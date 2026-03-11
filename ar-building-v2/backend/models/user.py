@@ -2,6 +2,7 @@
 # Besucher werden nicht in dieser Tabelle gespeichert – sie nutzen QR-Tokens.
 
 from sqlalchemy import Integer, String
+from typing import Optional
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.database import Base
@@ -16,8 +17,8 @@ class User(Base):
     # Benutzername, z.B. "admin" oder "max.mustermann"
     username: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
 
-    # bcrypt-Hash des 4-stelligen PINs – der echte PIN wird nie gespeichert
-    pin_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # bcrypt-Hash des 4-stelligen PINs – NULL bedeutet: noch kein PIN gesetzt (Erst-Setup)
+    pin_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
     # Rolle: staff, technician oder admin (visitor hat keinen DB-Eintrag)
     role: Mapped[str] = mapped_column(String(50), nullable=False, default="staff")

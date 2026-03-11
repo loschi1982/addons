@@ -33,6 +33,43 @@ async def lifespan(app: FastAPI):
     # Alle Tabellen in der SQLite-DB anlegen (falls sie noch nicht existieren).
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Migration: pin_hash auf nullable setzen falls die Spalte noch NOT NULL ist.
+        # SQLite unterstützt kein ALTER COLUMN – daher über PRAGMA-Prüfung + Tabellen-Rebuild.
+        await conn.execute(
+            __import__("sqlalchemy").text(
+                "PRAGMA legacy_alter_table = ON"
+            )
+        )
+        try:
+            # Prüfen ob pin_hash notnull=1 hat (alte DB ohne nullable).
+            result = await conn.execute(
+                __import__("sqlalchemy").text("PRAGMA table_info(users)")
+            )
+            rows = result.fetchall()
+            needs_migration = any(
+                row[1] == "pin_hash" and row[3] == 1  # index 3 = notnull
+                for row in rows
+            )
+            if needs_migration:
+                # Tabelle neu aufbauen ohne NOT NULL auf pin_hash.
+                await conn.execute(__import__("sqlalchemy").text(
+                    "CREATE TABLE IF NOT EXISTS users_new ("
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "  username VARCHAR(255) NOT NULL UNIQUE,"
+                    "  pin_hash VARCHAR(255),"
+                    "  role VARCHAR(50) NOT NULL DEFAULT 'staff'"
+                    ")"
+                ))
+                await conn.execute(__import__("sqlalchemy").text(
+                    "INSERT INTO users_new SELECT id, username, pin_hash, role FROM users"
+                ))
+                await conn.execute(__import__("sqlalchemy").text("DROP TABLE users"))
+                await conn.execute(__import__("sqlalchemy").text(
+                    "ALTER TABLE users_new RENAME TO users"
+                ))
+                print("INFO:     DB-Migration: users.pin_hash auf nullable umgestellt.")
+        except Exception as e:
+            print(f"WARNUNG:  DB-Migration übersprungen: {e}")
 
     # Add-on-Optionen lesen (geschrieben von HA nach /data/options.json).
     options: dict = {}
