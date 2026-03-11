@@ -45,6 +45,17 @@ if [ ! -f /data/settings.json ]; then
 EOF
 fi
 
+# Ports freigeben falls noch von vorheriger Instanz belegt.
+# Nötig bei schnellem Neustart mit host_network: true (OS-Socket noch aktiv).
+# ss gibt "pid=X" aus – wir lesen die PID und senden SIGKILL.
+for PORT in 8099 8443; do
+    PIDS=$(ss -Hlntp "sport = :${PORT}" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2)
+    for PID in $PIDS; do
+        echo "INFO: Beende alten Prozess PID ${PID} auf Port ${PORT}..."
+        kill -9 "$PID" 2>/dev/null || true
+    done
+done
+
 # Uvicorn starten.
 # --workers 1 = ein Prozess (SQLite ist nicht für mehrere Prozesse geeignet).
 cd /app
