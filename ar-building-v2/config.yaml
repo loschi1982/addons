@@ -1,6 +1,6 @@
 name: AR Building v2
 version: "1.0.83"
-slug: ar_building_v2
+slug: ar_building_v3
 description: AR-Guided Tour PWA für historische Konzerthäuser
 arch:
   - amd64
