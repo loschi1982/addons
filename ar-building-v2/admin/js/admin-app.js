@@ -190,9 +190,11 @@ function loadSection(name) {
 
     case 'users':
       users.loadUsers();
-      document.getElementById('btn-new-user').onclick    = () => users.openUserModal();
-      document.getElementById('btn-gen-visitor').onclick = () => users.generateVisitorToken();
-      document.getElementById('btn-print-qr').onclick    = () => users.printVisitorQR();
+      users.loadVisitorToken();
+      document.getElementById('btn-new-user').onclick       = () => users.openUserModal();
+      document.getElementById('btn-print-qr').onclick       = () => users.printVisitorQR();
+      document.getElementById('btn-regen-visitor').onclick  = () => users.regenVisitorToken();
+      document.getElementById('visitor-token-toggle').onchange = () => users.toggleVisitorToken();
       break;
 
     case 'statistics':

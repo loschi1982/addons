@@ -17,6 +17,8 @@ DEFAULT_SETTINGS = {
     "planradar_customer_id": "",   # NEU: Pflicht für alle PlanRadar-API-Aufrufe
     "jwt_secret": "changeme-please",
     "jwt_expire_hours": 12,
+    "visitor_token": None,          # Dauerhafter Besucher-Token (wird beim ersten Abruf generiert)
+    "visitor_token_enabled": False, # Token aktiv oder deaktiviert
 }
 
 

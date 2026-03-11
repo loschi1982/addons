@@ -13,6 +13,7 @@ from backend.database import get_db
 from backend.auth import verify_pin, hash_pin, create_jwt, require_admin, bearer_scheme
 from backend.models.user import User
 from backend.schemas.user import LoginResponse, ChangePinRequest
+from backend.config import load_settings, save_settings
 
 router = APIRouter()
 
@@ -52,14 +53,16 @@ async def login(body: dict, db: AsyncSession = Depends(get_db)):
     # Visitor-Token-Login: body enthält nur {"token": "login:visitor-abc123"}
     if "token" in body and "username" not in body:
         token: str = body.get("token", "")
-        # Visitor-Tokens beginnen immer mit "login:"
-        if not token.startswith("login:"):
+        settings = load_settings()
+        perm_token = settings.get("visitor_token")
+        token_enabled = settings.get("visitor_token_enabled", False)
+        # Nur der hinterlegte permanente Token ist gültig, und nur wenn er aktiv ist.
+        if not perm_token or not token_enabled or token != perm_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
             )
-        visitor_name = token[len("login:"):]
-        jwt_token = create_jwt(username=visitor_name, role="visitor")
-        return LoginResponse(jwt=jwt_token, role="visitor", username=visitor_name)
+        jwt_token = create_jwt(username="visitor", role="visitor")
+        return LoginResponse(jwt=jwt_token, role="visitor", username="visitor")
 
     # PIN-Login: body enthält {"username": "...", "pin": "...."}
     username = body.get("username")
@@ -124,13 +127,39 @@ async def change_pin(
 
 @router.get("/visitor-token")
 async def get_visitor_token(_user=Depends(require_admin())):
-    """Generiert einen neuen einmaligen Visitor-QR-Token.
-    Nur Admins dürfen das. Der Token wird NICHT in der DB gespeichert –
-    das Format 'login:...' ist ausreichend zur Validierung."""
-    # secrets.token_hex erzeugt eine kryptografisch sichere Zufallszeichenkette.
-    random_part = secrets.token_hex(8)
-    token = f"login:visitor-{random_part}"
+    """Gibt den dauerhaften Besucher-Token zurück (wird beim ersten Aufruf generiert).
+    Nur Admins dürfen das."""
+    settings = load_settings()
+    token = settings.get("visitor_token")
+    if not token:
+        token = f"login:visitor-{secrets.token_hex(16)}"
+        settings["visitor_token"] = token
+        save_settings(settings)
     return {
         "token": token,
         "qr_content": token,
+        "enabled": settings.get("visitor_token_enabled", False),
+    }
+
+
+@router.post("/visitor-token/toggle")
+async def toggle_visitor_token(_user=Depends(require_admin())):
+    """Aktiviert oder deaktiviert den dauerhaften Besucher-Token."""
+    settings = load_settings()
+    settings["visitor_token_enabled"] = not settings.get("visitor_token_enabled", False)
+    save_settings(settings)
+    return {"enabled": settings["visitor_token_enabled"]}
+
+
+@router.post("/visitor-token/regenerate")
+async def regenerate_visitor_token(_user=Depends(require_admin())):
+    """Generiert einen neuen dauerhaften Besucher-Token (der alte wird ungültig)."""
+    settings = load_settings()
+    token = f"login:visitor-{secrets.token_hex(16)}"
+    settings["visitor_token"] = token
+    save_settings(settings)
+    return {
+        "token": token,
+        "qr_content": token,
+        "enabled": settings.get("visitor_token_enabled", False),
     }

@@ -91,6 +91,12 @@ export async function changePin(newPin) {
 export async function getVisitorToken() {
   return request('GET', '/api/auth/visitor-token');
 }
+export async function toggleVisitorToken() {
+  return request('POST', '/api/auth/visitor-token/toggle');
+}
+export async function regenerateVisitorToken() {
+  return request('POST', '/api/auth/visitor-token/regenerate');
+}
 
 // ---- RÄUME ---- //
 

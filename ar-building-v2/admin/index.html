@@ -167,13 +167,22 @@
         </div>
 
         <div class="card mt-2">
-          <h3>Besucher-QR-Token generieren</h3>
-          <p class="muted">Generiert einen einmaligen Login-Token für Besucher. Der Token ist als QR-Code ausdruckbar.</p>
-          <button class="btn-primary" id="btn-gen-visitor">Neuen Token generieren</button>
-          <div id="visitor-qr-result" class="hidden">
+          <div class="visitor-token-header">
+            <h3>Besucher-QR-Token</h3>
+            <label class="toggle-switch" title="Token aktivieren / deaktivieren">
+              <input type="checkbox" id="visitor-token-toggle" />
+              <span class="toggle-slider"></span>
+            </label>
+            <span id="visitor-token-status" class="visitor-token-status">Inaktiv</span>
+          </div>
+          <p class="muted">Dauerhafter QR-Code für Besucher. Kann jederzeit aktiviert oder deaktiviert werden.</p>
+          <div id="visitor-qr-result">
             <div id="visitor-qr-code"></div>
             <p id="visitor-token-text" class="token-text"></p>
-            <button class="btn-secondary" id="btn-print-qr">🖨 Drucken</button>
+            <div class="visitor-token-actions">
+              <button class="btn-secondary" id="btn-print-qr">🖨 Drucken</button>
+              <button class="btn-danger btn-sm" id="btn-regen-visitor">Token neu generieren</button>
+            </div>
           </div>
         </div>
       </section>

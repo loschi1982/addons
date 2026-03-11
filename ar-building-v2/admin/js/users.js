@@ -134,45 +134,68 @@ export async function openUserModal(userId = null) {
   });
 }
 
-// Generiert einen neuen Visitor-QR-Token und zeigt ihn als QR-Code an.
-// Ruft GET /api/auth/visitor-token auf und rendert das Ergebnis mit QRCode.js.
-export async function generateVisitorToken() {
-  const resultDiv = document.getElementById('visitor-qr-result');
-  const qrDiv     = document.getElementById('visitor-qr-code');
-  const tokenText = document.getElementById('visitor-token-text');
-
-  // Alten QR-Code entfernen.
-  qrDiv.innerHTML = '';
-  resultDiv.classList.add('hidden');
-
+// Lädt den dauerhaften Visitor-Token und zeigt ihn mit aktuellem Status an.
+export async function loadVisitorToken() {
   try {
     const res = await api.getVisitorToken();
-    const tokenValue = res.qr_content || res.token;
-
-    // QR-Code mit QRCode.js erzeugen.
-    // QRCode.js erstellt automatisch ein Canvas-Element im Ziel-Container.
-    new QRCode(qrDiv, {
-      text:   tokenValue,
-      width:  200,
-      height: 200,
-      colorDark:  '#000000',
-      colorLight: '#ffffff',
-      correctLevel: QRCode.CorrectLevel.H
-    });
-
-    // Token-String als Text darunter anzeigen (für manuelle Eingabe).
-    tokenText.textContent = tokenValue;
-
-    resultDiv.classList.remove('hidden');
+    _renderVisitorToken(res);
   } catch (e) {
-    alert('Fehler beim Generieren des Visitor-Tokens: ' + e.message);
+    console.error('Visitor-Token laden fehlgeschlagen:', e.message);
+  }
+}
+
+// Schaltet den Token aktiv/inaktiv.
+export async function toggleVisitorToken() {
+  try {
+    const res = await api.toggleVisitorToken();
+    // Checkbox-Status korrigieren falls er vom Server abweicht.
+    document.getElementById('visitor-token-toggle').checked = res.enabled;
+    _updateTokenStatus(res.enabled);
+  } catch (e) {
+    alert('Fehler beim Umschalten: ' + e.message);
+  }
+}
+
+// Generiert einen neuen Token (der alte wird sofort ungültig).
+export async function regenVisitorToken() {
+  if (!confirm('Achtung: Der alte QR-Code wird sofort ungültig. Neuen Token generieren?')) return;
+  try {
+    const res = await api.regenerateVisitorToken();
+    _renderVisitorToken(res);
+  } catch (e) {
+    alert('Fehler beim Regenerieren: ' + e.message);
   }
 }
 
 // Öffnet den Browser-Druckdialog für den QR-Code.
-// Druckt nur den sichtbaren Bereich mit QR-Code und Token-Text.
 export function printVisitorQR() {
   window.print();
+}
+
+function _renderVisitorToken(res) {
+  const qrDiv     = document.getElementById('visitor-qr-code');
+  const tokenText = document.getElementById('visitor-token-text');
+  const toggle    = document.getElementById('visitor-token-toggle');
+  const tokenValue = res.qr_content || res.token;
+
+  qrDiv.innerHTML = '';
+  new QRCode(qrDiv, {
+    text:   tokenValue,
+    width:  200,
+    height: 200,
+    colorDark:  '#000000',
+    colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.H,
+  });
+  tokenText.textContent = tokenValue;
+  toggle.checked = !!res.enabled;
+  _updateTokenStatus(!!res.enabled);
+}
+
+function _updateTokenStatus(enabled) {
+  const statusEl = document.getElementById('visitor-token-status');
+  statusEl.textContent = enabled ? 'Aktiv' : 'Inaktiv';
+  statusEl.className = 'visitor-token-status ' + (enabled ? 'visitor-token-status--on' : 'visitor-token-status--off');
 }
 
 // HTML-Sonderzeichen escapen.
