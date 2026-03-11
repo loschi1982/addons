@@ -581,14 +581,14 @@ body{font-family:sans-serif;background:#fff;}
 .toolbar button:hover{background:#1558b0;}
 .toolbar span{font-size:13px;color:#555;}
 .grid{display:flex;flex-wrap:wrap;gap:6px;padding:16px;}
-.label{width:2cm;height:2cm;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;overflow:hidden;border:1px dashed #ccc;padding:1px;}
-.label-text{font-size:4pt;font-weight:600;color:#000;text-align:center;word-break:break-all;max-width:100%;line-height:1.2;margin-bottom:1px;}
-.label img{width:100%;flex:1;object-fit:contain;}
+.label{width:2cm;height:2.5cm;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;border:1px dashed #ccc;padding:1px;}
+.label-text{font-size:4pt;font-weight:600;color:#000;text-align:center;word-break:break-all;max-width:100%;line-height:1.2;margin-bottom:1px;flex-shrink:0;}
+.label img{width:100%;flex:1;min-height:0;object-fit:contain;}
 @media print{.toolbar{display:none;}.grid{padding:4mm;gap:2mm;}.label{border:none;page-break-inside:avoid;}}
 </style></head><body>
 <div class="toolbar">
   <button onclick="window.print()">🖨 Drucken</button>
-  <span>${entries.length} QR-Code${entries.length!==1?'s':''} · 2 × 2 cm · Marker-ID über dem Code</span>
+  <span>${entries.length} QR-Code${entries.length!==1?'s':''} · 2 × 2,5 cm (B×H) · Marker-ID über dem Code</span>
 </div>
 <div class="grid">${labels}</div>
 <script>setTimeout(()=>window.print(),400);<\/script>
