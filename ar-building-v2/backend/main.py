@@ -36,21 +36,31 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # Standard-Admin anlegen falls die DB noch leer ist.
+    # Add-on-Optionen lesen (geschrieben von HA nach /data/options.json).
+    options: dict = {}
+    try:
+        with open("/data/options.json", encoding="utf-8") as f:
+            options = __import__("json").load(f)
+    except Exception:
+        pass
+    reset_admin = options.get("reset_admin", False)
+
+    # Standard-Admin anlegen (erster Start) oder PIN zurücksetzen (reset_admin=true).
     async with AsyncSession(engine) as db:
         result = await db.execute(select(User).where(User.username == "admin"))
         admin = result.scalar_one_or_none()
-        if admin is None:
-            # Zufälligen 4-stelligen PIN generieren und im Log ausgeben.
-            # Der PIN wird beim ersten Start angezeigt und sollte danach geändert werden.
+        if admin is None or reset_admin:
             initial_pin = str(random.randint(1000, 9999))
             print(f"INFO:     *** INITIALER ADMIN-PIN: {initial_pin} — bitte sofort ändern! ***")
-            default_admin = User(
-                username="admin",
-                pin_hash=hash_pin(initial_pin),
-                role="admin",
-            )
-            db.add(default_admin)
+            if admin is None:
+                default_admin = User(
+                    username="admin",
+                    pin_hash=hash_pin(initial_pin),
+                    role="admin",
+                )
+                db.add(default_admin)
+            else:
+                admin.pin_hash = hash_pin(initial_pin)
             await db.commit()
 
     yield  # Hier läuft die Anwendung.
