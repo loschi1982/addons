@@ -45,12 +45,26 @@
       <div id="login-tab-pin" class="login-tab-content hidden">
         <input id="login-username" type="text" placeholder="Benutzername"
                class="input" autocomplete="username" />
-        <input id="login-pin" type="password" placeholder="PIN (4-stellig)"
+        <input id="login-pin" type="password" placeholder="PIN (leer lassen beim ersten Login)"
                maxlength="4" inputmode="numeric" class="input"
                autocomplete="current-password" />
         <button id="login-pin-btn" class="btn btn--primary">Anmelden</button>
       </div>
       <p id="login-error" class="login-error hidden">Anmeldung fehlgeschlagen.</p>
+    </div>
+  </div>
+
+  <!-- ===== PIN-Setup-Screen (erster Login / nach Reset) ===== -->
+  <div id="pin-setup-screen" class="login-screen hidden">
+    <div class="login-screen__box">
+      <h1 class="login-screen__title">AR Building</h1>
+      <p style="margin-bottom:1rem;font-size:0.9rem;opacity:0.7;">Bitte lege jetzt einen 4-stelligen PIN fest.</p>
+      <input id="pin-setup-new" type="password" placeholder="Neuer PIN (4 Ziffern)"
+             maxlength="4" inputmode="numeric" class="input" autocomplete="new-password" />
+      <input id="pin-setup-confirm" type="password" placeholder="PIN wiederholen"
+             maxlength="4" inputmode="numeric" class="input" autocomplete="new-password" />
+      <button id="pin-setup-btn" class="btn btn--primary">PIN speichern</button>
+      <p id="pin-setup-error" class="login-error hidden"></p>
     </div>
   </div>
 

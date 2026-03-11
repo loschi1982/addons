@@ -35,6 +35,10 @@
     return request('POST', '/api/auth/login', { token: token });
   }
 
+  function changePin(newPin) {
+    return request('POST', '/api/auth/change-pin', { new_pin: newPin });
+  }
+
   // ---- Räume ----
 
   function getRoomByMarker(markerId) {
@@ -141,6 +145,7 @@
   window.AR.api = {
     loginWithPin:          loginWithPin,
     loginWithToken:        loginWithToken,
+    changePin:             changePin,
     getRoomByMarker:       getRoomByMarker,
     getObjectsByRoom:      getObjectsByRoom,
     getObjectByMarker:     getObjectByMarker,
