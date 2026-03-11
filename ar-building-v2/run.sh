@@ -52,9 +52,54 @@ fi
 python3 - << 'PYEOF'
 import os, socket, time
 
+STATE_NAMES = {
+    '01': 'ESTABLISHED', '02': 'SYN_SENT', '03': 'SYN_RECV', '04': 'FIN_WAIT1',
+    '05': 'FIN_WAIT2', '06': 'TIME_WAIT', '07': 'CLOSE', '08': 'CLOSE_WAIT',
+    '09': 'LAST_ACK',    '0A': 'LISTEN',   '0B': 'CLOSING',
+}
+
+def diagnose_port(port):
+    """Gibt alle Sockets auf dem Port aus (Diagnose)."""
+    hex_port = format(port, '04X')
+    for netfile in ('/proc/net/tcp', '/proc/net/tcp6'):
+        try:
+            for line in open(netfile).readlines()[1:]:
+                parts = line.split()
+                if len(parts) <= 9:
+                    continue
+                local = parts[1].upper()
+                if not local.endswith(':' + hex_port):
+                    continue
+                state_code = parts[3].upper()
+                state_name = STATE_NAMES.get(state_code, state_code)
+                inode = parts[9]
+                # PID suchen
+                pid_found = None
+                for pid in os.listdir('/proc'):
+                    if not pid.isdigit():
+                        continue
+                    try:
+                        for fd in os.listdir(f'/proc/{pid}/fd'):
+                            try:
+                                if f'socket:[{inode}]' in os.readlink(f'/proc/{pid}/fd/{fd}'):
+                                    pid_found = pid
+                            except OSError:
+                                pass
+                    except OSError:
+                        pass
+                    if pid_found:
+                        break
+                if pid_found:
+                    print(f'DIAGNOSE: Port {port} {state_name} inode={inode} PID={pid_found} (im Container)')
+                else:
+                    print(f'DIAGNOSE: Port {port} {state_name} inode={inode} PID=NICHT SICHTBAR (Host-Prozess oder anderer Container!)')
+        except OSError:
+            pass
+
 def ensure_port_free(port, timeout=20):
     hex_port = format(port, '04X')
     deadline = time.time() + timeout
+    diagnosed = False
     while time.time() < deadline:
         # Tatsächlich versuchen zu binden – erst dann ist der Port wirklich frei.
         try:
@@ -66,6 +111,11 @@ def ensure_port_free(port, timeout=20):
             return
         except OSError:
             pass
+
+        # Erster Fehlschlag: Diagnose ausgeben
+        if not diagnosed:
+            diagnose_port(port)
+            diagnosed = True
 
         # Port belegt – Halter via /proc/net/tcp suchen und beenden.
         for netfile in ('/proc/net/tcp', '/proc/net/tcp6'):
