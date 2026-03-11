@@ -1,6 +1,8 @@
 # Pydantic-Schema für die Anwendungseinstellungen.
 # Datei: backend/schemas/settings.py
 
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -13,3 +15,5 @@ class Settings(BaseModel):
     planradar_customer_id: str = ""
     jwt_secret: str = ""
     jwt_expire_hours: int = 12
+    visitor_token: Optional[str] = None
+    visitor_token_enabled: bool = False

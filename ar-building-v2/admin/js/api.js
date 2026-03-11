@@ -209,8 +209,13 @@ export async function deleteUser(id) {
 // ---- STATISTIK ---- //
 
 // Lädt aggregierte KPI-Daten für das Admin-Dashboard.
-export async function getDashboard() {
-  return request('GET', '/api/stats/dashboard');
+// Optional mit Zeitraum-Filter (YYYY-MM-DD).
+export async function getDashboard(dateFrom = null, dateTo = null) {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set('date_from', dateFrom);
+  if (dateTo)   params.set('date_to', dateTo);
+  const qs = params.toString();
+  return request('GET', `/api/stats/dashboard${qs ? '?' + qs : ''}`);
 }
 
 // Lädt Live-Daten: aktive Sessions + aktive Räume.

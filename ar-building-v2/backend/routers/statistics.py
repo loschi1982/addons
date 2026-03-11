@@ -2,6 +2,7 @@
 # Wird in main.py eingebunden via: app.include_router(statistics.router, prefix="/api/stats", tags=["statistics"])
 
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy import select, func, distinct, text
@@ -14,12 +15,14 @@ from backend.auth import require_any_role, require_admin
 from backend.models.statistics import StatEvent, Heartbeat
 from backend.models.room import Room
 from backend.models.object import Object
+
 from backend.schemas.statistics import (
     StatEventCreate,
     HeartbeatCreate,
     DashboardData,
     LoginBreakdown,
     HourlyEvent,
+    TimelineEvent,
     TopRoom,
     TopObject,
     LiveData,
@@ -109,45 +112,84 @@ async def heartbeat(
 async def get_dashboard(
     db: AsyncSession = Depends(get_db),
     _user=Depends(require_admin()),
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ):
     """
     Gibt aggregierte KPI-Daten für das Admin-Dashboard zurück.
-    Alle Werte beziehen sich auf den aktuellen Tag (ab Mitternacht UTC).
+    Optional können date_from und date_to (Format YYYY-MM-DD) übergeben werden.
+    Ohne Parameter wird der aktuelle Tag verwendet.
+    Die Zeitachsen-Granularität wird automatisch gewählt:
+      - ≤ 1 Tag  → stündlich
+      - ≤ 31 Tage → täglich
+      - > 31 Tage → monatlich
     """
-    # Mitternacht UTC heute – alle Events davor gehören zum gestrigen Tag.
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    now = datetime.now(timezone.utc)
+
+    # --- Zeitraum parsen ---
+    if date_from:
+        try:
+            dt_from = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            dt_from = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        dt_from = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if date_to:
+        try:
+            dt_to = datetime.strptime(date_to, "%Y-%m-%d").replace(
+                hour=23, minute=59, second=59, microsecond=999999, tzinfo=timezone.utc
+            )
+        except ValueError:
+            dt_to = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+    else:
+        dt_to = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    # --- Granularität bestimmen ---
+    span_days = (dt_to - dt_from).days
+    if span_days <= 1:
+        granularity = "hour"
+    elif span_days <= 31:
+        granularity = "day"
+    else:
+        granularity = "month"
+
+    # Basis-Filter für den gewählten Zeitraum.
+    def period_filter(query):
+        return query.where(StatEvent.timestamp >= dt_from).where(StatEvent.timestamp <= dt_to)
 
     # Grenzwert für aktive Sitzungen: alles älter als 90 Sekunden gilt als inaktiv.
-    cutoff_90s = datetime.now(timezone.utc) - timedelta(seconds=90)
+    cutoff_90s = now - timedelta(seconds=90)
 
-    # --- Gesamtanzahl eindeutiger Sitzungen heute ---
-    # Zählt unterschiedliche session_ids, nicht jedes einzelne Event.
+    # --- Gesamtanzahl eindeutiger Sitzungen im Zeitraum ---
     result = await db.execute(
-        select(func.count(distinct(StatEvent.session_id)))
-        .where(StatEvent.timestamp >= today_start)
+        period_filter(
+            select(func.count(distinct(StatEvent.session_id)))
+        )
     )
-    total_sessions_today = result.scalar() or 0
+    total_sessions = result.scalar() or 0
 
-    # --- Anzahl Raum-Scans heute ---
-    # select_from() stellt sicher dass SQLAlchemy die richtige Tabelle kennt.
+    # --- Anzahl Raum-Scans im Zeitraum ---
     result = await db.execute(
-        select(func.count())
-        .select_from(StatEvent)
-        .where(StatEvent.event_type == "room_scan")
-        .where(StatEvent.timestamp >= today_start)
+        period_filter(
+            select(func.count())
+            .select_from(StatEvent)
+            .where(StatEvent.event_type == "room_scan")
+        )
     )
-    total_room_scans_today = result.scalar() or 0
+    total_room_scans = result.scalar() or 0
 
-    # --- Anzahl Objekt-Erkennungen heute ---
+    # --- Anzahl Objekt-Erkennungen im Zeitraum ---
     result = await db.execute(
-        select(func.count())
-        .select_from(StatEvent)
-        .where(StatEvent.event_type == "object_detected")
-        .where(StatEvent.timestamp >= today_start)
+        period_filter(
+            select(func.count())
+            .select_from(StatEvent)
+            .where(StatEvent.event_type == "object_detected")
+        )
     )
-    total_object_scans_today = result.scalar() or 0
+    total_object_scans = result.scalar() or 0
 
-    # --- Aktuell aktive Sitzungen (Heartbeat jünger als 90s) ---
+    # --- Aktuell aktive Sitzungen (Heartbeat jünger als 90s) – immer live ---
     result = await db.execute(
         select(func.count())
         .select_from(Heartbeat)
@@ -157,9 +199,10 @@ async def get_dashboard(
 
     # --- Login-Aufschlüsselung: pin / visitor / failed ---
     result = await db.execute(
-        select(StatEvent.event_type, func.count())
-        .where(StatEvent.event_type.in_(["login_pin", "login_visitor", "login_failed"]))
-        .where(StatEvent.timestamp >= today_start)
+        period_filter(
+            select(StatEvent.event_type, func.count())
+            .where(StatEvent.event_type.in_(["login_pin", "login_visitor", "login_failed"]))
+        )
         .group_by(StatEvent.event_type)
     )
     login_counts = {row[0]: row[1] for row in result.fetchall()}
@@ -169,33 +212,41 @@ async def get_dashboard(
         failed=login_counts.get("login_failed", 0),
     )
 
-    # --- Events pro Stunde (für das Linien-Chart) ---
-    # strftime('%H') gibt die Stunde als zweistelligen String zurück (z.B. "09").
+    # --- Zeitachsen-Events (Chart) ---
+    if granularity == "hour":
+        fmt = "%H"
+    elif granularity == "day":
+        fmt = "%Y-%m-%d"
+    else:
+        fmt = "%Y-%m"
+
     result = await db.execute(
-        select(
-            func.strftime("%H", StatEvent.timestamp).label("hour"),
-            func.count().label("count"),
+        period_filter(
+            select(
+                func.strftime(fmt, StatEvent.timestamp).label("label"),
+                func.count().label("count"),
+            )
         )
-        .where(StatEvent.timestamp >= today_start)
-        .group_by(func.strftime("%H", StatEvent.timestamp))
-        .order_by(func.strftime("%H", StatEvent.timestamp))
+        .group_by(func.strftime(fmt, StatEvent.timestamp))
+        .order_by(func.strftime(fmt, StatEvent.timestamp))
     )
-    hourly_events = [
-        HourlyEvent(hour=int(row.hour), count=row.count)
+    timeline_events = [
+        TimelineEvent(label=row.label, count=row.count)
         for row in result.fetchall()
     ]
 
     # --- Top-Räume nach Anzahl Scans ---
     result = await db.execute(
-        select(
-            StatEvent.room_id,
-            Room.name.label("room_name"),
-            func.count().label("scans"),
+        period_filter(
+            select(
+                StatEvent.room_id,
+                Room.name.label("room_name"),
+                func.count().label("scans"),
+            )
+            .join(Room, Room.id == StatEvent.room_id)
+            .where(StatEvent.event_type == "room_scan")
+            .where(StatEvent.room_id.isnot(None))
         )
-        .join(Room, Room.id == StatEvent.room_id)
-        .where(StatEvent.event_type == "room_scan")
-        .where(StatEvent.timestamp >= today_start)
-        .where(StatEvent.room_id.isnot(None))
         .group_by(StatEvent.room_id, Room.name)
         .order_by(func.count().desc())
         .limit(10)
@@ -207,15 +258,16 @@ async def get_dashboard(
 
     # --- Top-Objekte nach Anzahl Erkennungen ---
     result = await db.execute(
-        select(
-            StatEvent.object_id,
-            Object.name.label("object_name"),
-            func.count().label("detections"),
+        period_filter(
+            select(
+                StatEvent.object_id,
+                Object.name.label("object_name"),
+                func.count().label("detections"),
+            )
+            .join(Object, Object.id == StatEvent.object_id)
+            .where(StatEvent.event_type == "object_detected")
+            .where(StatEvent.object_id.isnot(None))
         )
-        .join(Object, Object.id == StatEvent.object_id)
-        .where(StatEvent.event_type == "object_detected")
-        .where(StatEvent.timestamp >= today_start)
-        .where(StatEvent.object_id.isnot(None))
         .group_by(StatEvent.object_id, Object.name)
         .order_by(func.count().desc())
         .limit(10)
@@ -226,12 +278,13 @@ async def get_dashboard(
     ]
 
     return DashboardData(
-        total_sessions_today=total_sessions_today,
-        total_room_scans_today=total_room_scans_today,
-        total_object_scans_today=total_object_scans_today,
+        total_sessions=total_sessions,
+        total_room_scans=total_room_scans,
+        total_object_scans=total_object_scans,
         active_sessions_now=active_sessions_now,
         login_breakdown=login_breakdown,
-        hourly_events=hourly_events,
+        timeline_events=timeline_events,
+        timeline_granularity=granularity,
         top_rooms=top_rooms,
         top_objects=top_objects,
     )

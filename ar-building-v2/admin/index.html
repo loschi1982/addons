@@ -329,19 +329,40 @@
           <button class="btn-secondary" id="btn-refresh-stats">↻ Aktualisieren</button>
         </div>
 
+        <!-- Zeitraum-Auswahl -->
+        <div class="stats-range-bar">
+          <div class="stats-presets">
+            <button class="stats-preset active" data-range="day">Heute</button>
+            <button class="stats-preset" data-range="week">Woche</button>
+            <button class="stats-preset" data-range="month">Monat</button>
+            <button class="stats-preset" data-range="year">Jahr</button>
+          </div>
+          <div class="stats-nav">
+            <button class="btn-icon" id="stats-prev" title="Zurück">◀</button>
+            <span class="stats-range-label" id="stats-range-label">Heute</span>
+            <button class="btn-icon" id="stats-next" title="Vor">▶</button>
+          </div>
+          <div class="stats-custom">
+            <input type="date" id="stats-date-from" />
+            <span class="stats-custom-sep">–</span>
+            <input type="date" id="stats-date-to" />
+            <button class="btn-secondary btn-sm" id="stats-apply-custom">Anwenden</button>
+          </div>
+        </div>
+
         <!-- KPI-Karten -->
         <div class="kpi-grid">
           <div class="kpi-card">
             <div class="kpi-value" id="kpi-sessions">–</div>
-            <div class="kpi-label">Sessions heute</div>
+            <div class="kpi-label">Sessions</div>
           </div>
           <div class="kpi-card">
             <div class="kpi-value" id="kpi-room-scans">–</div>
-            <div class="kpi-label">Raum-Scans heute</div>
+            <div class="kpi-label">Raum-Scans</div>
           </div>
           <div class="kpi-card">
             <div class="kpi-value" id="kpi-obj-scans">–</div>
-            <div class="kpi-label">Objekt-Erkennungen heute</div>
+            <div class="kpi-label">Objekt-Erkennungen</div>
           </div>
           <div class="kpi-card">
             <div class="kpi-value" id="kpi-active">–</div>
@@ -352,7 +373,7 @@
         <!-- Charts -->
         <div class="chart-row">
           <div class="card chart-card">
-            <h3>Events pro Stunde</h3>
+            <h3 id="chart-timeline-title">Events pro Stunde</h3>
             <canvas id="chart-hourly"></canvas>
           </div>
           <div class="card chart-card">

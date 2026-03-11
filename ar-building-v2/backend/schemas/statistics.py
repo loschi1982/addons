@@ -69,6 +69,12 @@ class HourlyEvent(BaseModel):
     count: int
 
 
+class TimelineEvent(BaseModel):
+    """Ein Datenpunkt in der Zeitachse (Stunde, Tag oder Monat)."""
+    label: str
+    count: int
+
+
 class TopRoom(BaseModel):
     """Raum mit den meisten Scans heute."""
     room_id: int
@@ -86,14 +92,15 @@ class TopObject(BaseModel):
 class DashboardData(BaseModel):
     """
     Vollständige Antwort des Dashboard-Endpunkts.
-    Enthält alle KPIs und aggregierten Daten für den heutigen Tag.
+    Enthält alle KPIs und aggregierten Daten für den gewählten Zeitraum.
     """
-    total_sessions_today: int
-    total_room_scans_today: int
-    total_object_scans_today: int
+    total_sessions: int
+    total_room_scans: int
+    total_object_scans: int
     active_sessions_now: int
     login_breakdown: LoginBreakdown
-    hourly_events: list[HourlyEvent]
+    timeline_events: list[TimelineEvent]
+    timeline_granularity: str   # "hour", "day", "month"
     top_rooms: list[TopRoom]
     top_objects: list[TopObject]
 
