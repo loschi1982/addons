@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>AR Building</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="css/main.css" />
+
+  <!-- jsQR: QR-Code-Erkennung aus Kamerabild -->
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <!-- ONNX Runtime Web: Objekterkennung direkt im Browser per WebAssembly -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.min.js"></script>
+</head>
+<body>
+
+  <!-- ===== SSL-Hinweis (einmalig beim ersten Besuch) ===== -->
+  <div id="ssl-notice" class="ssl-notice hidden">
+    <div class="ssl-notice__box">
+      <h2>🔒 Sicherheitshinweis</h2>
+      <p>Die App nutzt ein selbstsigniertes SSL-Zertifikat. Dein Browser zeigt
+         beim ersten Aufruf eine Warnung – das ist normal.</p>
+      <p>Bitte bestätige das Zertifikat einmalig über
+         <strong>„Erweitert → Trotzdem fortfahren"</strong>.</p>
+      <button id="ssl-notice-ok" class="btn btn--primary">Verstanden</button>
+    </div>
+  </div>
+
+  <!-- ===== Login-Screen ===== -->
+  <div id="login-screen" class="login-screen hidden">
+    <div class="login-screen__box">
+      <h1 class="login-screen__title">AR Building</h1>
+      <div class="login-tabs">
+        <button class="login-tab login-tab--active" data-tab="qr">QR-Code</button>
+        <button class="login-tab" data-tab="pin">PIN</button>
+      </div>
+      <div id="login-tab-qr" class="login-tab-content">
+        <p class="login-hint">Halte den Besucher-QR-Code vor die Kamera.</p>
+        <video id="login-video" autoplay playsinline muted class="login-video"></video>
+        <canvas id="login-canvas" class="hidden"></canvas>
+      </div>
+      <div id="login-tab-pin" class="login-tab-content hidden">
+        <input id="login-username" type="text" placeholder="Benutzername"
+               class="input" autocomplete="username" />
+        <input id="login-pin" type="password" placeholder="PIN (4-stellig)"
+               maxlength="4" inputmode="numeric" class="input"
+               autocomplete="current-password" />
+        <button id="login-pin-btn" class="btn btn--primary">Anmelden</button>
+      </div>
+      <p id="login-error" class="login-error hidden">Anmeldung fehlgeschlagen.</p>
+    </div>
+  </div>
+
+  <!-- ===== Haupt-App ===== -->
+  <div id="app" class="app hidden">
+    <video id="camera-video" autoplay playsinline muted class="camera-video"></video>
+    <canvas id="ar-canvas" class="ar-canvas"></canvas>
+    <video id="video-overlay" autoplay loop muted playsinline
+           class="video-overlay hidden"></video>
+
+    <div id="room-overlay" class="room-overlay hidden">
+      <div id="room-overlay-name" class="room-overlay__name"></div>
+      <div id="room-overlay-desc" class="room-overlay__desc"></div>
+      <div id="room-overlay-sensors" class="room-overlay__sensors"></div>
+    </div>
+
+    <div id="object-overlays"></div>
+
+    <!--
+      Detail-Panel: pointer-events:none am Panel selbst (siehe main.css).
+      Deshalb liegt der Close-Button AUSSERHALB von .detail-panel –
+      er ist position:fixed und braucht keinen Panel-Eltern-Container.
+      .detail-panel__inner hat pointer-events:auto und übernimmt den Scroll.
+    -->
+    <button id="detail-close" class="detail-panel__close hidden">✕</button>
+
+    <div id="detail-panel" class="detail-panel hidden">
+      <div class="detail-panel__inner">
+        <!-- Inhalt wird von ensurePanel() in object-view.js aufgebaut -->
+      </div>
+    </div>
+
+    <button id="logout-btn" class="logout-btn" title="Abmelden">⏻</button>
+  </div>
+
+  <!-- APP_CONFIG vor allen Skripten setzen -->
+  <script>
+    window.APP_CONFIG = {
+      apiBase: 'https://' + window.location.hostname + ':8443'
+    };
+  </script>
+
+  <!--
+    WICHTIG: Alle JS-Dateien als klassische Scripts laden (KEIN type="module").
+    Grund: FastAPI's StaticFiles liefert .js-Dateien ohne garantierten
+    text/javascript MIME-Type. Browser blockieren ES-Module (type="module")
+    bei falschem MIME-Type still und ohne Fehlermeldung – der Code läuft dann
+    einfach nicht. Klassische Scripts haben diese Einschränkung nicht.
+    Reihenfolge ist wichtig: Abhängigkeiten vor den Modulen die sie nutzen.
+  -->
+  <script src="js/api.js"></script>
+  <script src="js/audio-manager.js"></script>
+  <script src="js/video-overlay.js"></script>
+  <script src="js/camera.js"></script>
+  <script src="js/qr-scanner.js"></script>
+  <script src="js/onnx-detector.js"></script>
+  <script src="js/ar-overlay.js"></script>
+  <script src="js/stats-tracker.js"></script>
+  <script src="js/object-view.js"></script>
+  <script src="js/room-view.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

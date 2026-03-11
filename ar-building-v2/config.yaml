@@ -1,0 +1,16 @@
+name: AR Building v2
+version: "1.0.62"
+slug: ar_building_v3
+description: AR-Guided Tour PWA für historische Konzerthäuser
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+host_network: true
+init: false
+options: {}
+schema: {}
+dns:
+  - 8.8.8.8
+  - 1.1.1.1

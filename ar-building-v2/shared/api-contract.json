@@ -1,0 +1,437 @@
+{
+  "_comment": "Dieser Vertrag definiert alle API-Endpunkte. Alle Teams richten sich danach.",
+  "_version": "2.0.0",
+  "_base_url": "https://<host>:8443",
+
+  "auth": {
+    "POST /api/auth/login": {
+      "description": "Login mit Benutzername + PIN oder Visitor-Token",
+      "request": {
+        "type": "object",
+        "oneOf": [
+          {
+            "description": "PIN-Login (Personal, Techniker, Admin)",
+            "properties": {
+              "username": { "type": "string" },
+              "pin":      { "type": "string", "minLength": 4, "maxLength": 4 }
+            },
+            "required": ["username", "pin"]
+          },
+          {
+            "description": "Visitor-QR-Token-Login",
+            "properties": {
+              "token": { "type": "string", "example": "login:visitor-abc123" }
+            },
+            "required": ["token"]
+          }
+        ]
+      },
+      "response_200": {
+        "jwt":      { "type": "string", "description": "JWT, 12h gültig" },
+        "role":     { "type": "string", "enum": ["visitor", "staff", "technician", "admin"] },
+        "username": { "type": "string" }
+      },
+      "response_401": { "detail": "Invalid credentials" }
+    },
+
+    "GET /api/auth/visitor-token": {
+      "description": "Generiert einen neuen Visitor-QR-Token (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "response_200": {
+        "token": { "type": "string", "example": "login:visitor-abc123" },
+        "qr_content": { "type": "string", "example": "login:visitor-abc123" }
+      }
+    }
+  },
+
+  "rooms": {
+    "GET /api/rooms": {
+      "description": "Alle Räume auflisten",
+      "auth": "Bearer JWT (any role)",
+      "response_200": {
+        "type": "array",
+        "items": { "$ref": "#/schemas/RoomSummary" }
+      }
+    },
+
+    "GET /api/rooms/{room_id}": {
+      "description": "Einzelnen Raum mit allen Details laden",
+      "auth": "Bearer JWT (any role)",
+      "response_200": { "$ref": "#/schemas/RoomDetail" }
+    },
+
+    "POST /api/rooms": {
+      "description": "Neuen Raum anlegen (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "request": { "$ref": "#/schemas/RoomCreate" },
+      "response_201": { "$ref": "#/schemas/RoomDetail" }
+    },
+
+    "PUT /api/rooms/{room_id}": {
+      "description": "Raum bearbeiten (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "request": { "$ref": "#/schemas/RoomCreate" },
+      "response_200": { "$ref": "#/schemas/RoomDetail" }
+    },
+
+    "DELETE /api/rooms/{room_id}": {
+      "description": "Raum löschen (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "response_204": {}
+    },
+
+    "POST /api/rooms/{room_id}/files": {
+      "description": "Datei-Upload für Raum (ONNX-Modell, Audio, Video)",
+      "auth": "Bearer JWT (role=admin)",
+      "request": "multipart/form-data: file, file_type ('model'|'audio'|'video')",
+      "response_200": { "path": { "type": "string" } }
+    },
+
+    "GET /api/rooms/by-marker/{marker_id}": {
+      "description": "Raum per QR-Marker-ID laden (z.B. 'room:1')",
+      "auth": "Bearer JWT (any role)",
+      "response_200": { "$ref": "#/schemas/RoomDetail" }
+    }
+  },
+
+  "objects": {
+    "GET /api/objects": {
+      "description": "Alle Objekte/Exponate auflisten",
+      "auth": "Bearer JWT (any role)",
+      "query": { "room_id": "optional int" },
+      "response_200": {
+        "type": "array",
+        "items": { "$ref": "#/schemas/ObjectSummary" }
+      }
+    },
+
+    "GET /api/objects/{object_id}": {
+      "description": "Einzelnes Objekt mit Details",
+      "auth": "Bearer JWT (any role)",
+      "response_200": { "$ref": "#/schemas/ObjectDetail" }
+    },
+
+    "POST /api/objects": {
+      "description": "Neues Objekt anlegen (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "request": { "$ref": "#/schemas/ObjectCreate" },
+      "response_201": { "$ref": "#/schemas/ObjectDetail" }
+    },
+
+    "PUT /api/objects/{object_id}": {
+      "description": "Objekt bearbeiten (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "request": { "$ref": "#/schemas/ObjectCreate" },
+      "response_200": { "$ref": "#/schemas/ObjectDetail" }
+    },
+
+    "DELETE /api/objects/{object_id}": {
+      "description": "Objekt löschen (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "response_204": {}
+    },
+
+    "GET /api/objects/by-marker/{marker_id}": {
+      "description": "Objekt per QR-Marker laden (z.B. 'object:42')",
+      "auth": "Bearer JWT (any role)",
+      "response_200": { "$ref": "#/schemas/ObjectDetail" }
+    }
+  },
+
+  "object_types": {
+    "GET /api/object-types": {
+      "description": "Alle konfigurierten Objekttypen",
+      "auth": "Bearer JWT (any role)",
+      "response_200": {
+        "type": "array",
+        "items": { "$ref": "#/schemas/ObjectType" }
+      }
+    },
+    "POST /api/object-types": {
+      "description": "Neuen Objekttyp anlegen (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "request": { "$ref": "#/schemas/ObjectTypeCreate" },
+      "response_201": { "$ref": "#/schemas/ObjectType" }
+    },
+    "PUT /api/object-types/{type_id}": {
+      "description": "Objekttyp bearbeiten (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "request": { "$ref": "#/schemas/ObjectTypeCreate" },
+      "response_200": { "$ref": "#/schemas/ObjectType" }
+    },
+    "DELETE /api/object-types/{type_id}": {
+      "description": "Objekttyp löschen (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "response_204": {}
+    }
+  },
+
+  "users": {
+    "GET /api/users": {
+      "description": "Alle Benutzer (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "response_200": {
+        "type": "array",
+        "items": { "$ref": "#/schemas/UserSummary" }
+      }
+    },
+    "POST /api/users": {
+      "description": "Benutzer anlegen (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "request": { "$ref": "#/schemas/UserCreate" },
+      "response_201": { "$ref": "#/schemas/UserSummary" }
+    },
+    "PUT /api/users/{user_id}": {
+      "description": "Benutzer bearbeiten (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "request": { "$ref": "#/schemas/UserCreate" },
+      "response_200": { "$ref": "#/schemas/UserSummary" }
+    },
+    "DELETE /api/users/{user_id}": {
+      "description": "Benutzer löschen (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "response_204": {}
+    }
+  },
+
+  "statistics": {
+    "POST /api/stats/event": {
+      "description": "Ein Tracking-Event speichern",
+      "auth": "Bearer JWT (any role)",
+      "request": { "$ref": "#/schemas/StatEvent" },
+      "response_201": {}
+    },
+
+    "POST /api/stats/heartbeat": {
+      "description": "Heartbeat einer aktiven Session (alle 30s)",
+      "auth": "Bearer JWT (any role)",
+      "request": {
+        "session_id": { "type": "string" },
+        "room_id":    { "type": "integer", "nullable": true }
+      },
+      "response_200": {}
+    },
+
+    "GET /api/stats/dashboard": {
+      "description": "KPI-Daten für Admin-Dashboard",
+      "auth": "Bearer JWT (role=admin)",
+      "response_200": { "$ref": "#/schemas/DashboardData" }
+    },
+
+    "GET /api/stats/live": {
+      "description": "Live-Daten: aktive Sessions + aktive Räume",
+      "auth": "Bearer JWT (role=admin)",
+      "response_200": { "$ref": "#/schemas/LiveData" }
+    }
+  },
+
+  "settings": {
+    "GET /api/settings": {
+      "description": "Alle Einstellungen laden (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "response_200": { "$ref": "#/schemas/Settings" }
+    },
+    "PUT /api/settings": {
+      "description": "Einstellungen speichern (nur Admin)",
+      "auth": "Bearer JWT (role=admin)",
+      "request": { "$ref": "#/schemas/Settings" },
+      "response_200": { "$ref": "#/schemas/Settings" }
+    }
+  },
+
+  "ha_sensors": {
+    "GET /api/ha/sensors": {
+      "description": "Verfügbare HA-Sensoren abrufen",
+      "auth": "Bearer JWT (any role)",
+      "response_200": {
+        "type": "array",
+        "items": { "$ref": "#/schemas/HASensor" }
+      }
+    },
+    "GET /api/ha/sensors/{entity_id}": {
+      "description": "Einzelnen HA-Sensor-Wert abrufen",
+      "auth": "Bearer JWT (any role)",
+      "response_200": { "$ref": "#/schemas/HASensor" }
+    }
+  },
+
+  "planradar": {
+    "GET /api/planradar/tickets": {
+      "description": "PlanRadar-Tickets für ein Objekt/Raum laden",
+      "auth": "Bearer JWT (role=staff|technician|admin)",
+      "query": {
+        "room_id":   "optional int",
+        "object_id": "optional int"
+      },
+      "response_200": {
+        "type": "array",
+        "items": { "$ref": "#/schemas/PlanRadarTicket" }
+      }
+    },
+    "PUT /api/planradar/tickets/{ticket_id}/status": {
+      "description": "Ticketstatus setzen",
+      "auth": "Bearer JWT (role=technician|admin)",
+      "request": {
+        "status": { "type": "string", "enum": ["in_progress", "done", "closed"] }
+      },
+      "response_200": { "$ref": "#/schemas/PlanRadarTicket" }
+    }
+  },
+
+  "static": {
+    "GET /":         "frontend/index.html (PWA)",
+    "GET /admin":    "admin/index.html (Admin-UI, FileResponse)",
+    "GET /assets/*": "Statische Dateien (JS, CSS, Bilder)",
+    "GET /uploads/{room_id}/{filename}": "Hochgeladene Raumdateien (ONNX, Audio, Video)"
+  },
+
+  "schemas": {
+    "RoomSummary": {
+      "id":          { "type": "integer" },
+      "name":        { "type": "string" },
+      "marker_id":   { "type": "string", "example": "room:1" },
+      "short_desc":  { "type": "string" }
+    },
+
+    "RoomDetail": {
+      "id":                { "type": "integer" },
+      "name":              { "type": "string" },
+      "marker_id":         { "type": "string" },
+      "short_desc":        { "type": "string" },
+      "detail_text":       { "type": "string", "description": "HTML vom WYSIWYG-Editor" },
+      "model_path":        { "type": "string", "nullable": true },
+      "audio_path":        { "type": "string", "nullable": true },
+      "video_path":        { "type": "string", "nullable": true },
+      "video_opacity":     { "type": "number", "minimum": 0, "maximum": 1 },
+      "ha_sensor_ids":     { "type": "array", "items": { "type": "string" } },
+      "objects":           { "type": "array", "items": { "$ref": "#/schemas/ObjectSummary" } }
+    },
+
+    "RoomCreate": {
+      "name":          { "type": "string" },
+      "marker_id":     { "type": "string" },
+      "short_desc":    { "type": "string" },
+      "detail_text":   { "type": "string" },
+      "video_opacity": { "type": "number", "default": 0.8 },
+      "ha_sensor_ids": { "type": "array", "items": { "type": "string" } }
+    },
+
+    "ObjectSummary": {
+      "id":          { "type": "integer" },
+      "name":        { "type": "string" },
+      "marker_id":   { "type": "string", "example": "object:42" },
+      "short_desc":  { "type": "string" },
+      "type_id":     { "type": "integer" },
+      "type_name":   { "type": "string" },
+      "room_id":     { "type": "integer" }
+    },
+
+    "ObjectDetail": {
+      "id":            { "type": "integer" },
+      "name":          { "type": "string" },
+      "marker_id":     { "type": "string" },
+      "short_desc":    { "type": "string" },
+      "detail_text":   { "type": "string" },
+      "type_id":       { "type": "integer" },
+      "type_name":     { "type": "string" },
+      "room_id":       { "type": "integer" },
+      "video_path":    { "type": "string", "nullable": true },
+      "video_opacity": { "type": "number" },
+      "audio_path":    { "type": "string", "nullable": true },
+      "ha_sensor_ids": { "type": "array", "items": { "type": "string" } },
+      "onnx_class_id": { "type": "integer", "nullable": true, "description": "ONNX-Klassen-ID im Raummodell" }
+    },
+
+    "ObjectCreate": {
+      "name":          { "type": "string" },
+      "marker_id":     { "type": "string" },
+      "short_desc":    { "type": "string" },
+      "detail_text":   { "type": "string" },
+      "type_id":       { "type": "integer" },
+      "room_id":       { "type": "integer" },
+      "video_path":    { "type": "string", "nullable": true },
+      "video_opacity": { "type": "number", "default": 0.8 },
+      "audio_path":    { "type": "string", "nullable": true },
+      "ha_sensor_ids": { "type": "array", "items": { "type": "string" } },
+      "onnx_class_id": { "type": "integer", "nullable": true }
+    },
+
+    "ObjectType": {
+      "id":              { "type": "integer" },
+      "name":            { "type": "string", "example": "Exponat" },
+      "visible_to_roles": { "type": "array", "items": { "type": "string", "enum": ["visitor","staff","technician","admin"] } }
+    },
+
+    "ObjectTypeCreate": {
+      "name":              { "type": "string" },
+      "visible_to_roles":  { "type": "array", "items": { "type": "string" } }
+    },
+
+    "UserSummary": {
+      "id":       { "type": "integer" },
+      "username": { "type": "string" },
+      "role":     { "type": "string", "enum": ["visitor", "staff", "technician", "admin"] }
+    },
+
+    "UserCreate": {
+      "username": { "type": "string" },
+      "pin":      { "type": "string", "minLength": 4, "maxLength": 4 },
+      "role":     { "type": "string", "enum": ["staff", "technician", "admin"] }
+    },
+
+    "StatEvent": {
+      "event_type":  { "type": "string", "enum": ["login_pin","login_visitor","login_failed","room_scan","object_detected","detail_opened","session_end"] },
+      "session_id":  { "type": "string" },
+      "role":        { "type": "string", "nullable": true },
+      "room_id":     { "type": "integer", "nullable": true },
+      "object_id":   { "type": "integer", "nullable": true },
+      "timestamp":   { "type": "string", "format": "datetime" }
+    },
+
+    "DashboardData": {
+      "total_sessions_today":   { "type": "integer" },
+      "total_room_scans_today": { "type": "integer" },
+      "total_object_scans_today": { "type": "integer" },
+      "active_sessions_now":    { "type": "integer" },
+      "login_breakdown":        { "description": "{'pin': N, 'visitor': N, 'failed': N}" },
+      "hourly_events":          { "type": "array", "description": "[{hour, count}]" },
+      "top_rooms":              { "type": "array", "description": "[{room_id, name, scans}]" },
+      "top_objects":            { "type": "array", "description": "[{object_id, name, detections}]" }
+    },
+
+    "LiveData": {
+      "active_sessions": {
+        "type": "object",
+        "description": "{'visitor': N, 'staff': N, 'technician': N, 'admin': N}"
+      },
+      "active_rooms": {
+        "type": "array",
+        "items": { "description": "{'room_id': int, 'room_name': str, 'visitor_count': int}" }
+      }
+    },
+
+    "Settings": {
+      "ha_url":           { "type": "string" },
+      "ha_token":         { "type": "string" },
+      "planradar_token":  { "type": "string" },
+      "jwt_secret":       { "type": "string" },
+      "jwt_expire_hours": { "type": "integer", "default": 12 }
+    },
+
+    "HASensor": {
+      "entity_id":   { "type": "string", "example": "sensor.temperature_foyer" },
+      "state":       { "type": "string" },
+      "unit":        { "type": "string", "nullable": true },
+      "friendly_name": { "type": "string" }
+    },
+
+    "PlanRadarTicket": {
+      "id":          { "type": "string" },
+      "title":       { "type": "string" },
+      "description": { "type": "string" },
+      "status":      { "type": "string" },
+      "created_at":  { "type": "string", "format": "datetime" },
+      "assignee":    { "type": "string", "nullable": true }
+    }
+  }
+}

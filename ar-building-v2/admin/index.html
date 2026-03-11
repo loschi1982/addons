@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AR Building v2 – Admin</title>
+
+  <!-- Quill WYSIWYG Editor -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.min.css" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
+
+  <!-- Chart.js für Statistik-Charts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+  <!-- QRCode.js für Visitor-Token -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <link rel="stylesheet" href="/admin-static/css/admin.css" />
+</head>
+<body>
+
+  <!-- ===== LOGIN-SCREEN ===== -->
+  <div id="login-screen">
+    <div class="login-box">
+      <h1>AR Building v2</h1>
+      <p class="login-subtitle">Admin-Bereich</p>
+      <div id="login-error" class="error-msg hidden"></div>
+      <input type="text" id="login-username" placeholder="Benutzername" autocomplete="username" />
+      <input type="password" id="login-pin" placeholder="PIN (4 Stellen)" maxlength="4" autocomplete="current-password" />
+      <button id="login-btn">Anmelden</button>
+    </div>
+  </div>
+
+  <!-- ===== HAUPT-LAYOUT ===== -->
+  <div id="app" class="hidden">
+
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <div class="sidebar-logo">
+        <span>AR Building</span>
+        <small>Admin</small>
+      </div>
+      <nav>
+        <a href="#" class="nav-item active" data-section="rooms">
+          <span class="nav-icon">🏛</span> Räume
+        </a>
+        <a href="#" class="nav-item" data-section="objects">
+          <span class="nav-icon">📦</span> Objekte & Typen
+        </a>
+        <a href="#" class="nav-item" data-section="users">
+          <span class="nav-icon">👤</span> Benutzer
+        </a>
+        <!-- PlanRadar-Sektion zwischen Benutzer und Statistik -->
+        <a href="#" class="nav-item" data-section="planradar">
+          <span class="nav-icon">📋</span> PlanRadar
+        </a>
+        <a href="#" class="nav-item" data-section="statistics">
+          <span class="nav-icon">📊</span> Statistik
+        </a>
+        <a href="#" class="nav-item" data-section="settings">
+          <span class="nav-icon">⚙️</span> Einstellungen
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <span id="sidebar-username"></span>
+        <button id="logout-btn">Abmelden</button>
+      </div>
+    </aside>
+
+    <!-- Content -->
+    <main id="content">
+
+      <!-- RÄUME -->
+      <section id="section-rooms" class="section">
+        <div class="section-header">
+          <h2>Räume</h2>
+          <button class="btn-primary" id="btn-new-room">+ Neuer Raum</button>
+        </div>
+        <div class="table-wrap">
+          <table id="rooms-table">
+            <thead>
+              <!-- NEU -->
+              <tr>
+                <th class="col-check"></th>
+                <th>ID</th><th>Name</th><th>Marker-ID</th><th>Kurzbeschreibung</th><th>QR</th><th>Aktionen</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- OBJEKTE & TYPEN -->
+      <section id="section-objects" class="section hidden">
+        <div class="section-header">
+          <h2>Objekte & Typen</h2>
+          <div class="tab-bar">
+            <button class="tab-btn active" data-tab="objects-tab">Objekte</button>
+            <button class="tab-btn" data-tab="types-tab">Objekttypen</button>
+          </div>
+        </div>
+
+        <div id="objects-tab" class="tab-content">
+          <div class="tab-actions">
+            <button class="btn-primary" id="btn-new-object">+ Neues Objekt</button>
+          </div>
+          <div class="table-wrap">
+            <table id="objects-table">
+              <thead>
+                <!-- NEU -->
+                <tr>
+                  <th class="col-check"></th>
+                  <th>ID</th><th>Name</th><th>Marker-ID</th><th>Typ</th><th>Raum</th><th>QR</th><th>Aktionen</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="types-tab" class="tab-content hidden">
+          <div class="tab-actions">
+            <button class="btn-primary" id="btn-new-type">+ Neuer Objekttyp</button>
+          </div>
+          <div class="table-wrap">
+            <table id="types-table">
+              <thead>
+                <tr>
+                  <th>ID</th><th>Name</th><th>Sichtbar für Rollen</th><th>Aktionen</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- BENUTZER -->
+      <section id="section-users" class="section hidden">
+        <div class="section-header">
+          <h2>Benutzer</h2>
+          <button class="btn-primary" id="btn-new-user">+ Neuer Benutzer</button>
+        </div>
+        <div class="table-wrap">
+          <table id="users-table">
+            <thead>
+              <tr>
+                <th>ID</th><th>Benutzername</th><th>Rolle</th><th>Aktionen</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="card mt-2">
+          <h3>Besucher-QR-Token generieren</h3>
+          <p class="muted">Generiert einen einmaligen Login-Token für Besucher. Der Token ist als QR-Code ausdruckbar.</p>
+          <button class="btn-primary" id="btn-gen-visitor">Neuen Token generieren</button>
+          <div id="visitor-qr-result" class="hidden">
+            <div id="visitor-qr-code"></div>
+            <p id="visitor-token-text" class="token-text"></p>
+            <button class="btn-secondary" id="btn-print-qr">🖨 Drucken</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- PLANRADAR -->
+      <section id="section-planradar" class="section hidden">
+        <div class="section-header">
+          <h2>PlanRadar</h2>
+        </div>
+
+        <!-- Karte 1: Verbindung & Konfiguration -->
+        <div class="card">
+          <h3>Verbindung & Konfiguration</h3>
+          <p class="muted">Customer-ID aus Ihrem PlanRadar-Account. Wird zusammen mit dem API-Token aus den Einstellungen verwendet.</p>
+          <div class="pr-connection-form">
+            <label class="pr-field-label">PlanRadar Customer-ID
+              <input type="text" id="pr-customer-id" placeholder="z.B. 18392" />
+            </label>
+            <div class="pr-connection-actions">
+              <button class="btn-secondary" id="pr-save-customer-id">Speichern</button>
+              <button class="btn-secondary" id="pr-test-connection">Verbindung testen</button>
+              <span id="pr-connection-result" class="pr-result-neutral"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Karte 2: Projektliste & Rollenzuweisung -->
+        <div class="card">
+          <h3>Projektliste & Rollenzuweisung</h3>
+          <p class="muted">Legt fest, welche AR-Rollen Tickets eines PlanRadar-Projekts sehen dürfen.</p>
+          <div class="table-wrap">
+            <table id="pr-projects-table">
+              <thead>
+                <tr>
+                  <th>Projektname</th>
+                  <th>Status</th>
+                  <th>Sichtbar für Rollen</th>
+                  <th>Aktion</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="4" class="muted" style="padding:20px">Lädt…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Karte 3: Marker-Mapping -->
+        <div class="card">
+          <h3>Marker-Mapping</h3>
+          <p class="muted">Verknüpft PlanRadar-Listeneinträge mit AR-Markern (Räume oder Objekte).</p>
+
+          <!-- Bestehendes Mappings -->
+          <div class="table-wrap" style="margin-bottom: 24px">
+            <table id="pr-mappings-table">
+              <thead>
+                <tr>
+                  <th>AR-Marker</th>
+                  <th>PlanRadar-Eintrag</th>
+                  <th>Listen-ID</th>
+                  <th>Rollen</th>
+                  <th>Aktion</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="5" class="muted" style="padding:20px">Lädt…</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Neues Mapping anlegen -->
+          <h4 style="margin-bottom:14px; font-size:14px; color: var(--muted)">Neues Mapping anlegen</h4>
+          <div class="pr-mapping-form">
+
+            <!-- Schritt 1: Projekt wählen -->
+            <div class="pr-mapping-row">
+              <label class="pr-field-label">1. Projekt wählen
+                <select id="pr-map-project">
+                  <option value="">– Lädt Projekte –</option>
+                </select>
+              </label>
+              <button class="btn-secondary" id="pr-load-lists">Listen laden →</button>
+            </div>
+
+            <!-- Schritt 2: Liste wählen (initial versteckt) -->
+            <div class="pr-mapping-row hidden" id="pr-map-list-row">
+              <label class="pr-field-label">2. Liste wählen
+                <select id="pr-map-list">
+                  <option value="">– Liste wählen –</option>
+                </select>
+              </label>
+              <button class="btn-secondary" id="pr-load-entries">Einträge laden →</button>
+            </div>
+
+            <!-- Schritt 3: Eintrag + Marker (initial versteckt) -->
+            <div class="pr-mapping-row hidden" id="pr-map-entries-row">
+              <label class="pr-field-label">3. Eintrag wählen
+                <select id="pr-map-entry">
+                  <option value="">– Eintrag wählen –</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="pr-mapping-row hidden" id="pr-map-marker-row">
+              <label class="pr-field-label">4. AR-Marker-ID eingeben
+                <input type="text" id="pr-map-marker" placeholder="z.B. room:1 oder object:42" />
+              </label>
+
+              <div class="pr-mapping-roles">
+                <span class="pr-field-label" style="margin-bottom:6px; display:block">5. Sichtbar für Rollen</span>
+                <div class="role-checks">
+                  <label><input type="checkbox" class="pr-map-role-check" value="visitor" /> visitor</label>
+                  <label><input type="checkbox" class="pr-map-role-check" value="staff" /> staff</label>
+                  <label><input type="checkbox" class="pr-map-role-check" value="technician" /> technician</label>
+                  <label><input type="checkbox" class="pr-map-role-check" value="admin" /> admin</label>
+                </div>
+              </div>
+
+              <button class="btn-primary" id="pr-save-mapping" style="align-self:flex-end">Mapping speichern</button>
+            </div>
+
+          </div>
+
+          <!-- Auto-Mapping-Button – wird nur eingeblendet wenn Einträge geladen sind -->
+          <div style="margin-top:12px;">
+            <button class="btn-secondary hidden" id="pr-auto-mapping">✨ Auto-Mapping</button>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- STATISTIK -->
+      <section id="section-statistics" class="section hidden">
+        <div class="section-header">
+          <h2>Statistik</h2>
+          <button class="btn-secondary" id="btn-refresh-stats">↻ Aktualisieren</button>
+        </div>
+
+        <!-- KPI-Karten -->
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-value" id="kpi-sessions">–</div>
+            <div class="kpi-label">Sessions heute</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-value" id="kpi-room-scans">–</div>
+            <div class="kpi-label">Raum-Scans heute</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-value" id="kpi-obj-scans">–</div>
+            <div class="kpi-label">Objekt-Erkennungen heute</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-value" id="kpi-active">–</div>
+            <div class="kpi-label">Aktive Sessions jetzt</div>
+          </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="chart-row">
+          <div class="card chart-card">
+            <h3>Events pro Stunde</h3>
+            <canvas id="chart-hourly"></canvas>
+          </div>
+          <div class="card chart-card">
+            <h3>Login-Arten</h3>
+            <canvas id="chart-logins"></canvas>
+          </div>
+        </div>
+
+        <!-- Top-Listen -->
+        <div class="chart-row">
+          <div class="card">
+            <h3>Top-Räume</h3>
+            <table class="mini-table" id="top-rooms-table">
+              <thead><tr><th>Raum</th><th>Scans</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="card">
+            <h3>Top-Objekte</h3>
+            <table class="mini-table" id="top-objects-table">
+              <thead><tr><th>Objekt</th><th>Erkennungen</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Live-Block -->
+        <div class="card mt-1" id="live-block">
+          <div class="live-header">
+            <h3>Live-Daten</h3>
+            <span class="live-badge">● LIVE</span>
+          </div>
+          <div class="live-grid">
+            <div>
+              <p class="label">Aktive Sessions nach Rolle</p>
+              <div id="live-sessions"></div>
+            </div>
+            <div>
+              <p class="label">Aktive Räume</p>
+              <div id="live-rooms"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- EINSTELLUNGEN -->
+      <section id="section-settings" class="section hidden">
+        <div class="section-header">
+          <h2>Einstellungen</h2>
+        </div>
+        <div class="card settings-form">
+          <div id="settings-msg" class="hidden"></div>
+
+          <fieldset>
+            <legend>Home Assistant</legend>
+            <label>HA-URL
+              <input type="url" id="set-ha-url" placeholder="http://homeassistant.local:8123" />
+            </label>
+            <label>HA-Token
+              <input type="password" id="set-ha-token" placeholder="Long-Lived Access Token" />
+            </label>
+            <button class="btn-secondary" id="btn-test-ha">Verbindung testen</button>
+            <span id="ha-test-result"></span>
+          </fieldset>
+
+          <fieldset>
+            <legend>PlanRadar</legend>
+            <label>PlanRadar-Token
+              <input type="password" id="set-planradar-token" placeholder="API-Token" />
+            </label>
+            <!-- Neu in v2.1.0: Customer-ID -->
+            <label>PlanRadar Customer-ID
+              <input type="text" id="set-planradar-customer-id" placeholder="z.B. 18392" />
+            </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>JWT / Sicherheit</legend>
+            <label>JWT-Secret (nur lesbar)
+              <input type="text" id="set-jwt-secret" readonly />
+            </label>
+            <label>JWT-Gültigkeit (Stunden)
+              <input type="number" id="set-jwt-hours" min="1" max="720" />
+            </label>
+          </fieldset>
+
+          <button class="btn-primary" id="btn-save-settings">Einstellungen speichern</button>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ===== MODAL ===== -->
+  <div id="modal-overlay" class="hidden">
+    <div id="modal-box">
+      <div id="modal-header">
+        <h3 id="modal-title">Modal</h3>
+        <button id="modal-close">✕</button>
+      </div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- ===== CONFIRM-DIALOG ===== -->
+  <div id="confirm-overlay" class="hidden">
+    <div id="confirm-box">
+      <p id="confirm-text">Wirklich löschen?</p>
+      <div class="confirm-actions">
+        <button id="confirm-cancel" class="btn-secondary">Abbrechen</button>
+        <button id="confirm-ok" class="btn-danger">Löschen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- App-Konfiguration: API-Basis-URL -->
+  <script>
+    window.APP_CONFIG = {
+      apiBase: `https://${window.location.hostname}:8443`
+    };
+  </script>
+
+  <!-- Module laden -->
+  <script type="module" src="/admin-static/js/admin-app.js"></script>
+</body>
+</html>
