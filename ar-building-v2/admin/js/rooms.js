@@ -6,8 +6,10 @@
 
 import * as api from './api.js';
 import { openModal, closeModal, showConfirm } from './admin-app.js';
+import { renderSensorChips, openSensorMultiPicker, insertSensorPlaceholder } from './objects.js';
 
 let quillRoom = null;
+let _roomSensorIds = new Set();
 
 // Alle vom Backend geladenen Räume (unveränderter Master).
 let _allRooms = [];
@@ -370,9 +372,11 @@ export async function openRoomModal(roomId = null) {
           <span class="slider-val" id="r-opacity-val">80%</span>
         </div>
       </div>
-      <div class="form-group full-width">
-        <label>HA-Sensoren (entity_ids, kommagetrennt)</label>
-        <input type="text" id="r-sensors" placeholder="sensor.temp_foyer, sensor.humidity_foyer" />
+      <div class="form-group full-width"><label>HA-Sensoren</label>
+        <div class="sensor-picker" id="r-sensor-picker">
+          <div class="sensor-chips" id="r-sensor-chips"></div>
+          <button type="button" class="btn-secondary btn-sm" id="r-sensor-add">+ Sensor wählen</button>
+        </div>
       </div>
       <div class="form-group full-width">
         <label>Datei-Upload</label>
@@ -398,6 +402,7 @@ export async function openRoomModal(roomId = null) {
     </div>
   `;
 
+  _roomSensorIds = new Set();
   openModal(roomId ? 'Raum bearbeiten' : 'Neuer Raum', html);
 
   quillRoom = new Quill('#r-quill-wrap', {
@@ -416,13 +421,15 @@ export async function openRoomModal(roomId = null) {
       const pct = Math.round((room.video_opacity ?? 0.8) * 100);
       document.getElementById('r-opacity').value = pct;
       document.getElementById('r-opacity-val').textContent = pct + '%';
-      document.getElementById('r-sensors').value = (room.ha_sensor_ids || []).join(', ');
+      _roomSensorIds = new Set(room.ha_sensor_ids || []);
+      renderSensorChips(document.getElementById('r-sensor-chips'), _roomSensorIds);
     } catch (e) {
       alert('Fehler beim Laden der Raumdaten: ' + e.message);
     }
   }
 
-  document.getElementById('r-insert-sensor').addEventListener('click', () => insertSensorPlaceholder(quillRoom));
+  document.getElementById('r-insert-sensor').addEventListener('click', e => insertSensorPlaceholder(quillRoom, e.currentTarget));
+  document.getElementById('r-sensor-add').addEventListener('click', e => openSensorMultiPicker(e.currentTarget, _roomSensorIds));
   document.getElementById('r-opacity').addEventListener('input', e => {
     document.getElementById('r-opacity-val').textContent = e.target.value + '%';
   });
@@ -434,7 +441,7 @@ export async function openRoomModal(roomId = null) {
     const short_desc  = document.getElementById('r-short').value.trim();
     const detail_text = quillRoom.root.innerHTML;
     const video_opacity = +document.getElementById('r-opacity').value / 100;
-    const ha_sensor_ids = document.getElementById('r-sensors').value.split(',').map(s => s.trim()).filter(Boolean);
+    const ha_sensor_ids = [..._roomSensorIds];
 
     if (!name || !marker_id) { alert('Name und Marker-ID sind Pflichtfelder.'); return; }
 
@@ -571,14 +578,6 @@ function renderLoadingRow(tbody, cols) {
   tbody.innerHTML = `<tr><td colspan="${cols}" class="muted" style="padding:20px">Lädt…</td></tr>`;
 }
 
-function insertSensorPlaceholder(qi) {
-  const id = prompt('HA Sensor Entity-ID (z.B. sensor.temperature_foyer):');
-  if (!id?.trim()) return;
-  const r = qi.getSelection(true);
-  const p = `{{sensor:${id.trim()}}}`;
-  qi.insertText(r.index, p, 'user');
-  qi.setSelection(r.index + p.length);
-}
 
 function esc(s) {
   return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');

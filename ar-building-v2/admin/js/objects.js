@@ -614,7 +614,7 @@ function renderLoadingRow(tbody, cols) {
   tbody.innerHTML = `<tr><td colspan="${cols}" class="muted" style="padding:20px">Lädt…</td></tr>`;
 }
 
-function renderSensorChips(container, idSet) {
+export function renderSensorChips(container, idSet) {
   container.innerHTML = '';
   idSet.forEach(id => {
     const chip = document.createElement('span');
@@ -671,7 +671,7 @@ async function _buildSensorDropdown(anchor, renderItems) {
   return { listEl, render, searchInput };
 }
 
-async function openSensorMultiPicker(anchor, idSet) {
+export async function openSensorMultiPicker(anchor, idSet) {
   await _buildSensorDropdown(anchor, (s, val) => {
     const checked = idSet.has(s.entity_id);
     return `<label class="sensor-option${checked ? ' sensor-option--checked' : ''}">
@@ -694,9 +694,9 @@ async function openSensorMultiPicker(anchor, idSet) {
   });
 }
 
-async function insertSensorPlaceholder(qi) {
+export async function insertSensorPlaceholder(qi, anchorEl) {
   const result = await _buildSensorDropdown(
-    document.getElementById('o-insert-sensor'),
+    anchorEl ?? document.getElementById('o-insert-sensor'),
     (s, val) => `<div class="sensor-option sensor-option--click" data-id="${esc(s.entity_id)}">
       <span class="sensor-option-body">
         <span class="sensor-option-name">${escHtml(s.friendly_name || s.entity_id)}</span>
