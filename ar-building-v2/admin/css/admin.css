@@ -158,6 +158,8 @@ nav { flex: 1; padding: 12px 0; }
 }
 
 #sidebar-username { font-size: 12px; color: var(--muted); }
+.pwa-link { font-size: 12px; color: var(--muted); text-decoration: none; }
+.pwa-link:hover { color: var(--primary); }
 
 /* ---- Content ---- */
 #content {

@@ -123,6 +123,9 @@ function showApp() {
   // Benutzernamen in der Sidebar anzeigen.
   document.getElementById('sidebar-username').textContent = auth.getUsername() || 'Admin';
 
+  // PWA-Link mit korrekter URL befüllen (Ingress oder direkt).
+  document.getElementById('pwa-link').href = window.APP_CONFIG.pwaUrl || '/';
+
   setupNavigation();
   setupLogout();
   navigateTo('rooms');

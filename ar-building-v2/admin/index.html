@@ -75,6 +75,7 @@
         </a>
       </nav>
       <div class="sidebar-footer">
+        <a id="pwa-link" href="/" target="_blank" class="pwa-link">🔗 PWA öffnen</a>
         <span id="sidebar-username"></span>
         <button id="logout-btn">Abmelden</button>
       </div>
@@ -453,7 +454,8 @@
   <!-- App-Konfiguration: API-Basis-URL -->
   <script>
     window.APP_CONFIG = {
-      apiBase: window.location.origin
+      apiBase: window.location.origin,
+      pwaUrl: "/"
     };
   </script>
 

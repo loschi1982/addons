@@ -213,12 +213,23 @@ async def serve_admin(request: Request):
         "apiBase: window.location.origin",
         f'apiBase: "{api_base}"',
     )
+
+    # PWA-URL für den "PWA öffnen"-Link in der Sidebar.
+    pwa_url = f"{ingress_path}/" if ingress_path else f"https://{request.headers.get('host', 'localhost:8444')}/"
+    html = html.replace('pwaUrl: "/"', f'pwaUrl: "{pwa_url}"')
+
     return HTMLResponse(content=html)
 
 
 @app.get("/")
-async def serve_frontend():
-    """Liefert die PWA-Frontend-Startseite (index.html)."""
+async def serve_frontend(request: Request):
+    """Liefert die PWA-Frontend-Startseite (index.html).
+    Bei Ingress-Zugriff (X-Ingress-Path vorhanden) → Redirect zum Admin-Panel."""
+    if request.headers.get("X-Ingress-Path"):
+        ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=f"{ingress_path}/admin")
+
     frontend_index = "./frontend/index.html"
     if not os.path.exists(frontend_index):
         return {"detail": "Frontend not found", "docs": "/docs"}
