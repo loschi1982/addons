@@ -8,6 +8,7 @@ import * as api from './api.js';
 import { openModal, closeModal, showConfirm } from './admin-app.js';
 
 let quillObj = null;
+let _objSensorIds = new Set(); // aktuell ausgewählte Sensor-Entity-IDs im Objekt-Formular
 
 let _allObjects   = [];
 let _filteredRows = [];
@@ -345,8 +346,12 @@ export async function openObjectModal(objectId = null) {
       </div>
       <div class="form-group full-width"><label>Audio-Pfad</label>
         <input type="text" id="o-audio" placeholder="/uploads/1/sound.mp3" /></div>
-      <div class="form-group full-width"><label>HA-Sensoren (entity_ids, kommagetrennt)</label>
-        <input type="text" id="o-sensors" placeholder="sensor.temp_saal" /></div>
+      <div class="form-group full-width"><label>HA-Sensoren</label>
+        <div class="sensor-picker" id="o-sensor-picker">
+          <div class="sensor-chips" id="o-sensor-chips"></div>
+          <button type="button" class="btn-secondary btn-sm" id="o-sensor-add">+ Sensor wählen</button>
+        </div>
+      </div>
     </div>
     <div class="modal-actions">
       <button class="btn-secondary" id="o-cancel">Abbrechen</button>
@@ -354,6 +359,7 @@ export async function openObjectModal(objectId = null) {
     </div>
   `;
 
+  _objSensorIds = new Set(); // State für neues Objekt zurücksetzen
   openModal(objectId ? 'Objekt bearbeiten' : 'Neues Objekt', html);
 
   quillObj = new Quill('#o-quill-wrap', {
@@ -362,6 +368,9 @@ export async function openObjectModal(objectId = null) {
   });
 
   document.getElementById('o-insert-sensor').addEventListener('click', () => insertSensorPlaceholder(quillObj));
+  document.getElementById('o-sensor-add').addEventListener('click', (e) => {
+    openSensorMultiPicker(e.currentTarget, _objSensorIds);
+  });
 
   if (objectId) {
     try {
@@ -378,7 +387,8 @@ export async function openObjectModal(objectId = null) {
       document.getElementById('o-opacity').value = pct;
       document.getElementById('o-opacity-val').textContent = pct + '%';
       document.getElementById('o-audio').value   = obj.audio_path || '';
-      document.getElementById('o-sensors').value = (obj.ha_sensor_ids || []).join(', ');
+      _objSensorIds = new Set(obj.ha_sensor_ids || []);
+      renderSensorChips(document.getElementById('o-sensor-chips'), _objSensorIds);
     } catch (e) { alert('Fehler beim Laden der Objektdaten: ' + e.message); }
   }
 
@@ -403,7 +413,7 @@ export async function openObjectModal(objectId = null) {
       video_path:    document.getElementById('o-video').value.trim() || null,
       video_opacity: +document.getElementById('o-opacity').value / 100,
       audio_path:    document.getElementById('o-audio').value.trim() || null,
-      ha_sensor_ids: document.getElementById('o-sensors').value.split(',').map(s=>s.trim()).filter(Boolean),
+      ha_sensor_ids: [..._objSensorIds],
     };
 
     try {
@@ -604,13 +614,108 @@ function renderLoadingRow(tbody, cols) {
   tbody.innerHTML = `<tr><td colspan="${cols}" class="muted" style="padding:20px">Lädt…</td></tr>`;
 }
 
-function insertSensorPlaceholder(qi) {
-  const id = prompt('HA Sensor Entity-ID (z.B. sensor.temperature_foyer):');
-  if (!id?.trim()) return;
-  const r = qi.getSelection(true);
-  const p = `{{sensor:${id.trim()}}}`;
-  qi.insertText(r.index, p, 'user');
-  qi.setSelection(r.index + p.length);
+function renderSensorChips(container, idSet) {
+  container.innerHTML = '';
+  idSet.forEach(id => {
+    const chip = document.createElement('span');
+    chip.className = 'sensor-chip';
+    chip.innerHTML = `${escHtml(id)}<button type="button" title="Entfernen" data-id="${esc(id)}">×</button>`;
+    chip.querySelector('button').onclick = () => { idSet.delete(id); renderSensorChips(container, idSet); };
+    container.appendChild(chip);
+  });
+}
+
+async function _buildSensorDropdown(anchor, renderItems) {
+  document.querySelector('.sensor-dropdown')?.remove();
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'sensor-dropdown';
+  dropdown.innerHTML = `
+    <div class="sensor-dropdown-header">
+      <input type="text" class="sensor-search" placeholder="Suchen…" />
+      <button type="button" class="btn-secondary btn-sm sensor-dropdown-close">Fertig</button>
+    </div>
+    <div class="sensor-dropdown-list"><div class="sensor-dropdown-info">Lädt Sensoren…</div></div>`;
+  anchor.after(dropdown);
+
+  const searchInput = dropdown.querySelector('.sensor-search');
+  const listEl      = dropdown.querySelector('.sensor-dropdown-list');
+  dropdown.querySelector('.sensor-dropdown-close').onclick = () => dropdown.remove();
+
+  let sensors = [];
+  try {
+    sensors = await api.getHASensors();
+  } catch (e) {
+    listEl.innerHTML = `<div class="sensor-dropdown-info" style="color:#e44">Fehler: ${escHtml(e.message)}</div>`;
+    return;
+  }
+
+  function render(q) {
+    const filtered = sensors.filter(s =>
+      !q || s.entity_id.toLowerCase().includes(q) ||
+      (s.friendly_name || '').toLowerCase().includes(q)
+    );
+    if (!filtered.length) {
+      listEl.innerHTML = '<div class="sensor-dropdown-info">Keine Sensoren gefunden.</div>';
+      return;
+    }
+    listEl.innerHTML = filtered.map(s => {
+      const val = s.state + (s.unit ? '\u00a0' + s.unit : '');
+      return renderItems(s, val);
+    }).join('');
+  }
+
+  render('');
+  searchInput.addEventListener('input', () => render(searchInput.value.toLowerCase().trim()));
+  searchInput.focus();
+  return { listEl, render, searchInput };
+}
+
+async function openSensorMultiPicker(anchor, idSet) {
+  await _buildSensorDropdown(anchor, (s, val) => {
+    const checked = idSet.has(s.entity_id);
+    return `<label class="sensor-option${checked ? ' sensor-option--checked' : ''}">
+      <input type="checkbox" value="${esc(s.entity_id)}"${checked ? ' checked' : ''} />
+      <span class="sensor-option-body">
+        <span class="sensor-option-name">${escHtml(s.friendly_name || s.entity_id)}</span>
+        <span class="sensor-option-id">${escHtml(s.entity_id)}</span>
+      </span>
+      <span class="sensor-option-val">${escHtml(val)}</span>
+    </label>`;
+  });
+
+  // Checkbox-Handler nach dem Rendern verdrahten (Event-Delegation auf listEl).
+  document.querySelector('.sensor-dropdown-list')?.addEventListener('change', e => {
+    const cb = e.target;
+    if (cb.type !== 'checkbox') return;
+    if (cb.checked) idSet.add(cb.value); else idSet.delete(cb.value);
+    cb.closest('label')?.classList.toggle('sensor-option--checked', cb.checked);
+    renderSensorChips(document.getElementById('o-sensor-chips'), idSet);
+  });
+}
+
+async function insertSensorPlaceholder(qi) {
+  const result = await _buildSensorDropdown(
+    document.getElementById('o-insert-sensor'),
+    (s, val) => `<div class="sensor-option sensor-option--click" data-id="${esc(s.entity_id)}">
+      <span class="sensor-option-body">
+        <span class="sensor-option-name">${escHtml(s.friendly_name || s.entity_id)}</span>
+        <span class="sensor-option-id">${escHtml(s.entity_id)}</span>
+      </span>
+      <span class="sensor-option-val">${escHtml(val)}</span>
+    </div>`
+  );
+  if (!result) return;
+
+  result.listEl.addEventListener('click', e => {
+    const item = e.target.closest('.sensor-option--click');
+    if (!item) return;
+    const r = qi.getSelection(true);
+    const p = `{{sensor:${item.dataset.id}}}`;
+    qi.insertText(r.index, p, 'user');
+    qi.setSelection(r.index + p.length);
+    document.querySelector('.sensor-dropdown')?.remove();
+  });
 }
 
 function esc(s) {
