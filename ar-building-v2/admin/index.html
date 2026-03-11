@@ -176,12 +176,20 @@
             <span id="visitor-token-status" class="visitor-token-status">Inaktiv</span>
           </div>
           <p class="muted">Dauerhafter QR-Code für Besucher. Kann jederzeit aktiviert oder deaktiviert werden.</p>
+          <p id="visitor-token-error" class="error-msg hidden"></p>
           <div id="visitor-qr-result">
             <div id="visitor-qr-code"></div>
             <p id="visitor-token-text" class="token-text"></p>
             <div class="visitor-token-actions">
               <button class="btn-secondary" id="btn-print-qr">🖨 Drucken</button>
               <button class="btn-danger btn-sm" id="btn-regen-visitor">Token neu generieren</button>
+            </div>
+            <div id="visitor-regen-confirm" class="hidden" style="margin-top:8px;padding:10px;background:rgba(220,50,50,.15);border-radius:6px;font-size:13px;">
+              Alter QR-Code wird sofort ungültig. Wirklich neu generieren?
+              <div style="display:flex;gap:8px;margin-top:8px;">
+                <button class="btn-danger btn-sm" id="btn-regen-confirm-yes">Ja, neu generieren</button>
+                <button class="btn-secondary btn-sm" id="btn-regen-confirm-no">Abbrechen</button>
+              </div>
             </div>
           </div>
         </div>

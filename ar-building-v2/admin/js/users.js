@@ -136,11 +136,21 @@ export async function openUserModal(userId = null) {
 
 // Lädt den dauerhaften Visitor-Token und zeigt ihn mit aktuellem Status an.
 export async function loadVisitorToken() {
+  const errEl = document.getElementById('visitor-token-error');
+  errEl.classList.add('hidden');
+
+  document.getElementById('btn-regen-confirm-yes').onclick = _doRegenVisitorToken;
+  document.getElementById('btn-regen-confirm-no').onclick  = () => {
+    document.getElementById('visitor-regen-confirm').classList.add('hidden');
+    document.getElementById('btn-regen-visitor').classList.remove('hidden');
+  };
+
   try {
     const res = await api.getVisitorToken();
     _renderVisitorToken(res);
   } catch (e) {
-    console.error('Visitor-Token laden fehlgeschlagen:', e.message);
+    errEl.textContent = 'Fehler beim Laden: ' + e.message;
+    errEl.classList.remove('hidden');
   }
 }
 
@@ -156,14 +166,23 @@ export async function toggleVisitorToken() {
   }
 }
 
-// Generiert einen neuen Token (der alte wird sofort ungültig).
-export async function regenVisitorToken() {
-  if (!confirm('Achtung: Der alte QR-Code wird sofort ungültig. Neuen Token generieren?')) return;
+// Zeigt die inline Bestätigung für Token-Regenerierung.
+export function regenVisitorToken() {
+  document.getElementById('visitor-regen-confirm').classList.remove('hidden');
+  document.getElementById('btn-regen-visitor').classList.add('hidden');
+}
+
+async function _doRegenVisitorToken() {
+  document.getElementById('visitor-regen-confirm').classList.add('hidden');
+  document.getElementById('btn-regen-visitor').classList.remove('hidden');
+  const errEl = document.getElementById('visitor-token-error');
+  errEl.classList.add('hidden');
   try {
     const res = await api.regenerateVisitorToken();
     _renderVisitorToken(res);
   } catch (e) {
-    alert('Fehler beim Regenerieren: ' + e.message);
+    errEl.textContent = 'Fehler beim Regenerieren: ' + e.message;
+    errEl.classList.remove('hidden');
   }
 }
 
