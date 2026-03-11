@@ -6,8 +6,8 @@ import os
 import random
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Depends, Request
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -116,13 +116,41 @@ if os.path.isdir("./frontend"):
 # ─── HTML-Routen ──────────────────────────────────────────────────────────────
 
 @app.get("/admin")
-async def serve_admin():
+async def serve_admin(request: Request):
     """Liefert die Admin-UI (index.html).
-    Explizite Route nötig – StaticFiles würde /admin nicht als index.html auflösen."""
+    Wenn HA Ingress den Request weiterleitet, wird der X-Ingress-Path-Header
+    verwendet, um apiBase und <base href> dynamisch zu setzen – damit alle
+    Asset-URLs und API-Calls durch den Ingress-Proxy laufen."""
     admin_index = "./admin/index.html"
     if not os.path.exists(admin_index):
         return {"detail": "Admin UI not found"}
-    return FileResponse(admin_index)
+
+    # X-Ingress-Path enthält den Pfad-Präfix, den HA vor alle URLs stellt.
+    # z.B. "/api/hassio_ingress/abc123" – HA leitet dann /abc123/api/rooms → /api/rooms weiter.
+    ingress_path = request.headers.get("X-Ingress-Path", "").rstrip("/")
+
+    with open(admin_index, encoding="utf-8") as f:
+        html = f.read()
+
+    if ingress_path:
+        # Ingress-Modus: <base href> setzen damit relative Asset-URLs korrekt aufgelöst werden.
+        # apiBase = Ingress-Präfix, damit API-Calls durch den Proxy gehen.
+        base_tag = f'<base href="{ingress_path}/">'
+        api_base = ingress_path
+    else:
+        # Direktzugriff über HTTPS: volle URL mit Port 8443.
+        host = request.headers.get("host", "localhost").split(":")[0]
+        base_tag = ""
+        api_base = f"https://{host}:8443"
+
+    if base_tag:
+        html = html.replace("<head>", f"<head>\n  {base_tag}", 1)
+
+    html = html.replace(
+        "apiBase: `https://${window.location.hostname}:8443`",
+        f'apiBase: "{api_base}"',
+    )
+    return HTMLResponse(content=html)
 
 
 @app.get("/")

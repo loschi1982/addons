@@ -46,11 +46,20 @@ EOF
 fi
 
 # Uvicorn starten.
-# exec ersetzt den Shell-Prozess durch uvicorn – uvicorn wird PID 1.
-# Das ist wichtig, damit Docker-Stopp-Signale (SIGTERM) korrekt ankommen.
 # --workers 1 = ein Prozess (SQLite ist nicht für mehrere Prozesse geeignet).
-echo "INFO: Starte AR Building v2 auf Port 8443..."
 cd /app
+
+# HTTP-Server auf Port 8099 für HA Ingress (Seitenleiste).
+# HA übernimmt die HTTPS-Terminierung – der Add-on selbst spricht HTTP.
+echo "INFO: Starte Ingress-Server auf Port 8099 (HTTP)..."
+python3 -m uvicorn backend.main:app \
+    --host 0.0.0.0 \
+    --port 8099 \
+    --workers 1 &
+
+# HTTPS-Server auf Port 8443 für direkten Zugriff (PWA + Admin).
+# exec ersetzt den Shell-Prozess – uvicorn wird PID 1 und empfängt SIGTERM korrekt.
+echo "INFO: Starte HTTPS-Server auf Port 8443..."
 exec python3 -m uvicorn backend.main:app \
     --host 0.0.0.0 \
     --port 8443 \
