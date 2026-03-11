@@ -32,44 +32,61 @@ async def lifespan(app: FastAPI):
 
     # Alle Tabellen in der SQLite-DB anlegen (falls sie noch nicht existieren).
     async with engine.begin() as conn:
+        import sqlalchemy as _sa
+
+        # Aufräumen: falls ein vorheriger Migration-Versuch users_new hinterlassen hat,
+        # zuerst prüfen ob users existiert. Falls nicht, users_new → users umbenennen.
+        try:
+            tables_result = await conn.execute(
+                _sa.text("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users', 'users_new')")
+            )
+            existing_tables = {row[0] for row in tables_result.fetchall()}
+            print(f"INFO:     DB-Status beim Start: Tabellen={existing_tables}")
+
+            if "users_new" in existing_tables and "users" not in existing_tables:
+                # Halbfertige Migration: users wurde gelöscht, Umbenennung fehlgeschlagen.
+                await conn.execute(_sa.text("ALTER TABLE users_new RENAME TO users"))
+                print("INFO:     DB-Wiederherstellung: users_new → users umbenannt.")
+            elif "users_new" in existing_tables and "users" in existing_tables:
+                # Verwaiste users_new aus fehlgeschlagener Migration – löschen.
+                await conn.execute(_sa.text("DROP TABLE users_new"))
+                print("INFO:     DB-Bereinigung: verwaiste users_new gelöscht.")
+        except Exception as e:
+            print(f"WARNUNG:  DB-Vorprüfung fehlgeschlagen: {e}")
+
         await conn.run_sync(Base.metadata.create_all)
+
         # Migration: pin_hash auf nullable setzen falls die Spalte noch NOT NULL ist.
         # SQLite unterstützt kein ALTER COLUMN – daher über PRAGMA-Prüfung + Tabellen-Rebuild.
-        await conn.execute(
-            __import__("sqlalchemy").text(
-                "PRAGMA legacy_alter_table = ON"
-            )
-        )
         try:
             # Prüfen ob pin_hash notnull=1 hat (alte DB ohne nullable).
-            result = await conn.execute(
-                __import__("sqlalchemy").text("PRAGMA table_info(users)")
-            )
+            result = await conn.execute(_sa.text("PRAGMA table_info(users)"))
             rows = result.fetchall()
             needs_migration = any(
                 row[1] == "pin_hash" and row[3] == 1  # index 3 = notnull
                 for row in rows
             )
             if needs_migration:
+                print("INFO:     DB-Migration: pin_hash NOT NULL → nullable wird durchgeführt.")
                 # Tabelle neu aufbauen ohne NOT NULL auf pin_hash.
-                await conn.execute(__import__("sqlalchemy").text(
-                    "CREATE TABLE IF NOT EXISTS users_new ("
+                await conn.execute(_sa.text(
+                    "CREATE TABLE users_new ("
                     "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
                     "  username VARCHAR(255) NOT NULL UNIQUE,"
                     "  pin_hash VARCHAR(255),"
                     "  role VARCHAR(50) NOT NULL DEFAULT 'staff'"
                     ")"
                 ))
-                await conn.execute(__import__("sqlalchemy").text(
+                await conn.execute(_sa.text(
                     "INSERT INTO users_new SELECT id, username, pin_hash, role FROM users"
                 ))
-                await conn.execute(__import__("sqlalchemy").text("DROP TABLE users"))
-                await conn.execute(__import__("sqlalchemy").text(
-                    "ALTER TABLE users_new RENAME TO users"
-                ))
+                await conn.execute(_sa.text("DROP TABLE users"))
+                await conn.execute(_sa.text("ALTER TABLE users_new RENAME TO users"))
                 print("INFO:     DB-Migration: users.pin_hash auf nullable umgestellt.")
+            else:
+                print("INFO:     DB-Migration: nicht erforderlich.")
         except Exception as e:
-            print(f"WARNUNG:  DB-Migration übersprungen: {e}")
+            print(f"FEHLER:   DB-Migration fehlgeschlagen: {e}")
 
     # Add-on-Optionen lesen (geschrieben von HA nach /data/options.json).
     options: dict = {}
@@ -90,11 +107,14 @@ async def lifespan(app: FastAPI):
             default_admin = User(username="admin", pin_hash=None, role="admin")
             db.add(default_admin)
             await db.commit()
-            print("INFO:     Admin-Konto angelegt. Beim ersten Login bitte einen PIN setzen.")
+            print("INFO:     Admin-Konto neu angelegt. Beim ersten Login PIN setzen.")
         elif reset_admin:
             admin.pin_hash = None
             await db.commit()
-            print("INFO:     Admin-PIN zurückgesetzt. Beim nächsten Login bitte neuen PIN setzen.")
+            print("INFO:     Admin-PIN zurückgesetzt. Beim nächsten Login neuen PIN setzen.")
+        else:
+            pin_status = "kein PIN gesetzt" if admin.pin_hash is None else "PIN gesetzt"
+            print(f"INFO:     Admin-Konto vorhanden ({pin_status}).")
 
     yield  # Hier läuft die Anwendung.
     # Beim Stopp: Datenbankverbindung sauber schließen.
