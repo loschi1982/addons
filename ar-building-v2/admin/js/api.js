@@ -82,6 +82,11 @@ export async function login(username, pin) {
   return request('POST', '/api/auth/login', { username, pin });
 }
 
+// Setzt einen neuen PIN für den eingeloggten Benutzer (auch beim Erst-Setup).
+export async function changePin(newPin) {
+  return request('POST', '/api/auth/change-pin', { new_pin: newPin });
+}
+
 // Generiert einen neuen Visitor-QR-Token (nur Admin).
 export async function getVisitorToken() {
   return request('GET', '/api/auth/visitor-token');

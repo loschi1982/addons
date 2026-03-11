@@ -41,8 +41,8 @@ export function getUsername() {
   return sessionStorage.getItem('ar_username');
 }
 
-// Versucht den Login mit username + PIN.
-// Gibt true zurück wenn erfolgreich und die Rolle admin ist.
+// Versucht den Login mit username + PIN (PIN darf leer sein beim Erst-Setup).
+// Gibt { mustChangePin } zurück.
 // Wirft einen Fehler bei falschen Daten oder fehlender Admin-Berechtigung.
 export async function login(username, pin) {
   const res = await api.login(username, pin);
@@ -57,7 +57,12 @@ export async function login(username, pin) {
   sessionStorage.setItem('ar_role', res.role);
   sessionStorage.setItem('ar_username', res.username);
 
-  return true;
+  return { mustChangePin: !!res.must_change_pin };
+}
+
+// Setzt einen neuen PIN für den aktuell eingeloggten Benutzer.
+export async function changePin(newPin) {
+  return api.changePin(newPin);
 }
 
 // Meldet den Benutzer ab und leert den Speicher.

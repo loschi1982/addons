@@ -26,8 +26,21 @@
       <p class="login-subtitle">Admin-Bereich</p>
       <div id="login-error" class="error-msg hidden"></div>
       <input type="text" id="login-username" placeholder="Benutzername" autocomplete="username" />
-      <input type="password" id="login-pin" placeholder="PIN (4 Stellen)" maxlength="4" autocomplete="current-password" />
+      <input type="password" id="login-pin" placeholder="PIN (4 Stellen, leer lassen beim ersten Login)" maxlength="4" autocomplete="current-password" />
       <button id="login-btn">Anmelden</button>
+    </div>
+  </div>
+
+  <!-- ===== PIN-SETUP-SCREEN (erster Login / nach Reset) ===== -->
+  <div id="pin-setup-screen" class="hidden">
+    <div class="login-box">
+      <h1>AR Building v2</h1>
+      <p class="login-subtitle">PIN festlegen</p>
+      <p style="font-size:0.9rem;color:#666;margin-bottom:1rem;">Bitte lege jetzt einen 4-stelligen PIN fest.</p>
+      <div id="pin-setup-error" class="error-msg hidden"></div>
+      <input type="password" id="pin-setup-new" placeholder="Neuer PIN (4 Ziffern)" maxlength="4" autocomplete="new-password" />
+      <input type="password" id="pin-setup-confirm" placeholder="PIN wiederholen" maxlength="4" autocomplete="new-password" />
+      <button id="pin-setup-btn">PIN speichern</button>
     </div>
   </div>
 

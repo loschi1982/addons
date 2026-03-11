@@ -53,14 +53,61 @@ async function doLogin() {
 
   errorEl.classList.add('hidden');
 
-  if (!username || !pin) {
-    errorEl.textContent = 'Bitte Benutzername und PIN eingeben.';
+  if (!username) {
+    errorEl.textContent = 'Bitte Benutzername eingeben.';
     errorEl.classList.remove('hidden');
     return;
   }
 
   try {
-    await auth.login(username, pin);
+    const { mustChangePin } = await auth.login(username, pin);
+    if (mustChangePin) {
+      showPinSetup();
+    } else {
+      showApp();
+    }
+  } catch (e) {
+    errorEl.textContent = e.message;
+    errorEl.classList.remove('hidden');
+  }
+}
+
+// Zeigt den PIN-Setup-Dialog (erster Login oder nach Reset).
+function showPinSetup() {
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('pin-setup-screen').classList.remove('hidden');
+
+  document.getElementById('pin-setup-btn').onclick = doPinSetup;
+  document.getElementById('pin-setup-new').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doPinSetup();
+  });
+  document.getElementById('pin-setup-confirm').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doPinSetup();
+  });
+}
+
+// Speichert den neuen PIN und öffnet die App.
+async function doPinSetup() {
+  const newPin     = document.getElementById('pin-setup-new').value.trim();
+  const confirmPin = document.getElementById('pin-setup-confirm').value.trim();
+  const errorEl    = document.getElementById('pin-setup-error');
+
+  errorEl.classList.add('hidden');
+
+  if (newPin.length !== 4 || !/^\d{4}$/.test(newPin)) {
+    errorEl.textContent = 'PIN muss genau 4 Ziffern enthalten.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  if (newPin !== confirmPin) {
+    errorEl.textContent = 'PINs stimmen nicht überein.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    await auth.changePin(newPin);
+    document.getElementById('pin-setup-screen').classList.add('hidden');
     showApp();
   } catch (e) {
     errorEl.textContent = e.message;

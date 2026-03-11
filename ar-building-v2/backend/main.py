@@ -3,7 +3,6 @@
 # und statische Dateien bereitgestellt.
 
 import os
-import random
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends, Request
@@ -14,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from backend.database import engine, Base, get_db
-from backend.auth import hash_pin
 
 # Alle Modelle importieren damit SQLAlchemy die Tabellen kennt.
 import backend.models  # noqa: F401 – Seiteneffekt: registriert alle Tabellen
@@ -46,22 +44,20 @@ async def lifespan(app: FastAPI):
     reset_admin = options.get("reset_admin", False)
 
     # Standard-Admin anlegen (erster Start) oder PIN zurücksetzen (reset_admin=true).
+    # pin_hash=None bedeutet: noch kein PIN gesetzt → Login ohne PIN-Prüfung möglich,
+    # Benutzer wird nach dem ersten Login aufgefordert einen PIN zu setzen.
     async with AsyncSession(engine) as db:
         result = await db.execute(select(User).where(User.username == "admin"))
         admin = result.scalar_one_or_none()
-        if admin is None or reset_admin:
-            initial_pin = str(random.randint(1000, 9999))
-            print(f"INFO:     *** INITIALER ADMIN-PIN: {initial_pin} — bitte sofort ändern! ***")
-            if admin is None:
-                default_admin = User(
-                    username="admin",
-                    pin_hash=hash_pin(initial_pin),
-                    role="admin",
-                )
-                db.add(default_admin)
-            else:
-                admin.pin_hash = hash_pin(initial_pin)
+        if admin is None:
+            default_admin = User(username="admin", pin_hash=None, role="admin")
+            db.add(default_admin)
             await db.commit()
+            print("INFO:     Admin-Konto angelegt. Beim ersten Login bitte einen PIN setzen.")
+        elif reset_admin:
+            admin.pin_hash = None
+            await db.commit()
+            print("INFO:     Admin-PIN zurückgesetzt. Beim nächsten Login bitte neuen PIN setzen.")
 
     yield  # Hier läuft die Anwendung.
     # Beim Stopp: Datenbankverbindung sauber schließen.

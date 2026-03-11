@@ -38,3 +38,9 @@ class LoginResponse(BaseModel):
     jwt: str
     role: str
     username: str
+    must_change_pin: bool = False
+
+
+class ChangePinRequest(BaseModel):
+    """Anfrage zum Setzen eines neuen PINs."""
+    new_pin: str = Field(min_length=4, max_length=4)

@@ -10,9 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from backend.database import get_db
-from backend.auth import verify_pin, create_jwt, require_admin
+from backend.auth import verify_pin, hash_pin, create_jwt, require_admin, bearer_scheme
 from backend.models.user import User
-from backend.schemas.user import LoginResponse
+from backend.schemas.user import LoginResponse, ChangePinRequest
 
 router = APIRouter()
 
@@ -63,8 +63,8 @@ async def login(body: dict, db: AsyncSession = Depends(get_db)):
 
     # PIN-Login: body enthält {"username": "...", "pin": "...."}
     username = body.get("username")
-    pin = body.get("pin")
-    if not username or not pin:
+    pin = body.get("pin", "")
+    if not username:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
         )
@@ -76,8 +76,20 @@ async def login(body: dict, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
 
-    # Benutzer nicht gefunden oder PIN falsch → gleicher Fehler (kein Hinweis welches stimmt).
-    if user is None or not verify_pin(pin, user.pin_hash):
+    if user is None:
+        _record_failure(username)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
+        )
+
+    # Kein PIN gesetzt (Erst-Setup): Login ohne Prüfung, muss PIN setzen.
+    if user.pin_hash is None:
+        _clear_failures(username)
+        jwt_token = create_jwt(username=user.username, role=user.role)
+        return LoginResponse(jwt=jwt_token, role=user.role, username=user.username, must_change_pin=True)
+
+    # Normaler Login: PIN prüfen.
+    if not verify_pin(pin, user.pin_hash):
         _record_failure(username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
@@ -86,6 +98,28 @@ async def login(body: dict, db: AsyncSession = Depends(get_db)):
     _clear_failures(username)
     jwt_token = create_jwt(username=user.username, role=user.role)
     return LoginResponse(jwt=jwt_token, role=user.role, username=user.username)
+
+
+@router.post("/change-pin")
+async def change_pin(
+    body: ChangePinRequest,
+    credentials=Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+):
+    """Setzt den PIN des eingeloggten Benutzers. Funktioniert auch beim Erst-Setup."""
+    from backend.auth import decode_jwt
+    payload = decode_jwt(credentials.credentials)
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    result = await db.execute(select(User).where(User.username == payload["sub"]))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.pin_hash = hash_pin(body.new_pin)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/visitor-token")
