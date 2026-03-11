@@ -46,15 +46,45 @@ EOF
 fi
 
 # Ports freigeben falls noch von vorheriger Instanz belegt.
-# Nötig bei schnellem Neustart mit host_network: true (OS-Socket noch aktiv).
-# ss gibt "pid=X" aus – wir lesen die PID und senden SIGKILL.
-for PORT in 8099 8443; do
-    PIDS=$(ss -Hlntp "sport = :${PORT}" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2)
-    for PID in $PIDS; do
-        echo "INFO: Beende alten Prozess PID ${PID} auf Port ${PORT}..."
-        kill -9 "$PID" 2>/dev/null || true
-    done
-done
+# Liest /proc/net/tcp direkt – funktioniert zuverlässig in Alpine/Busybox.
+python3 - << 'PYEOF'
+import os, time
+
+def free_port(port):
+    hex_port = format(port, '04X')
+    for netfile in ('/proc/net/tcp', '/proc/net/tcp6'):
+        try:
+            for line in open(netfile).readlines()[1:]:
+                parts = line.split()
+                if len(parts) <= 9:
+                    continue
+                local = parts[1].upper()
+                state = parts[3]
+                inode = parts[9]
+                # 0A = LISTEN; Port steht am Ende von local_address (nach ':')
+                if not local.endswith(':' + hex_port) or state != '0A':
+                    continue
+                # PID via /proc/<pid>/fd suchen
+                for pid in os.listdir('/proc'):
+                    if not pid.isdigit():
+                        continue
+                    try:
+                        for fd in os.listdir(f'/proc/{pid}/fd'):
+                            try:
+                                if f'socket:[{inode}]' in os.readlink(f'/proc/{pid}/fd/{fd}'):
+                                    print(f'INFO: Beende PID {pid} auf Port {port}')
+                                    os.kill(int(pid), 9)
+                                    time.sleep(0.3)
+                            except OSError:
+                                pass
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+
+for p in [8099, 8443]:
+    free_port(p)
+PYEOF
 
 # Uvicorn starten.
 # --workers 1 = ein Prozess (SQLite ist nicht für mehrere Prozesse geeignet).
