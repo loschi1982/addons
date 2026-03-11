@@ -216,6 +216,8 @@ async def serve_admin(request: Request):
 
     # PWA-URL für den "PWA öffnen"-Link in der Sidebar.
     pwa_url = f"{ingress_path}/" if ingress_path else f"https://{request.headers.get('host', 'localhost:8444')}/"
+    # pwaUrl: im Ingress-Modus eigene /pwa-Route, damit der Link nicht wieder zu /admin umgeleitet wird.
+    pwa_url = f"{ingress_path}/pwa" if ingress_path else f"https://{request.headers.get('host', 'localhost:8444')}/"
     html = html.replace('pwaUrl: "/"', f'pwaUrl: "{pwa_url}"')
 
     return HTMLResponse(content=html)
@@ -233,6 +235,16 @@ async def serve_frontend(request: Request):
     frontend_index = "./frontend/index.html"
     if not os.path.exists(frontend_index):
         return {"detail": "Frontend not found", "docs": "/docs"}
+    return FileResponse(frontend_index)
+
+
+@app.get("/pwa")
+async def serve_pwa():
+    """Dedizierte Route für die PWA – wird vom 'PWA öffnen'-Link im Admin-Panel genutzt.
+    Kein Ingress-Redirect hier, damit der Link immer das Frontend öffnet."""
+    frontend_index = "./frontend/index.html"
+    if not os.path.exists(frontend_index):
+        return {"detail": "Frontend not found"}
     return FileResponse(frontend_index)
 
 
