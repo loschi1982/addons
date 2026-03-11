@@ -6,157 +6,155 @@ AR Building v2 ist eine **Augmented-Reality-Führungs-App** für historische Kon
 
 Das System besteht aus drei Teilen:
 - **PWA Frontend** (Browser-App auf dem Besuchergerät)
-- **Admin-Oberfläche** (Verwaltung von Räumen, Objekten und Benutzern)
+- **Admin-Oberfläche** (Verwaltung von Räumen, Objekten und Benutzern – auch als HA-Seitenleistenpanel)
 - **Backend-API** (FastAPI, läuft als Home Assistant Add-on)
 
 ---
 
 ## 2. Installation
 
-### Schritt 1: Projektdateien bereitstellen
-
-Öffne den **Studio Code Server** in Home Assistant und stelle sicher, dass das Projektverzeichnis unter folgendem Pfad liegt:
-
-```
-/addons/ar-building-v2/
-```
-
-Falls du das Projekt per Git klonst:
-```bash
-cd /addons
-git clone <repository-url> ar-building-v2
-```
-
-### Schritt 2: Add-on in Home Assistant registrieren
+### Schritt 1: Repository in Home Assistant einbinden
 
 1. Öffne die HA-Oberfläche im Browser
 2. Gehe zu **Einstellungen → Add-ons → Add-on-Store**
 3. Klicke oben rechts auf das **Drei-Punkte-Menü (⋮)**
 4. Wähle **Eigene Repositories**
-5. Trage den Pfad `/addons` ein und bestätige
+5. Trage folgende URL ein und bestätige:
+   ```
+   https://github.com/loschi1982/addons
+   ```
 6. Lade die Add-on-Liste neu (Seite aktualisieren)
 7. Suche nach **„AR Building v2"** und klicke auf **Installieren**
 
-### Schritt 3: Add-on starten
+### Schritt 2: Add-on starten
 
-Nach der Installation klicke auf **Starten**. Das Add-on baut beim ersten Start automatisch:
-- Ein selbstsigniertes SSL-Zertifikat
-- Eine leere Datenbank
-- Eine Standard-`settings.json`
-
----
-
-## 3. Erster Aufruf
-
-### IP-Adresse des HA-Hosts ermitteln
-
-1. Gehe zu **Einstellungen → System → Netzwerk**
-2. Notiere die angezeigte IP-Adresse (z. B. `192.168.1.100`)
-
-### App im Browser öffnen
-
-```
-https://192.168.1.100:8443
-```
-
-> **Hinweis:** Ersetze `192.168.1.100` durch die tatsächliche IP-Adresse deines HA-Hosts.
-
-### SSL-Warnung bestätigen
-
-Beim ersten Aufruf zeigt der Browser eine Sicherheitswarnung, weil das Zertifikat selbstsigniert ist. Das ist **normal und erwartet**. Gehe so vor:
-
-- **Chrome/Edge**: Klicke auf „Erweitert" → „Weiter zu 192.168.1.x (unsicher)"
-- **Firefox**: Klicke auf „Risiko akzeptieren und fortfahren"
-- **Safari (iOS)**: Tippe auf „Details anzeigen" → „Diese Website trotzdem besuchen"
-
-Diese Bestätigung muss nur **einmalig pro Gerät** durchgeführt werden.
-
-### Erster Admin-Login
-
-Öffne die Admin-Oberfläche unter:
-```
-https://192.168.1.100:8443/admin
-```
-
-Melde dich mit den Standard-Zugangsdaten an:
-- **Benutzername**: `admin`
-- **PIN**: `4711`
-
-> ⚠️ **Ändere den Standard-PIN sofort nach dem ersten Login!**
-> Gehe dazu in der Admin-Oberfläche zu **Benutzer → admin → Bearbeiten**.
+Nach der Installation klicke auf **Starten**. Das Add-on richtet beim ersten Start automatisch ein:
+- Ein selbstsigniertes SSL-Zertifikat für Port 8443
+- Eine leere SQLite-Datenbank
+- Eine `settings.json` mit zufällig generiertem JWT-Secret
+- Einen Admin-Benutzer mit zufälligem 4-stelligem PIN
 
 ---
 
-## 4. Persistente Daten
+## 3. Erster Login
 
-Die folgenden Verzeichnisse und Dateien bleiben bei Add-on-Updates und Container-Neustarts **vollständig erhalten**:
+### Initialen Admin-PIN herausfinden
+
+Der PIN wird beim **allerersten Start** im Add-on-Log angezeigt. Gehe zu:
+
+**Einstellungen → Add-ons → AR Building v2 → Log**
+
+Suche nach der Zeile:
+```
+INFO: *** INITIALER ADMIN-PIN: XXXX — bitte sofort ändern! ***
+```
+
+> ⚠️ **Ändere den PIN sofort nach dem ersten Login!**
+> Admin-Oberfläche → Benutzer → admin → Bearbeiten
+
+### Admin-Oberfläche aufrufen
+
+**Option A – Seitenleiste (empfohlen):**
+Nach der Installation erscheint automatisch ein **„AR Building Admin"**-Eintrag in der HA-Seitenleiste (Zahnrad-Icon). Ein Klick darauf öffnet die Admin-UI direkt in Home Assistant.
+
+**Option B – Direkter HTTPS-Zugriff:**
+```
+https://<HA-IP>:8443/admin
+```
+Beim ersten Aufruf erscheint eine SSL-Warnung (selbstsigniertes Zertifikat – einmalig bestätigen).
+
+---
+
+## 4. PWA (Besucher-App)
+
+Die PWA läuft ausschließlich über direkten HTTPS-Zugriff:
+```
+https://<HA-IP>:8443
+```
+
+- Ersetze `<HA-IP>` durch die IP-Adresse deines Home Assistant Hosts
+- Die SSL-Warnung muss **einmalig pro Gerät** bestätigt werden
+- Die App benötigt Kamerazugriff (nur über HTTPS möglich)
+
+---
+
+## 5. Ports
+
+| Port | Protokoll | Zweck |
+|------|-----------|-------|
+| 8443 | HTTPS     | PWA (Besucher), Admin-UI (direkt) |
+| 8099 | HTTP      | HA Ingress (Seitenleiste Admin-UI) |
+
+---
+
+## 6. Persistente Daten
+
+Die folgenden Daten bleiben bei Add-on-Updates und Neustarts erhalten:
 
 | Pfad | Inhalt |
-|---|---|
-| `/data/db/ar_building.db` | SQLite-Datenbank (Räume, Objekte, Benutzer, Statistiken) |
-| `/data/uploads/` | Hochgeladene Dateien (ONNX-Modelle, Audiodateien, Videos) |
-| `/data/ssl/cert.pem` | SSL-Zertifikat |
-| `/data/ssl/key.pem` | Privater SSL-Schlüssel |
-| `/data/settings.json` | Konfiguration (HA-URL, Tokens, JWT-Secret) |
+|------|--------|
+| `/data/db/ar_building.db`   | SQLite-Datenbank (Räume, Objekte, Benutzer, Statistiken) |
+| `/data/uploads/`            | Hochgeladene Dateien (ONNX-Modelle, Audio, Video) |
+| `/data/ssl/cert.pem`        | SSL-Zertifikat |
+| `/data/ssl/key.pem`         | Privater SSL-Schlüssel |
+| `/data/settings.json`       | Konfiguration (HA-URL, Tokens, JWT-Secret) |
 
 ---
 
-## 5. Entwicklung mit Studio Code Server
+## 7. Einstellungen konfigurieren
 
-### Typischer Entwicklungs-Workflow
+Gehe in der Admin-Oberfläche zu **Einstellungen**:
 
-1. Datei im Studio Code Server bearbeiten und speichern (`Strg+S`)
-2. In der HA-Oberfläche zum Add-on navigieren
-3. Auf **Neu starten** klicken
-4. Im **Log-Tab** prüfen, ob das Add-on fehlerfrei gestartet ist
-5. Änderungen im Browser testen
-
-### API testen mit Swagger UI
-
-FastAPI stellt automatisch eine interaktive API-Dokumentation bereit:
-
-```
-https://192.168.1.100:8443/docs
-```
-
-Hier kannst du alle Endpunkte direkt im Browser ausprobieren – inklusive Login, um einen JWT-Token zu erhalten.
-
-### Logs anzeigen
-
-Gehe in der HA-Oberfläche zu **Einstellungen → Add-ons → AR Building v2 → Log**.
-Alle `bashio::log.info`-Meldungen aus `run.sh` sowie uvicorn-Ausgaben erscheinen hier in Echtzeit.
+| Einstellung | Beschreibung |
+|-------------|--------------|
+| HA URL | Home Assistant URL (z.B. `http://homeassistant:8123`) |
+| HA Token | Long-Lived Access Token für Sensordaten |
+| PlanRadar Token | API-Key für PlanRadar-Integration |
+| PlanRadar Customer-ID | Customer-ID aus dem PlanRadar-Account |
 
 ---
 
-## 6. Häufige Probleme
+## 8. API-Dokumentation
+
+FastAPI stellt automatisch eine interaktive Swagger-Dokumentation bereit:
+```
+https://<HA-IP>:8443/docs
+```
+
+Den vollständigen API-Vertrag findest du unter:
+```
+ar-building-v2/shared/api-contract.json
+```
+
+---
+
+## 9. Häufige Probleme
 
 ### SSL-Warnung erscheint immer wieder
-Die einmalige Bestätigung gilt nur für den jeweiligen Browser auf dem jeweiligen Gerät. Jedes neue Gerät muss die Warnung einmalig bestätigen.
+Die einmalige Bestätigung gilt pro Browser und Gerät. Jedes neue Gerät muss sie einmalig bestätigen.
 
-### Falsche IP-Adresse im Zertifikat
-Das Zertifikat enthält die IP-Adresse, die beim **ersten Start** des Add-ons aktiv war. Wenn sich die Host-IP geändert hat:
+### Falscher PIN nach Neuinstallation
+Der initiale PIN wird nur beim **allerersten Start** (leere Datenbank) generiert und im Log angezeigt. Nach einem Update bleibt die bestehende Datenbank mit dem gesetzten PIN erhalten.
 
-1. Lösche den Zertifikatsordner über das Studio Code Server Terminal:
-   ```bash
-   rm -rf /data/ssl/
-   ```
-2. Starte das Add-on neu – es erstellt automatisch ein neues Zertifikat mit der aktuellen IP.
-3. Bestätige die SSL-Warnung auf allen Geräten erneut.
+### Falsche IP im SSL-Zertifikat
+Das Zertifikat enthält die IP vom ersten Start. Bei IP-Änderung:
+```bash
+rm -rf /data/ssl/
+```
+Add-on neu starten → neues Zertifikat mit aktueller IP.
 
 ### Add-on startet nicht
-Prüfe das Log unter **Einstellungen → Add-ons → AR Building v2 → Log**. Häufige Ursachen:
-- Syntaxfehler in einer Python-Datei
-- Fehlende Abhängigkeiten in `requirements.txt`
-- Portkonflikt auf Port 8443 (anderer Dienst läuft bereits)
+Log prüfen: **Einstellungen → Add-ons → AR Building v2 → Log**
+Häufige Ursachen: Syntaxfehler in Python-Dateien, Portkonflikt auf 8443 oder 8099.
 
-### ONNX-Objekterkennung funktioniert nicht
-Die ONNX Runtime läuft **ausschließlich im Browser** (über CDN geladen). Sie ist **nicht** im Docker-Container installiert und wird dort auch nicht benötigt. Wenn die Erkennung nicht klappt:
-- Prüfe, ob das ONNX-Modell korrekt hochgeladen wurde (Admin → Räume → Raum bearbeiten)
-- Öffne die Browser-Entwicklerkonsole (`F12`) und prüfe auf Fehlermeldungen
-- Stelle sicher, dass der Browser WebAssembly unterstützt (alle modernen Browser tun das)
+### Admin-UI in der Seitenleiste zeigt leere Seite
+Der Ingress-Server auf Port 8099 muss laufen. Im Log nach `Starte Ingress-Server auf Port 8099` suchen. Falls nicht vorhanden, Add-on neu starten.
 
 ### Kamera wird nicht angezeigt
-Die Kamera-API (`getUserMedia`) funktioniert im Browser nur über **HTTPS**. Da das Add-on selbstsigniertes HTTPS verwendet, muss die SSL-Warnung zuvor bestätigt worden sein. Über `http://` oder nach einem verworfenen Zertifikat verweigert der Browser den Kamerazugriff.
+Die Kamera-API funktioniert nur über HTTPS. SSL-Warnung muss zuvor bestätigt worden sein.
 
-### Admin-Oberfläche zeigt leere Seite
-Prüfe, ob der Ordner `admin/` im Projektverzeichnis existiert und eine `index.html` enthält. Der Pfad im Container ist `/app/admin/index.html`.
+### ONNX-Objekterkennung funktioniert nicht
+Die ONNX Runtime läuft vollständig im Browser (WebAssembly, via CDN). Prüfe:
+- ONNX-Modell korrekt hochgeladen (Admin → Räume → Raum bearbeiten)
+- Browser-Konsole (`F12`) auf Fehlermeldungen prüfen
+- Browser unterstützt WebAssembly (alle modernen Browser)

@@ -1,11 +1,21 @@
 {
   "_comment": "Dieser Vertrag definiert alle API-Endpunkte. Alle Teams richten sich danach.",
-  "_version": "2.0.0",
-  "_base_url": "https://<host>:8443",
+  "_version": "2.1.1",
+  "_changelog": {
+    "2.1.1": "Rate Limiting (429), Upload-Validierung (413/400), Ingress-Port dokumentiert",
+    "2.1.0": "PlanRadar v2: marker_id-Logik, Journals, Attachments, Kommentare, planradar_customer_id",
+    "2.0.0": "Initiale Version"
+  },
+  "_base_url_https": "https://<host>:8443",
+  "_base_url_ingress": "/api/hassio_ingress/<token>",
+  "_ingress_port": 8099,
+  "_note": "JWT als Bearer-Token im Authorization-Header. Rollen: visitor < staff < technician < admin.",
 
   "auth": {
     "POST /api/auth/login": {
       "description": "Login mit Benutzername + PIN oder Visitor-Token",
+      "auth": "none",
+      "rate_limit": "max. 5 Fehlversuche pro Username in 60 Sekunden",
       "request": {
         "type": "object",
         "oneOf": [
@@ -27,18 +37,19 @@
         ]
       },
       "response_200": {
-        "jwt":      { "type": "string", "description": "JWT, 12h gültig" },
+        "jwt":      { "type": "string", "description": "JWT, 12h gültig (konfigurierbar)" },
         "role":     { "type": "string", "enum": ["visitor", "staff", "technician", "admin"] },
         "username": { "type": "string" }
       },
-      "response_401": { "detail": "Invalid credentials" }
+      "response_401": { "detail": "Invalid credentials" },
+      "response_429": { "detail": "Zu viele Fehlversuche. Bitte 60 Sekunden warten." }
     },
 
     "GET /api/auth/visitor-token": {
       "description": "Generiert einen neuen Visitor-QR-Token (nur Admin)",
       "auth": "Bearer JWT (role=admin)",
       "response_200": {
-        "token": { "type": "string", "example": "login:visitor-abc123" },
+        "token":      { "type": "string", "example": "login:visitor-abc123" },
         "qr_content": { "type": "string", "example": "login:visitor-abc123" }
       }
     }
@@ -48,16 +59,21 @@
     "GET /api/rooms": {
       "description": "Alle Räume auflisten",
       "auth": "Bearer JWT (any role)",
-      "response_200": {
-        "type": "array",
-        "items": { "$ref": "#/schemas/RoomSummary" }
-      }
+      "response_200": { "type": "array", "items": { "$ref": "#/schemas/RoomSummary" } }
     },
 
     "GET /api/rooms/{room_id}": {
       "description": "Einzelnen Raum mit allen Details laden",
       "auth": "Bearer JWT (any role)",
-      "response_200": { "$ref": "#/schemas/RoomDetail" }
+      "response_200": { "$ref": "#/schemas/RoomDetail" },
+      "response_404": { "detail": "Room not found" }
+    },
+
+    "GET /api/rooms/by-marker/{marker_id}": {
+      "description": "Raum per QR-Marker-ID laden (z.B. 'room:1')",
+      "auth": "Bearer JWT (any role)",
+      "response_200": { "$ref": "#/schemas/RoomDetail" },
+      "response_404": { "detail": "Room not found" }
     },
 
     "POST /api/rooms": {
@@ -71,26 +87,29 @@
       "description": "Raum bearbeiten (nur Admin)",
       "auth": "Bearer JWT (role=admin)",
       "request": { "$ref": "#/schemas/RoomCreate" },
-      "response_200": { "$ref": "#/schemas/RoomDetail" }
+      "response_200": { "$ref": "#/schemas/RoomDetail" },
+      "response_404": { "detail": "Room not found" }
     },
 
     "DELETE /api/rooms/{room_id}": {
       "description": "Raum löschen (nur Admin)",
       "auth": "Bearer JWT (role=admin)",
-      "response_204": {}
+      "response_204": {},
+      "response_404": { "detail": "Room not found" }
     },
 
     "POST /api/rooms/{room_id}/files": {
       "description": "Datei-Upload für Raum (ONNX-Modell, Audio, Video)",
       "auth": "Bearer JWT (role=admin)",
       "request": "multipart/form-data: file, file_type ('model'|'audio'|'video')",
-      "response_200": { "path": { "type": "string" } }
-    },
-
-    "GET /api/rooms/by-marker/{marker_id}": {
-      "description": "Raum per QR-Marker-ID laden (z.B. 'room:1')",
-      "auth": "Bearer JWT (any role)",
-      "response_200": { "$ref": "#/schemas/RoomDetail" }
+      "upload_limits": {
+        "model": { "extensions": [".onnx"], "max_mb": 50 },
+        "audio": { "extensions": [".mp3", ".wav", ".ogg", ".m4a"], "max_mb": 20 },
+        "video": { "extensions": [".mp4", ".webm", ".mov"], "max_mb": 200 }
+      },
+      "response_200": { "path": { "type": "string", "example": "/uploads/1/model.onnx" } },
+      "response_400": "Ungültiger Dateiname oder nicht erlaubte Dateiendung",
+      "response_413": "Datei zu groß"
     }
   },
 
@@ -98,17 +117,22 @@
     "GET /api/objects": {
       "description": "Alle Objekte/Exponate auflisten",
       "auth": "Bearer JWT (any role)",
-      "query": { "room_id": "optional int" },
-      "response_200": {
-        "type": "array",
-        "items": { "$ref": "#/schemas/ObjectSummary" }
-      }
+      "query": { "room_id": "optional int – filtert nach Raum" },
+      "response_200": { "type": "array", "items": { "$ref": "#/schemas/ObjectSummary" } }
     },
 
     "GET /api/objects/{object_id}": {
       "description": "Einzelnes Objekt mit Details",
       "auth": "Bearer JWT (any role)",
-      "response_200": { "$ref": "#/schemas/ObjectDetail" }
+      "response_200": { "$ref": "#/schemas/ObjectDetail" },
+      "response_404": { "detail": "Object not found" }
+    },
+
+    "GET /api/objects/by-marker/{marker_id}": {
+      "description": "Objekt per QR-Marker laden (z.B. 'object:42')",
+      "auth": "Bearer JWT (any role)",
+      "response_200": { "$ref": "#/schemas/ObjectDetail" },
+      "response_404": { "detail": "Object not found" }
     },
 
     "POST /api/objects": {
@@ -129,12 +153,6 @@
       "description": "Objekt löschen (nur Admin)",
       "auth": "Bearer JWT (role=admin)",
       "response_204": {}
-    },
-
-    "GET /api/objects/by-marker/{marker_id}": {
-      "description": "Objekt per QR-Marker laden (z.B. 'object:42')",
-      "auth": "Bearer JWT (any role)",
-      "response_200": { "$ref": "#/schemas/ObjectDetail" }
     }
   },
 
@@ -142,10 +160,7 @@
     "GET /api/object-types": {
       "description": "Alle konfigurierten Objekttypen",
       "auth": "Bearer JWT (any role)",
-      "response_200": {
-        "type": "array",
-        "items": { "$ref": "#/schemas/ObjectType" }
-      }
+      "response_200": { "type": "array", "items": { "$ref": "#/schemas/ObjectType" } }
     },
     "POST /api/object-types": {
       "description": "Neuen Objekttyp anlegen (nur Admin)",
@@ -170,10 +185,7 @@
     "GET /api/users": {
       "description": "Alle Benutzer (nur Admin)",
       "auth": "Bearer JWT (role=admin)",
-      "response_200": {
-        "type": "array",
-        "items": { "$ref": "#/schemas/UserSummary" }
-      }
+      "response_200": { "type": "array", "items": { "$ref": "#/schemas/UserSummary" } }
     },
     "POST /api/users": {
       "description": "Benutzer anlegen (nur Admin)",
@@ -201,9 +213,8 @@
       "request": { "$ref": "#/schemas/StatEvent" },
       "response_201": {}
     },
-
     "POST /api/stats/heartbeat": {
-      "description": "Heartbeat einer aktiven Session (alle 30s)",
+      "description": "Heartbeat einer aktiven Session (alle 30s vom Frontend)",
       "auth": "Bearer JWT (any role)",
       "request": {
         "session_id": { "type": "string" },
@@ -211,15 +222,13 @@
       },
       "response_200": {}
     },
-
     "GET /api/stats/dashboard": {
       "description": "KPI-Daten für Admin-Dashboard",
       "auth": "Bearer JWT (role=admin)",
       "response_200": { "$ref": "#/schemas/DashboardData" }
     },
-
     "GET /api/stats/live": {
-      "description": "Live-Daten: aktive Sessions + aktive Räume",
+      "description": "Live-Daten: aktive Sessions + aktive Räume (90s-Fenster)",
       "auth": "Bearer JWT (role=admin)",
       "response_200": { "$ref": "#/schemas/LiveData" }
     }
@@ -241,70 +250,169 @@
 
   "ha_sensors": {
     "GET /api/ha/sensors": {
-      "description": "Verfügbare HA-Sensoren abrufen",
+      "description": "Alle HA-Sensoren abrufen (Proxy zu HA-API, nur sensor.*-Entitäten)",
       "auth": "Bearer JWT (any role)",
-      "response_200": {
-        "type": "array",
-        "items": { "$ref": "#/schemas/HASensor" }
-      }
+      "response_200": { "type": "array", "items": { "$ref": "#/schemas/HASensor" } },
+      "response_503": "Home Assistant nicht konfiguriert oder nicht erreichbar"
     },
     "GET /api/ha/sensors/{entity_id}": {
-      "description": "Einzelnen HA-Sensor-Wert abrufen",
+      "description": "Einzelnen HA-Sensor abrufen (entity_id z.B. 'sensor.temperature_foyer')",
       "auth": "Bearer JWT (any role)",
-      "response_200": { "$ref": "#/schemas/HASensor" }
+      "response_200": { "$ref": "#/schemas/HASensor" },
+      "response_404": { "detail": "Sensor not found" }
     }
   },
 
   "planradar": {
-    "GET /api/planradar/tickets": {
-      "description": "PlanRadar-Tickets für ein Objekt/Raum laden",
-      "auth": "Bearer JWT (role=staff|technician|admin)",
-      "query": {
-        "room_id":   "optional int",
-        "object_id": "optional int"
-      },
+    "_note": "Alle Proxy-Endpunkte erfordern planradar_token + planradar_customer_id in /api/settings.",
+
+    "GET /api/planradar/projects": {
+      "description": "Alle PlanRadar-Projekte abrufen",
+      "auth": "Bearer JWT (role=admin)",
+      "response_200": { "type": "array", "items": { "$ref": "#/schemas/PlanRadarProject" } }
+    },
+
+    "GET /api/planradar/projects/{project_id}/list-fields": {
+      "description": "Listenfelder eines Projekts – liefert field_key (typed-values-Key), list_id, field_label",
+      "auth": "Bearer JWT (role=admin)",
       "response_200": {
         "type": "array",
-        "items": { "$ref": "#/schemas/PlanRadarTicket" }
+        "items": {
+          "field_key":   { "type": "string", "example": "tf37e04757dabbca63" },
+          "list_id":     { "type": "string" },
+          "field_label": { "type": "string" }
+        }
       }
     },
-    "PUT /api/planradar/tickets/{ticket_id}/status": {
-      "description": "Ticketstatus setzen",
-      "auth": "Bearer JWT (role=technician|admin)",
-      "request": {
-        "status": { "type": "string", "enum": ["in_progress", "done", "closed"] }
+
+    "GET /api/planradar/lists": {
+      "description": "Custom-Listen eines Projekts",
+      "auth": "Bearer JWT (role=admin)",
+      "query": { "project_id": "optional string" },
+      "response_200": { "type": "array", "items": { "$ref": "#/schemas/PlanRadarList" } }
+    },
+
+    "GET /api/planradar/lists/{list_id}/entries": {
+      "description": "Einträge einer PlanRadar-Liste (z.B. einzelne Räume oder Anlagen)",
+      "auth": "Bearer JWT (role=admin)",
+      "response_200": { "type": "array", "items": { "$ref": "#/schemas/PlanRadarListEntry" } }
+    },
+
+    "GET /api/planradar/project-roles": {
+      "description": "Rollenzuordnungen für PlanRadar-Projekte laden",
+      "auth": "Bearer JWT (role=admin)",
+      "response_200": { "type": "array", "items": { "$ref": "#/schemas/PlanRadarProjectRole" } }
+    },
+
+    "PUT /api/planradar/project-roles": {
+      "description": "Rollenzuordnungen speichern (Upsert per project_id)",
+      "auth": "Bearer JWT (role=admin)",
+      "request": { "type": "array", "items": { "$ref": "#/schemas/PlanRadarProjectRole" } },
+      "response_200": { "type": "array", "items": { "$ref": "#/schemas/PlanRadarProjectRole" } }
+    },
+
+    "GET /api/planradar/mappings": {
+      "description": "Alle gespeicherten Marker-Mappings laden (AR-Marker ↔ PlanRadar-Eintrag)",
+      "auth": "Bearer JWT (role=admin)",
+      "response_200": { "type": "array", "items": { "$ref": "#/schemas/PlanRadarMapping" } }
+    },
+
+    "POST /api/planradar/mappings": {
+      "description": "Marker-Mapping anlegen oder aktualisieren (Upsert per ar_marker_id)",
+      "auth": "Bearer JWT (role=admin)",
+      "request": { "$ref": "#/schemas/PlanRadarMappingCreate" },
+      "response_201": { "$ref": "#/schemas/PlanRadarMapping" }
+    },
+
+    "DELETE /api/planradar/mappings/{mapping_id}": {
+      "description": "Marker-Mapping löschen",
+      "auth": "Bearer JWT (role=admin)",
+      "response_204": {},
+      "response_404": { "detail": "Mapping not found" }
+    },
+
+    "GET /api/planradar/tickets": {
+      "description": "PlanRadar-Tickets laden. Bei marker_id: Mapping nachschlagen + Rollencheck + Listeneintrag-Filter. Bei room_id/object_id: Legacy-Logik.",
+      "auth": "Bearer JWT (role=staff|technician|admin)",
+      "query": {
+        "marker_id": "optional string – bevorzugte Methode (v2.1.0+)",
+        "room_id":   "optional int – Legacy",
+        "object_id": "optional int – Legacy"
       },
-      "response_200": { "$ref": "#/schemas/PlanRadarTicket" }
+      "response_200": { "type": "array", "items": { "$ref": "#/schemas/PlanRadarTicket" } }
+    },
+
+    "PUT /api/planradar/tickets/{ticket_id}/status": {
+      "description": "Ticketstatus setzen. project_id aus Query-Parameter oder In-Memory-Cache.",
+      "auth": "Bearer JWT (role=technician|admin)",
+      "query": { "project_id": "optional string" },
+      "request": {
+        "status": { "type": "string", "enum": ["open", "in_progress", "resolved", "feedback", "closed", "rejected"] }
+      },
+      "response_200": { "$ref": "#/schemas/PlanRadarTicket" },
+      "response_400": "Ungültiger Status oder project_id unbekannt"
+    },
+
+    "GET /api/planradar/tickets/{ticket_id}/journals": {
+      "description": "Journals (Kommentare, Medien, Änderungshistorie) eines Tickets",
+      "auth": "Bearer JWT (role=staff|technician|admin)",
+      "query": {
+        "project_id": "optional string",
+        "filter": "optional string – 1=Kommentare, 2=Medien, 3=Änderungshistorie"
+      },
+      "response_200": { "type": "array", "items": { "$ref": "#/schemas/PlanRadarJournal" } }
+    },
+
+    "GET /api/planradar/tickets/{ticket_id}/attachments": {
+      "description": "Attachments (Bilder, Dokumente, Audio, Video) eines Tickets",
+      "auth": "Bearer JWT (role=staff|technician|admin)",
+      "query": {
+        "project_id": "optional string",
+        "types": "optional string – kommagetrennt: images,audios,videos,documents"
+      },
+      "response_200": { "type": "array", "items": { "$ref": "#/schemas/PlanRadarAttachment" } }
+    },
+
+    "POST /api/planradar/tickets/{ticket_id}/comment": {
+      "description": "Kommentar zu einem Ticket hinzufügen (via Ticket-PUT mit notes-Feld)",
+      "auth": "Bearer JWT (role=staff|technician|admin)",
+      "query": { "project_id": "optional string" },
+      "request": { "comment": { "type": "string" } },
+      "response_201": { "$ref": "#/schemas/PlanRadarTicket" },
+      "response_400": "Kommentartext fehlt oder project_id unbekannt"
     }
   },
 
   "static": {
-    "GET /":         "frontend/index.html (PWA)",
-    "GET /admin":    "admin/index.html (Admin-UI, FileResponse)",
-    "GET /assets/*": "Statische Dateien (JS, CSS, Bilder)",
-    "GET /uploads/{room_id}/{filename}": "Hochgeladene Raumdateien (ONNX, Audio, Video)"
+    "GET /":                             "frontend/index.html (PWA)",
+    "GET /admin":                        "admin/index.html (Admin-UI, dynamisch – injiziert X-Ingress-Path als apiBase)",
+    "GET /uploads/{room_id}/{filename}": "Hochgeladene Raumdateien (ONNX, Audio, Video)",
+    "GET /assets/*":                     "Frontend-Assets (Bilder, SVG)",
+    "GET /css/*":                        "Frontend-CSS",
+    "GET /js/*":                         "Frontend-JS",
+    "GET /admin-static/*":              "Admin-UI-Assets (CSS, JS)"
   },
 
   "schemas": {
     "RoomSummary": {
-      "id":          { "type": "integer" },
-      "name":        { "type": "string" },
-      "marker_id":   { "type": "string", "example": "room:1" },
-      "short_desc":  { "type": "string" }
+      "id":         { "type": "integer" },
+      "name":       { "type": "string" },
+      "marker_id":  { "type": "string", "example": "room:1" },
+      "short_desc": { "type": "string" }
     },
 
     "RoomDetail": {
-      "id":                { "type": "integer" },
-      "name":              { "type": "string" },
-      "marker_id":         { "type": "string" },
-      "short_desc":        { "type": "string" },
-      "detail_text":       { "type": "string", "description": "HTML vom WYSIWYG-Editor" },
-      "model_path":        { "type": "string", "nullable": true },
-      "audio_path":        { "type": "string", "nullable": true },
-      "video_path":        { "type": "string", "nullable": true },
-      "video_opacity":     { "type": "number", "minimum": 0, "maximum": 1 },
-      "ha_sensor_ids":     { "type": "array", "items": { "type": "string" } },
-      "objects":           { "type": "array", "items": { "$ref": "#/schemas/ObjectSummary" } }
+      "id":            { "type": "integer" },
+      "name":          { "type": "string" },
+      "marker_id":     { "type": "string" },
+      "short_desc":    { "type": "string" },
+      "detail_text":   { "type": "string", "description": "HTML vom WYSIWYG-Editor" },
+      "model_path":    { "type": "string", "nullable": true },
+      "audio_path":    { "type": "string", "nullable": true },
+      "video_path":    { "type": "string", "nullable": true },
+      "video_opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+      "ha_sensor_ids": { "type": "array", "items": { "type": "string" } },
+      "objects":       { "type": "array", "items": { "$ref": "#/schemas/ObjectSummary" } }
     },
 
     "RoomCreate": {
@@ -317,13 +425,13 @@
     },
 
     "ObjectSummary": {
-      "id":          { "type": "integer" },
-      "name":        { "type": "string" },
-      "marker_id":   { "type": "string", "example": "object:42" },
-      "short_desc":  { "type": "string" },
-      "type_id":     { "type": "integer" },
-      "type_name":   { "type": "string" },
-      "room_id":     { "type": "integer" }
+      "id":         { "type": "integer" },
+      "name":       { "type": "string" },
+      "marker_id":  { "type": "string", "example": "object:42" },
+      "short_desc": { "type": "string" },
+      "type_id":    { "type": "integer" },
+      "type_name":  { "type": "string" },
+      "room_id":    { "type": "integer" }
     },
 
     "ObjectDetail": {
@@ -357,14 +465,14 @@
     },
 
     "ObjectType": {
-      "id":              { "type": "integer" },
-      "name":            { "type": "string", "example": "Exponat" },
+      "id":               { "type": "integer" },
+      "name":             { "type": "string", "example": "Exponat" },
       "visible_to_roles": { "type": "array", "items": { "type": "string", "enum": ["visitor","staff","technician","admin"] } }
     },
 
     "ObjectTypeCreate": {
-      "name":              { "type": "string" },
-      "visible_to_roles":  { "type": "array", "items": { "type": "string" } }
+      "name":             { "type": "string" },
+      "visible_to_roles": { "type": "array", "items": { "type": "string" } }
     },
 
     "UserSummary": {
@@ -380,58 +488,117 @@
     },
 
     "StatEvent": {
-      "event_type":  { "type": "string", "enum": ["login_pin","login_visitor","login_failed","room_scan","object_detected","detail_opened","session_end"] },
-      "session_id":  { "type": "string" },
-      "role":        { "type": "string", "nullable": true },
-      "room_id":     { "type": "integer", "nullable": true },
-      "object_id":   { "type": "integer", "nullable": true },
-      "timestamp":   { "type": "string", "format": "datetime" }
+      "event_type": { "type": "string", "enum": ["login_pin","login_visitor","login_failed","room_scan","object_detected","detail_opened","session_end"] },
+      "session_id": { "type": "string" },
+      "role":       { "type": "string", "nullable": true },
+      "room_id":    { "type": "integer", "nullable": true },
+      "object_id":  { "type": "integer", "nullable": true },
+      "timestamp":  { "type": "string", "format": "datetime" }
     },
 
     "DashboardData": {
-      "total_sessions_today":   { "type": "integer" },
-      "total_room_scans_today": { "type": "integer" },
+      "total_sessions_today":     { "type": "integer" },
+      "total_room_scans_today":   { "type": "integer" },
       "total_object_scans_today": { "type": "integer" },
-      "active_sessions_now":    { "type": "integer" },
-      "login_breakdown":        { "description": "{'pin': N, 'visitor': N, 'failed': N}" },
-      "hourly_events":          { "type": "array", "description": "[{hour, count}]" },
-      "top_rooms":              { "type": "array", "description": "[{room_id, name, scans}]" },
-      "top_objects":            { "type": "array", "description": "[{object_id, name, detections}]" }
+      "active_sessions_now":      { "type": "integer" },
+      "login_breakdown":          { "description": "{ pin: N, visitor: N, failed: N }" },
+      "hourly_events":            { "type": "array", "description": "[{ hour, count }]" },
+      "top_rooms":                { "type": "array", "description": "[{ room_id, name, scans }]" },
+      "top_objects":              { "type": "array", "description": "[{ object_id, name, detections }]" }
     },
 
     "LiveData": {
-      "active_sessions": {
-        "type": "object",
-        "description": "{'visitor': N, 'staff': N, 'technician': N, 'admin': N}"
-      },
-      "active_rooms": {
-        "type": "array",
-        "items": { "description": "{'room_id': int, 'room_name': str, 'visitor_count': int}" }
-      }
+      "active_sessions": { "type": "object", "description": "{ visitor: N, staff: N, technician: N, admin: N }" },
+      "active_rooms":    { "type": "array",  "description": "[{ room_id, room_name, visitor_count }]" }
     },
 
     "Settings": {
-      "ha_url":           { "type": "string" },
-      "ha_token":         { "type": "string" },
-      "planradar_token":  { "type": "string" },
-      "jwt_secret":       { "type": "string" },
-      "jwt_expire_hours": { "type": "integer", "default": 12 }
+      "ha_url":                 { "type": "string", "description": "Home Assistant URL, z.B. http://homeassistant:8123" },
+      "ha_token":               { "type": "string", "description": "HA Long-Lived Access Token" },
+      "planradar_token":        { "type": "string", "description": "PlanRadar API-Key" },
+      "planradar_customer_id":  { "type": "string", "description": "PlanRadar Customer-ID (seit v2.1.0)" },
+      "jwt_secret":             { "type": "string", "description": "JWT-Signierungsschlüssel (auto-generiert)" },
+      "jwt_expire_hours":       { "type": "integer", "default": 12 }
     },
 
     "HASensor": {
-      "entity_id":   { "type": "string", "example": "sensor.temperature_foyer" },
-      "state":       { "type": "string" },
-      "unit":        { "type": "string", "nullable": true },
+      "entity_id":    { "type": "string", "example": "sensor.temperature_foyer" },
+      "state":        { "type": "string" },
+      "unit":         { "type": "string", "nullable": true },
       "friendly_name": { "type": "string" }
+    },
+
+    "PlanRadarProject": {
+      "id":     { "type": "string" },
+      "name":   { "type": "string" },
+      "active": { "type": "boolean" }
+    },
+
+    "PlanRadarList": {
+      "id":   { "type": "string" },
+      "name": { "type": "string" }
+    },
+
+    "PlanRadarListEntry": {
+      "uuid": { "type": "string" },
+      "name": { "type": "string" }
+    },
+
+    "PlanRadarProjectRole": {
+      "project_id":        { "type": "string" },
+      "visible_to_roles":  { "type": "array", "items": { "type": "string", "enum": ["visitor","staff","technician","admin"] } }
+    },
+
+    "PlanRadarMappingCreate": {
+      "planradar_project_id":  { "type": "string" },
+      "planradar_list_id":     { "type": "string", "nullable": true },
+      "planradar_entry_uuid":  { "type": "string", "nullable": true },
+      "planradar_entry_name":  { "type": "string", "nullable": true },
+      "ar_marker_id":          { "type": "string", "example": "room:1" },
+      "visible_to_roles":      { "type": "array", "items": { "type": "string" } }
+    },
+
+    "PlanRadarMapping": {
+      "id":                    { "type": "integer" },
+      "planradar_project_id":  { "type": "string" },
+      "planradar_list_id":     { "type": "string", "nullable": true },
+      "planradar_entry_uuid":  { "type": "string", "nullable": true },
+      "planradar_entry_name":  { "type": "string", "nullable": true },
+      "ar_marker_id":          { "type": "string" },
+      "visible_to_roles":      { "type": "array", "items": { "type": "string" } }
     },
 
     "PlanRadarTicket": {
       "id":          { "type": "string" },
       "title":       { "type": "string" },
       "description": { "type": "string" },
-      "status":      { "type": "string" },
+      "status":      { "type": "string", "enum": ["open", "in_progress", "resolved", "feedback", "closed", "rejected"] },
+      "priority":    { "type": "string", "enum": ["low", "normal", "high"] },
+      "progress":    { "type": "integer", "nullable": true, "description": "0–100" },
+      "due_date":    { "type": "string", "nullable": true, "format": "date" },
       "created_at":  { "type": "string", "format": "datetime" },
-      "assignee":    { "type": "string", "nullable": true }
+      "updated_at":  { "type": "string", "nullable": true, "format": "datetime" },
+      "closed_at":   { "type": "string", "nullable": true, "format": "datetime" },
+      "assignee":    { "type": "string", "nullable": true },
+      "author":      { "type": "string", "nullable": true },
+      "project_id":  { "type": "string" }
+    },
+
+    "PlanRadarJournal": {
+      "id":         { "type": "string" },
+      "type":       { "type": "integer", "description": "1=Kommentar, 2=Medien, 3=Statusänderung" },
+      "text":       { "type": "string" },
+      "author":     { "type": "string" },
+      "created_at": { "type": "string", "format": "datetime" }
+    },
+
+    "PlanRadarAttachment": {
+      "id":         { "type": "string" },
+      "type":       { "type": "string" },
+      "filename":   { "type": "string" },
+      "url":        { "type": "string" },
+      "caption":    { "type": "string" },
+      "created_at": { "type": "string", "format": "datetime" }
     }
   }
 }
