@@ -69,18 +69,15 @@
       }, 0);
     }
 
-    // Position: rechts neben der Bounding-Box.
-    // KEIN window.scrollX/Y – die App scrollt nicht.
-    var left = canvasRect.left + box.x + box.w + 8;
-    var top  = canvasRect.top  + box.y;
+    // Position: zentriert über dem QR-Code.
+    // transform: translate(-50%, -50%) zentriert das Overlay am Mittelpunkt des Codes.
+    var cx = canvasRect.left + box.x + box.w / 2;
+    var cy = canvasRect.top  + box.y + box.h / 2;
 
-    if (left + 188 > window.innerWidth)  left = canvasRect.left + box.x - 188;
-    if (top  + 80  > window.innerHeight) top  = window.innerHeight - 90;
-    if (top < 4) top = 4;
-
-    el.style.left     = left + 'px';
-    el.style.top      = top  + 'px';
-    el.style.position = 'absolute';
+    el.style.left      = cx + 'px';
+    el.style.top       = cy + 'px';
+    el.style.position  = 'absolute';
+    el.style.transform = 'translate(-50%, -50%)';
   }
 
   // Entfernt Overlays deren Objekt-ID nicht mehr in activeIds ist.
