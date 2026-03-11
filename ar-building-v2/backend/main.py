@@ -138,16 +138,16 @@ async def serve_admin(request: Request):
         base_tag = f'<base href="{ingress_path}/">'
         api_base = ingress_path
     else:
-        # Direktzugriff über HTTPS: volle URL mit Port 8443.
-        host = request.headers.get("host", "localhost").split(":")[0]
+        # Direktzugriff über HTTPS: host-Header enthält bereits Host:Port.
+        host = request.headers.get("host", "localhost:8444")
         base_tag = ""
-        api_base = f"https://{host}:8443"
+        api_base = f"https://{host}"
 
     if base_tag:
         html = html.replace("<head>", f"<head>\n  {base_tag}", 1)
 
     html = html.replace(
-        "apiBase: `https://${window.location.hostname}:8443`",
+        "apiBase: window.location.origin",
         f'apiBase: "{api_base}"',
     )
     return HTMLResponse(content=html)

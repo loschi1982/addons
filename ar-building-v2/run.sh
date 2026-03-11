@@ -45,12 +45,18 @@ if [ ! -f /data/settings.json ]; then
 EOF
 fi
 
+# HTTPS-Port aus Add-on-Optionen lesen (Standard: 8444).
+# HA schreibt die Optionen nach /data/options.json.
+HTTPS_PORT=$(python3 -c "import json; d=json.load(open('/data/options.json')); print(d.get('https_port', 8444))" 2>/dev/null || echo 8444)
+echo "INFO: HTTPS-Port: ${HTTPS_PORT}"
+
 # Ports freigeben und auf echte Verfügbarkeit warten.
 # Strategie: Bind-Test in Schleife – erst wenn der Bind klappt, ist der Port wirklich frei.
 # Das fängt auch Fälle ab, bei denen der Vorprozess in einem anderen PID-Namespace
 # läuft und über /proc nicht sichtbar ist (passiert bei --workers mit HA-Restart).
-python3 - << 'PYEOF'
+python3 - << PYEOF
 import os, socket, time
+HTTPS_PORT = ${HTTPS_PORT}
 
 STATE_NAMES = {
     '01': 'ESTABLISHED', '02': 'SYN_SENT', '03': 'SYN_RECV', '04': 'FIN_WAIT1',
@@ -149,7 +155,7 @@ def ensure_port_free(port, timeout=20):
 
     print(f'WARNUNG: Port {port} nach {timeout}s nicht freigegeben – starte trotzdem.')
 
-for p in [8099, 8443]:
+for p in [8099, HTTPS_PORT]:
     ensure_port_free(p)
 PYEOF
 
@@ -166,11 +172,11 @@ python3 -m uvicorn backend.main:app \
     --host 0.0.0.0 \
     --port 8099 &
 
-# HTTPS-Server auf Port 8443 für direkten Zugriff (PWA + Admin).
+# HTTPS-Server auf konfiguriertem Port für direkten Zugriff (PWA + Admin).
 # exec ersetzt den Shell-Prozess – uvicorn wird PID 1 und empfängt SIGTERM korrekt.
-echo "INFO: Starte HTTPS-Server auf Port 8443..."
+echo "INFO: Starte HTTPS-Server auf Port ${HTTPS_PORT}..."
 exec python3 -m uvicorn backend.main:app \
     --host 0.0.0.0 \
-    --port 8443 \
+    --port ${HTTPS_PORT} \
     --ssl-keyfile /data/ssl/key.pem \
     --ssl-certfile /data/ssl/cert.pem

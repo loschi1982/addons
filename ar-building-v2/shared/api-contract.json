@@ -1,12 +1,13 @@
 {
   "_comment": "Dieser Vertrag definiert alle API-Endpunkte. Alle Teams richten sich danach.",
-  "_version": "2.1.1",
+  "_version": "2.1.2",
   "_changelog": {
+    "2.1.2": "HTTPS-Port konfigurierbar (Standard 8444), apiBase nutzt window.location.origin",
     "2.1.1": "Rate Limiting (429), Upload-Validierung (413/400), Ingress-Port dokumentiert",
     "2.1.0": "PlanRadar v2: marker_id-Logik, Journals, Attachments, Kommentare, planradar_customer_id",
     "2.0.0": "Initiale Version"
   },
-  "_base_url_https": "https://<host>:8443",
+  "_base_url_https": "https://<host>:<https_port> (Standard 8444, konfigurierbar)",
   "_base_url_ingress": "/api/hassio_ingress/<token>",
   "_ingress_port": 8099,
   "_note": "JWT als Bearer-Token im Authorization-Header. Rollen: visitor < staff < technician < admin.",

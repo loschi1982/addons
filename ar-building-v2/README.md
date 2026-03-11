@@ -29,10 +29,12 @@ Das System besteht aus drei Teilen:
 ### Schritt 2: Add-on starten
 
 Nach der Installation klicke auf **Starten**. Das Add-on richtet beim ersten Start automatisch ein:
-- Ein selbstsigniertes SSL-Zertifikat für Port 8443
+- Ein selbstsigniertes SSL-Zertifikat für den konfigurierten HTTPS-Port
 - Eine leere SQLite-Datenbank
 - Eine `settings.json` mit zufällig generiertem JWT-Secret
 - Einen Admin-Benutzer mit zufälligem 4-stelligem PIN
+
+> **Hinweis:** Der Standard-HTTPS-Port ist **8444**. Falls dieser Port auf deinem System bereits belegt ist (z.B. durch ein anderes Add-on), kannst du ihn unter **Einstellungen → Add-ons → AR Building v2 → Konfiguration** anpassen.
 
 ---
 
@@ -59,8 +61,9 @@ Nach der Installation erscheint automatisch ein **„AR Building Admin"**-Eintra
 
 **Option B – Direkter HTTPS-Zugriff:**
 ```
-https://<HA-IP>:8443/admin
+https://<HA-IP>:8444/admin
 ```
+(Port 8444 ist der Standard – ggf. angepassten Port verwenden)
 Beim ersten Aufruf erscheint eine SSL-Warnung (selbstsigniertes Zertifikat – einmalig bestätigen).
 
 ---
@@ -69,8 +72,9 @@ Beim ersten Aufruf erscheint eine SSL-Warnung (selbstsigniertes Zertifikat – e
 
 Die PWA läuft ausschließlich über direkten HTTPS-Zugriff:
 ```
-https://<HA-IP>:8443
+https://<HA-IP>:8444
 ```
+(Standard-Port – ggf. angepassten Port verwenden)
 
 - Ersetze `<HA-IP>` durch die IP-Adresse deines Home Assistant Hosts
 - Die SSL-Warnung muss **einmalig pro Gerät** bestätigt werden
@@ -82,8 +86,10 @@ https://<HA-IP>:8443
 
 | Port | Protokoll | Zweck |
 |------|-----------|-------|
-| 8443 | HTTPS     | PWA (Besucher), Admin-UI (direkt) |
+| 8444 | HTTPS     | PWA (Besucher), Admin-UI (direkt) – konfigurierbar |
 | 8099 | HTTP      | HA Ingress (Seitenleiste Admin-UI) |
+
+Der HTTPS-Port ist unter **Einstellungen → Add-ons → AR Building v2 → Konfiguration** anpassbar (Standard: 8444).
 
 ---
 
@@ -118,7 +124,7 @@ Gehe in der Admin-Oberfläche zu **Einstellungen**:
 
 FastAPI stellt automatisch eine interaktive Swagger-Dokumentation bereit:
 ```
-https://<HA-IP>:8443/docs
+https://<HA-IP>:8444/docs
 ```
 
 Den vollständigen API-Vertrag findest du unter:
@@ -145,7 +151,7 @@ Add-on neu starten → neues Zertifikat mit aktueller IP.
 
 ### Add-on startet nicht
 Log prüfen: **Einstellungen → Add-ons → AR Building v2 → Log**
-Häufige Ursachen: Syntaxfehler in Python-Dateien, Portkonflikt auf 8443 oder 8099.
+Häufige Ursachen: Syntaxfehler in Python-Dateien, Portkonflikt auf dem konfigurierten HTTPS-Port oder 8099.
 
 ### Admin-UI in der Seitenleiste zeigt leere Seite
 Der Ingress-Server auf Port 8099 muss laufen. Im Log nach `Starte Ingress-Server auf Port 8099` suchen. Falls nicht vorhanden, Add-on neu starten.

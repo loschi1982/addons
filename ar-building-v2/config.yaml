@@ -1,5 +1,5 @@
 name: AR Building v2
-version: "1.0.67"
+version: "1.0.68"
 slug: ar_building_v3
 description: AR-Guided Tour PWA für historische Konzerthäuser
 arch:
@@ -13,8 +13,10 @@ ingress: true
 ingress_port: 8099
 panel_icon: mdi:cog-outline
 panel_title: AR Building Admin
-options: {}
-schema: {}
+options:
+  https_port: 8444
+schema:
+  https_port: port
 dns:
   - 8.8.8.8
   - 1.1.1.1
