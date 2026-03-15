@@ -97,7 +97,7 @@ def get_template_for_kg(kg: str) -> dict | None:
         "kg": kg,
         "label": info["label"],
         "gewerk": info["gewerk"],
-        "items": VDMA_CHECKLISTS.get(kg, []),
+        "checklist": VDMA_CHECKLISTS.get(kg, []),
     }
 
 

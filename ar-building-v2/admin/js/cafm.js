@@ -7,8 +7,9 @@
 import * as api from './api.js';
 import { openModal, closeModal, showConfirm } from './admin-app.js';
 
-// Cache für Objekte und VDMA-Vorlagen.
+// Cache für Objekte, Räume und VDMA-Vorlagen.
 let objectsCache = [];
+let roomsCache = [];
 let vdmaTemplates = [];
 let plantsCache = [];
 
@@ -20,6 +21,7 @@ export async function loadCafm() {
   setupCafmTabs();
   await Promise.all([
     loadObjectsCache(),
+    loadRoomsCache(),
     loadVDMATemplates(),
   ]);
   await loadPlants();
@@ -59,6 +61,23 @@ async function loadObjectsCache() {
   }
 }
 
+async function loadRoomsCache() {
+  try {
+    roomsCache = await api.getRooms();
+  } catch (e) {
+    console.error('Räume laden fehlgeschlagen:', e.message);
+    roomsCache = [];
+  }
+}
+
+// Raum-Name für ein Objekt ermitteln.
+function getRoomNameForObject(objectId) {
+  const obj = objectsCache.find(o => o.id === objectId);
+  if (!obj) return '';
+  const room = roomsCache.find(r => r.id === obj.room_id);
+  return room ? room.name : '';
+}
+
 async function loadVDMATemplates() {
   try {
     vdmaTemplates = await api.getVDMATemplates();
@@ -72,6 +91,8 @@ async function loadVDMATemplates() {
 // ANLAGEN-TAB
 // ====================================================
 
+let overviewMode = 'gantt';
+
 async function loadPlants() {
   try {
     plantsCache = await api.getPlants();
@@ -80,8 +101,10 @@ async function loadPlants() {
     plantsCache = [];
   }
   renderPlantsTable();
+  renderOverview();
   renderSchedulesTable();
   renderLogsTable();
+  setupOverviewToggle();
 }
 
 function renderPlantsTable() {
@@ -331,6 +354,22 @@ export function openNewPlantModal() {
 
   openModal('Neue Anlage', html);
   setupPlantFormEvents();
+
+  // Standort-Detail aus dem Raum des gewählten Objekts vorbelegen.
+  const objectSelect = document.getElementById('pf-object-id');
+  const standortInput = document.getElementById('pf-standort');
+  function prefillStandort() {
+    const oid = parseInt(objectSelect.value);
+    const roomName = getRoomNameForObject(oid);
+    if (roomName && !standortInput.value) {
+      standortInput.value = roomName;
+    }
+  }
+  objectSelect.addEventListener('change', () => {
+    standortInput.value = '';
+    prefillStandort();
+  });
+  prefillStandort();
 
   document.getElementById('plant-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -725,6 +764,211 @@ window._cafmDeleteSchedule = (scheduleId) => {
     await loadPlants();
   });
 };
+
+// ====================================================
+// WARTUNGSÜBERSICHT (GANTT / TABELLE)
+// ====================================================
+
+let overviewToggleReady = false;
+
+function setupOverviewToggle() {
+  if (overviewToggleReady) return;
+  overviewToggleReady = true;
+
+  document.querySelectorAll('.overview-mode').forEach(btn => {
+    btn.addEventListener('click', () => {
+      overviewMode = btn.dataset.mode;
+      document.querySelectorAll('.overview-mode').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderOverview();
+    });
+  });
+}
+
+function renderOverview() {
+  const container = document.getElementById('cafm-overview-content');
+  if (!container) return;
+
+  // Alle Wartungspläne sammeln.
+  const allSchedules = [];
+  for (const p of plantsCache) {
+    const obj = objectsCache.find(o => o.id === p.object_id);
+    for (const s of (p.schedules || [])) {
+      allSchedules.push({
+        ...s,
+        plantName: obj ? obj.name : `Objekt #${p.object_id}`,
+        objectId: p.object_id,
+        din276_kg: p.din276_kg,
+      });
+    }
+  }
+
+  if (allSchedules.length === 0) {
+    container.innerHTML = '<p class="muted" style="font-size:13px;">Keine Wartungspläne vorhanden.</p>';
+    return;
+  }
+
+  allSchedules.sort((a, b) => a.next_due.localeCompare(b.next_due));
+
+  if (overviewMode === 'table') {
+    renderOverviewTable(container, allSchedules);
+  } else {
+    renderOverviewGantt(container, allSchedules);
+  }
+}
+
+function renderOverviewTable(container, schedules) {
+  const today = new Date().toISOString().slice(0, 10);
+  let html = `
+    <div class="table-wrap">
+      <table id="cafm-overview-table">
+        <thead>
+          <tr>
+            <th>Anlage</th><th>KG</th><th>Wartung</th><th>Intervall</th>
+            <th>Letzte Wartung</th><th>Nächste Fälligkeit</th><th>Tage</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+  for (const s of schedules) {
+    const overdue = s.active && s.next_due <= today;
+    const days = s.days_until_due ?? 0;
+    const statusBadge = !s.active
+      ? '<span class="badge badge-gray">Inaktiv</span>'
+      : overdue
+        ? '<span class="badge badge-red">Überfällig</span>'
+        : days <= 30
+          ? '<span class="badge badge-yellow">Bald fällig</span>'
+          : '<span class="badge badge-green">OK</span>';
+
+    html += `
+      <tr>
+        <td>${esc(s.plantName)}</td>
+        <td>${esc(s.din276_kg || '–')}</td>
+        <td>${esc(s.title)}</td>
+        <td>${s.interval_months} Mon.</td>
+        <td>${s.last_completed ? fmtDE(s.last_completed) : '–'}</td>
+        <td style="${overdue ? 'color:#c0392b;font-weight:bold;' : ''}">${fmtDE(s.next_due)}</td>
+        <td style="${overdue ? 'color:#c0392b;font-weight:bold;' : days <= 30 ? 'color:#f0a500;' : ''}">${days}</td>
+        <td>${statusBadge}</td>
+      </tr>`;
+  }
+
+  html += '</tbody></table></div>';
+  container.innerHTML = html;
+}
+
+function renderOverviewGantt(container, schedules) {
+  const today = new Date();
+  const todayISO = today.toISOString().slice(0, 10);
+
+  // Zeitraum: 2 Monate zurück bis 12 Monate voraus.
+  const startDate = new Date(today);
+  startDate.setMonth(startDate.getMonth() - 2);
+  startDate.setDate(1);
+  const endDate = new Date(today);
+  endDate.setMonth(endDate.getMonth() + 12);
+  endDate.setDate(0); // Letzter Tag des Monats
+
+  // Monate als Spalten.
+  const months = [];
+  const cur = new Date(startDate);
+  while (cur <= endDate) {
+    months.push({
+      year: cur.getFullYear(),
+      month: cur.getMonth(),
+      label: cur.toLocaleString('de-DE', { month: 'short', year: '2-digit' }),
+      start: new Date(cur.getFullYear(), cur.getMonth(), 1),
+      end: new Date(cur.getFullYear(), cur.getMonth() + 1, 0),
+    });
+    cur.setMonth(cur.getMonth() + 1);
+  }
+
+  const totalDays = Math.round((endDate - startDate) / 86400000);
+
+  let html = '<div class="gantt-wrap"><table class="gantt-table"><thead><tr>';
+  html += '<th>Anlage / Wartung</th>';
+  for (const m of months) {
+    html += `<th>${m.label}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+
+  for (const s of schedules) {
+    html += '<tr>';
+    html += `<td>${esc(s.plantName)}<br><span class="muted" style="font-size:11px">${esc(s.title)}</span></td>`;
+
+    // Für jeden Monat: prüfen ob Fälligkeitsdatum in diesen Monat fällt.
+    // Auch vergangene + zukünftige Fälligkeiten basierend auf Intervall berechnen.
+    const dueDates = computeDueDates(s, startDate, endDate);
+
+    for (const m of months) {
+      const cellDues = dueDates.filter(d => d.getFullYear() === m.year && d.getMonth() === m.month);
+      if (cellDues.length === 0) {
+        html += '<td class="gantt-cell"></td>';
+      } else {
+        const d = cellDues[0];
+        const dISO = isoDate(d);
+        const overdue = s.active && dISO <= todayISO && dISO === s.next_due;
+        const isPast = dISO < todayISO && dISO !== s.next_due;
+        const barClass = overdue ? 'gantt-bar-overdue' : isPast ? 'gantt-bar-ok' : 'gantt-bar-due';
+        // Position innerhalb des Monats.
+        const dayInMonth = d.getDate();
+        const daysInMonth = m.end.getDate();
+        const leftPct = Math.round((dayInMonth / daysInMonth) * 100);
+        html += `<td class="gantt-cell">
+          <div class="gantt-bar ${barClass}" style="position:absolute;left:${leftPct}%;width:8px;top:50%;transform:translateY(-50%);"
+               title="${esc(s.title)}: ${fmtDE(dISO)}"></div>
+        </td>`;
+      }
+    }
+    html += '</tr>';
+  }
+
+  html += '</tbody></table></div>';
+
+  // Legende.
+  html += `
+    <div style="display:flex;gap:16px;margin-top:10px;font-size:11px;color:#888;">
+      <span><span class="gantt-bar gantt-bar-ok" style="display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:middle;"></span> Erledigt</span>
+      <span><span class="gantt-bar gantt-bar-due" style="display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:middle;"></span> Geplant</span>
+      <span><span class="gantt-bar gantt-bar-overdue" style="display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:middle;"></span> Überfällig</span>
+    </div>`;
+
+  container.innerHTML = html;
+}
+
+// Fälligkeitstermine berechnen (vergangene + zukünftige basierend auf Intervall).
+function computeDueDates(schedule, rangeStart, rangeEnd) {
+  const dates = [];
+  if (!schedule.next_due) return dates;
+
+  const nextDue = new Date(schedule.next_due + 'T00:00:00');
+  const intervalMs = schedule.interval_months * 30.44 * 86400000; // Approximation
+
+  // Vorwärts vom next_due.
+  let d = new Date(nextDue);
+  while (d <= rangeEnd) {
+    if (d >= rangeStart) dates.push(new Date(d));
+    d = new Date(d.getTime() + intervalMs);
+  }
+
+  // Rückwärts vom next_due.
+  d = new Date(nextDue.getTime() - intervalMs);
+  while (d >= rangeStart) {
+    dates.push(new Date(d));
+    d = new Date(d.getTime() - intervalMs);
+  }
+
+  dates.sort((a, b) => a - b);
+  return dates;
+}
+
+function isoDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 // ====================================================
 // HILFSFUNKTIONEN
