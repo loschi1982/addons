@@ -1096,3 +1096,20 @@ td.qr-cell {
 }
 .toggle-switch input:checked + .toggle-slider { background: #4caf50; }
 .toggle-switch input:checked + .toggle-slider::before { transform: translateX(18px); }
+
+/* ---- CAFM / Badges ---- */
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+}
+.badge-green  { background: rgba(39,174,96,.2); color: #27ae60; }
+.badge-yellow { background: rgba(241,196,15,.2); color: #f1c40f; }
+.badge-red    { background: rgba(192,57,43,.2); color: #c0392b; }
+.badge-gray   { background: rgba(136,136,136,.2); color: #888; }
+
+/* ---- Form Layout ---- */
+.form-row { display: flex; gap: 1rem; }
+.form-col { flex: 1; }
+@media (max-width: 600px) {
+  .form-row { flex-direction: column; gap: 0; }
+}

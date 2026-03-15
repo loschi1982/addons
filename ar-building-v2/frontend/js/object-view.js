@@ -52,6 +52,7 @@ var panelReady = false;
       '<div class="detail-tabs">' +
         '<button class="detail-tab detail-tab--active" data-tab="desc">Beschreibung</button>' +
         '<button class="detail-tab" data-tab="planradar">PlanRadar</button>' +
+        '<button class="detail-tab hidden" data-tab="anlage" id="detail-tab-btn-anlage">Anlage</button>' +
       '</div>' +
 
       '<div id="detail-tab-desc" class="detail-tab-content">' +
@@ -61,6 +62,10 @@ var panelReady = false;
 
       '<div id="detail-tab-planradar" class="detail-tab-content hidden">' +
         '<div id="detail-tickets"></div>' +
+      '</div>' +
+
+      '<div id="detail-tab-anlage" class="detail-tab-content hidden">' +
+        '<div id="detail-plant"></div>' +
       '</div>';
 
     inner.querySelectorAll('.detail-tab').forEach(function (btn) {
@@ -515,6 +520,16 @@ var panelReady = false;
 
     loadSensors(object.ha_sensor_ids || []);
     loadTicketsByMarker(object.marker_id);
+
+    // CAFM: Anlage-Tab laden wenn plant_data vorhanden.
+    if (object.plant_data) {
+      var anlageBtn = document.getElementById('detail-tab-btn-anlage');
+      if (anlageBtn) anlageBtn.classList.remove('hidden');
+      loadPlantTab(object.id, object.plant_data);
+    } else {
+      var anlageBtn2 = document.getElementById('detail-tab-btn-anlage');
+      if (anlageBtn2) anlageBtn2.classList.add('hidden');
+    }
   }
 
   async function openRoomDetailPanel(room, sessionId) {
@@ -648,6 +663,200 @@ var panelReady = false;
         day: '2-digit', month: '2-digit', year: 'numeric'
       });
     } catch (e) { return iso; }
+  }
+
+  // ----------------------------------------------------------------
+  // CAFM – Anlage-Tab
+  // ----------------------------------------------------------------
+
+  function loadPlantTab(objectId, plantData) {
+    var el = document.getElementById('detail-plant');
+    if (!el) return;
+
+    var p = plantData;
+    var html = '';
+
+    // Stammdaten.
+    html += '<div style="margin-bottom:16px">';
+    html += _plantRow('Hersteller', p.hersteller);
+    html += _plantRow('Modell', p.modell);
+    html += _plantRow('Seriennummer', p.seriennummer);
+    html += _plantRow('Baujahr', p.baujahr);
+    html += _plantRow('Einbaudatum', p.einbaudatum ? formatDate(p.einbaudatum) : null);
+    html += _plantRow('Standort', p.standort_detail);
+    html += _plantRow('Garantie bis', p.garantie_bis ? formatDate(p.garantie_bis) : null);
+    html += _plantRow('Status', p.status);
+    html += _plantRow('DIN 276 KG', p.din276_kg);
+    html += '</div>';
+
+    // Dokumente.
+    if (p.documents && p.documents.length > 0) {
+      html += '<div style="font-size:.72rem;color:#555;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Dokumente</div>';
+      p.documents.forEach(function (d) {
+        html += '<a href="' + esc(d.file_path) + '" target="_blank" ' +
+          'style="display:block;color:#4a9eff;font-size:.85rem;margin-bottom:4px;text-decoration:none">' +
+          esc(d.filename) + ' <span style="color:#555;font-size:.75rem">(' + esc(d.category) + ')</span></a>';
+      });
+      html += '<div style="margin-bottom:16px"></div>';
+    }
+
+    el.innerHTML = html;
+
+    // Fällige Wartungen laden.
+    loadDueMaintenance(objectId, el);
+  }
+
+  function _plantRow(label, value) {
+    if (!value && value !== 0) return '';
+    return '<div style="display:flex;gap:8px;font-size:.85rem;margin-bottom:3px">' +
+      '<span style="color:#666;min-width:110px">' + label + ':</span>' +
+      '<span style="color:#ccc">' + esc(String(value)) + '</span></div>';
+  }
+
+  function loadDueMaintenance(objectId, container) {
+    window.AR.api.getDueMaintenance(objectId)
+      .then(function (schedules) {
+        if (!schedules || !schedules.length) {
+          container.insertAdjacentHTML('beforeend',
+            '<div style="font-size:.72rem;color:#555;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Fällige Wartungen</div>' +
+            '<p style="color:#666;font-size:.85rem">Keine fälligen Wartungen.</p>'
+          );
+          return;
+        }
+
+        container.insertAdjacentHTML('beforeend',
+          '<div style="font-size:.72rem;color:#555;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Fällige Wartungen</div>'
+        );
+
+        schedules.forEach(function (s) {
+          var card = document.createElement('div');
+          card.style.cssText = [
+            'background:#1a1a2e', 'border:1px solid #2a2a4a', 'border-radius:8px',
+            'padding:12px', 'margin-bottom:10px'
+          ].join(';');
+
+          var overdue = s.days_until_due < 0;
+          var badge = overdue
+            ? '<span style="background:#e5393522;color:#e53935;font-size:.72rem;padding:2px 6px;border-radius:8px">Überfällig</span>'
+            : '<span style="background:#f0a50022;color:#f0a500;font-size:.72rem;padding:2px 6px;border-radius:8px">Fällig</span>';
+
+          card.innerHTML =
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">' +
+              '<strong style="color:#ccc;font-size:.9rem">' + esc(s.title) + '</strong>' +
+              badge +
+            '</div>' +
+            '<div style="color:#666;font-size:.8rem;margin-bottom:8px">' +
+              'Fällig: ' + formatDate(s.next_due) + ' | ' + s.interval_months + ' Monate' +
+            '</div>';
+
+          // Button: Wartung durchführen (nur Techniker/Admin).
+          var role = (sessionStorage.getItem('ar_role') || '').toLowerCase();
+          if (role === 'technician' || role === 'admin') {
+            var btn = document.createElement('button');
+            btn.textContent = 'Wartung durchführen';
+            btn.style.cssText = [
+              'background:#4a9eff', 'color:#fff', 'border:none',
+              'border-radius:6px', 'padding:7px 14px', 'font-size:.85rem', 'cursor:pointer'
+            ].join(';');
+            btn.addEventListener('click', function () {
+              openMaintenanceForm(s, container);
+            });
+            card.appendChild(btn);
+          }
+
+          container.appendChild(card);
+        });
+      })
+      .catch(function () {
+        container.insertAdjacentHTML('beforeend',
+          '<p style="color:#666;font-size:.85rem">Wartungsdaten konnten nicht geladen werden.</p>'
+        );
+      });
+  }
+
+  function openMaintenanceForm(schedule, parentEl) {
+    // Bestehenden Inhalt im Anlage-Tab ersetzen mit Checkliste.
+    var checklist = schedule.checklist || [];
+    var html = '<div style="margin-bottom:16px">' +
+      '<div style="font-size:.72rem;color:#555;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">' +
+        'Wartung: ' + esc(schedule.title) +
+      '</div>';
+
+    if (checklist.length === 0) {
+      html += '<p style="color:#888;font-size:.85rem">Keine Checkliste vorhanden.</p>';
+    } else {
+      checklist.forEach(function (item, idx) {
+        html += '<div style="background:#1a1a2e;border:1px solid #2a2a4a;border-radius:6px;padding:8px 10px;margin-bottom:6px">' +
+          '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.85rem;color:#ccc">' +
+            '<input type="checkbox" class="maint-check" data-idx="' + idx + '" /> ' +
+            esc(item.text) +
+          '</label>' +
+          '<input type="text" class="maint-note" data-idx="' + idx + '" placeholder="Bemerkung…" ' +
+            'style="width:100%;box-sizing:border-box;margin-top:4px;background:#0f0f23;color:#e0e0e0;border:1px solid #333;border-radius:4px;padding:4px 8px;font-size:.8rem" />' +
+        '</div>';
+      });
+    }
+
+    html += '<label style="display:block;font-size:.8rem;color:#888;margin-top:10px">Allgemeine Bemerkungen</label>' +
+      '<textarea id="maint-notes" rows="3" style="width:100%;box-sizing:border-box;background:#0f0f23;color:#e0e0e0;border:1px solid #333;border-radius:6px;padding:8px;font-size:.85rem;resize:vertical;font-family:inherit"></textarea>';
+
+    html += '<div style="display:flex;gap:8px;margin-top:10px">' +
+      '<button id="maint-submit" style="background:#4caf50;color:#fff;border:none;border-radius:6px;padding:8px 16px;font-size:.9rem;cursor:pointer">Wartung abschließen</button>' +
+      '<button id="maint-cancel" style="background:#333;color:#ccc;border:none;border-radius:6px;padding:8px 16px;font-size:.9rem;cursor:pointer">Abbrechen</button>' +
+    '</div>';
+
+    html += '<div id="maint-msg" style="font-size:.8rem;margin-top:6px;min-height:1.2em"></div>';
+    html += '</div>';
+
+    parentEl.innerHTML = html;
+
+    document.getElementById('maint-cancel').addEventListener('click', function () {
+      // Reload plant tab.
+      window.AR.api.getPlantData(schedule.plant_id)
+        .then(function (plant) { loadPlantTab(plant.object_id, plant); })
+        .catch(function () { parentEl.innerHTML = '<p style="color:#888">Fehler beim Neuladen.</p>'; });
+    });
+
+    document.getElementById('maint-submit').addEventListener('click', function () {
+      var checks = parentEl.querySelectorAll('.maint-check');
+      var notes  = parentEl.querySelectorAll('.maint-note');
+      var checklist = schedule.checklist || [];
+      var results = [];
+
+      for (var i = 0; i < checklist.length; i++) {
+        results.push({
+          id:   checklist[i].id,
+          text: checklist[i].text,
+          ok:   checks[i] ? checks[i].checked : false,
+          note: notes[i] ? notes[i].value : '',
+        });
+      }
+
+      var generalNotes = document.getElementById('maint-notes').value;
+      var submitBtn = document.getElementById('maint-submit');
+      var msgEl     = document.getElementById('maint-msg');
+
+      submitBtn.disabled    = true;
+      submitBtn.textContent = 'Wird gespeichert…';
+      msgEl.textContent     = '';
+
+      window.AR.api.completeMaintenance(schedule.id, { results: results, notes: generalNotes })
+        .then(function (log) {
+          msgEl.style.color = '#4caf50';
+          msgEl.innerHTML   = '✓ Wartung abgeschlossen.';
+          if (log.pdf_path) {
+            msgEl.innerHTML += ' <a href="' + window.AR.api.getLogPdfUrl(log.id) +
+              '" target="_blank" style="color:#4a9eff">PDF herunterladen</a>';
+          }
+          submitBtn.textContent = 'Erledigt';
+        })
+        .catch(function (err) {
+          msgEl.style.color   = '#e57373';
+          msgEl.textContent   = '✗ ' + (err.message || 'Fehler');
+          submitBtn.disabled  = false;
+          submitBtn.textContent = 'Wartung abschließen';
+        });
+    });
   }
 
   window.AR = window.AR || {};

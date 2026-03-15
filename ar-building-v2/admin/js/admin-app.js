@@ -11,6 +11,7 @@ import * as users      from './users.js';
 import * as statistics from './statistics.js';
 import * as settings   from './settings.js';
 import * as planradar  from './planradar.js';
+import * as cafm       from './cafm.js';
 
 // ---- Aktuell aktive Sektion speichern ----
 let currentSection = 'rooms';
@@ -205,6 +206,11 @@ function loadSection(name) {
     case 'planradar':
       // PlanRadar-Sektion: alle drei Karten initialisieren.
       planradar.loadPlanRadar();
+      break;
+
+    case 'cafm':
+      cafm.loadCafm();
+      document.getElementById('btn-new-plant').onclick = () => cafm.openNewPlantModal();
       break;
 
     case 'settings':

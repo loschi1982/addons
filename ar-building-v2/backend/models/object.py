@@ -75,6 +75,7 @@ class Object(Base):
     # Beziehungen
     object_type: Mapped["ObjectType"] = relationship("ObjectType", back_populates="objects")
     room: Mapped["Room"] = relationship("Room", back_populates="objects")  # noqa: F821
+    plant_data = relationship("PlantData", back_populates="object", uselist=False, lazy="selectin")
 
     @property
     def ha_sensor_ids(self) -> list[str]:

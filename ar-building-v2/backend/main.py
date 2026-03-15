@@ -18,8 +18,9 @@ from backend.database import engine, Base, get_db
 import backend.models  # noqa: F401 – Seiteneffekt: registriert alle Tabellen
 
 from backend.models.user import User
+from backend.models.object import ObjectType
 from backend.routers import (
-    auth, rooms, objects, object_types, users, statistics, settings, ha, planradar,
+    auth, rooms, objects, object_types, users, statistics, settings, ha, planradar, cafm,
 )
 
 
@@ -116,6 +117,22 @@ async def lifespan(app: FastAPI):
             pin_status = "kein PIN gesetzt" if admin.pin_hash is None else "PIN gesetzt"
             print(f"INFO:     Admin-Konto vorhanden ({pin_status}).")
 
+        # ObjectType "Technische Anlagen" seeden falls nicht vorhanden.
+        result = await db.execute(
+            select(ObjectType).where(ObjectType.name == "Technische Anlagen")
+        )
+        if result.scalar_one_or_none() is None:
+            import json as _json
+            ta_type = ObjectType(
+                name="Technische Anlagen",
+                visible_to_roles_json=_json.dumps(["technician", "admin"]),
+            )
+            db.add(ta_type)
+            await db.commit()
+            print("INFO:     ObjectType 'Technische Anlagen' angelegt.")
+        else:
+            print("INFO:     ObjectType 'Technische Anlagen' vorhanden.")
+
     yield  # Hier läuft die Anwendung.
     # Beim Stopp: Datenbankverbindung sauber schließen.
     await engine.dispose()
@@ -155,6 +172,7 @@ app.include_router(statistics.router,   prefix="/api/stats",        tags=["stati
 app.include_router(settings.router,     prefix="/api/settings",     tags=["settings"])
 app.include_router(ha.router,           prefix="/api/ha",           tags=["ha"])
 app.include_router(planradar.router,    prefix="/api/planradar",    tags=["planradar"])
+app.include_router(cafm.router,        prefix="/api/cafm",         tags=["cafm"])
 
 
 # ─── Statische Dateien ────────────────────────────────────────────────────────

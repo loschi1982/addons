@@ -12,12 +12,16 @@ from backend.models.object import Object, ObjectType
 from backend.schemas.object import (
     ObjectSummary, ObjectDetail, ObjectCreate,
 )
+from backend.schemas.cafm import PlantDataRead
 
 router = APIRouter(redirect_slashes=False)
 
 
 def obj_to_detail(obj: Object) -> ObjectDetail:
     """Wandelt ein ORM-Objekt in das ObjectDetail-Schema um."""
+    plant = None
+    if obj.plant_data is not None:
+        plant = PlantDataRead.model_validate(obj.plant_data)
     return ObjectDetail(
         id=obj.id,
         name=obj.name,
@@ -32,6 +36,7 @@ def obj_to_detail(obj: Object) -> ObjectDetail:
         audio_path=obj.audio_path,
         ha_sensor_ids=obj.ha_sensor_ids,
         onnx_class_id=obj.onnx_class_id,
+        plant_data=plant,
     )
 
 

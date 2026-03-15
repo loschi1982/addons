@@ -141,6 +141,24 @@
     });
   }
 
+  // ---- CAFM ----
+
+  function getPlantData(objectId) {
+    return request('GET', '/api/cafm/plants/' + objectId);
+  }
+
+  function getDueMaintenance(objectId) {
+    return request('GET', '/api/cafm/plants/' + objectId + '/due');
+  }
+
+  function completeMaintenance(scheduleId, data) {
+    return request('POST', '/api/cafm/schedules/' + scheduleId + '/complete', data);
+  }
+
+  function getLogPdfUrl(logId) {
+    return BASE() + '/api/cafm/logs/' + logId + '/pdf';
+  }
+
   window.AR = window.AR || {};
   window.AR.api = {
     loginWithPin:          loginWithPin,
@@ -159,5 +177,9 @@
     addTicketComment:      addTicketComment,
     postEvent:             postEvent,
     postHeartbeat:         postHeartbeat,
+    getPlantData:          getPlantData,
+    getDueMaintenance:     getDueMaintenance,
+    completeMaintenance:   completeMaintenance,
+    getLogPdfUrl:          getLogPdfUrl,
   };
 })();

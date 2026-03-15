@@ -16,7 +16,7 @@ COPY backend/requirements.txt /app/requirements.txt
 # auch wenn requirements.txt byte-identisch geblieben ist.
 # Wann hochzählen: immer wenn neue Pakete nicht im Container ankommen.
 # Aktuell: 3
-ARG CACHE_BUST=3
+ARG CACHE_BUST=4
 
 # Python-Pakete installieren.
 # --break-system-packages ist bei Alpine Linux nötig (kein venv).

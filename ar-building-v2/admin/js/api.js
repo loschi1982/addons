@@ -288,3 +288,95 @@ export async function savePlanRadarMapping(data) {
 export async function deletePlanRadarMapping(id) {
   return request('DELETE', `/api/planradar/mappings/${id}`);
 }
+
+// ---- CAFM ---- //
+
+// Gibt alle VDMA-Vorlagen zurück.
+export async function getVDMATemplates() {
+  return request('GET', '/api/cafm/vdma-templates');
+}
+
+// Gibt eine VDMA-Vorlage für eine KG zurück.
+export async function getVDMATemplate(kg) {
+  return request('GET', `/api/cafm/vdma-templates/${encodeURIComponent(kg)}`);
+}
+
+// Gibt alle Anlagen zurück.
+export async function getPlants() {
+  return request('GET', '/api/cafm/plants');
+}
+
+// Gibt Anlagendaten eines Objekts zurück.
+export async function getPlant(objectId) {
+  return request('GET', `/api/cafm/plants/${objectId}`);
+}
+
+// Anlagendaten anlegen.
+export async function createPlant(objectId, data) {
+  return request('POST', `/api/cafm/plants/${objectId}`, data);
+}
+
+// Anlagendaten bearbeiten.
+export async function updatePlant(objectId, data) {
+  return request('PUT', `/api/cafm/plants/${objectId}`, data);
+}
+
+// Anlagendaten löschen.
+export async function deletePlant(objectId) {
+  return request('DELETE', `/api/cafm/plants/${objectId}`);
+}
+
+// Dokumente einer Anlage.
+export async function getPlantDocuments(objectId) {
+  return request('GET', `/api/cafm/plants/${objectId}/documents`);
+}
+
+// Dokument hochladen (FormData mit file + category + description).
+export async function uploadPlantDocument(objectId, formData) {
+  return request('POST', `/api/cafm/plants/${objectId}/documents`, formData, true);
+}
+
+// Dokument löschen.
+export async function deletePlantDocument(docId) {
+  return request('DELETE', `/api/cafm/documents/${docId}`);
+}
+
+// Wartungspläne einer Anlage.
+export async function getSchedules(objectId) {
+  return request('GET', `/api/cafm/plants/${objectId}/schedules`);
+}
+
+// Wartungsplan anlegen.
+export async function createSchedule(objectId, data) {
+  return request('POST', `/api/cafm/plants/${objectId}/schedules`, data);
+}
+
+// Wartungsplan bearbeiten.
+export async function updateSchedule(scheduleId, data) {
+  return request('PUT', `/api/cafm/schedules/${scheduleId}`, data);
+}
+
+// Wartungsplan löschen.
+export async function deleteSchedule(scheduleId) {
+  return request('DELETE', `/api/cafm/schedules/${scheduleId}`);
+}
+
+// Alle fälligen Wartungen.
+export async function getAllDueMaintenance() {
+  return request('GET', '/api/cafm/due');
+}
+
+// Wartung abschließen.
+export async function completeSchedule(scheduleId, data) {
+  return request('POST', `/api/cafm/schedules/${scheduleId}/complete`, data);
+}
+
+// Wartungshistorie einer Anlage.
+export async function getPlantLogs(objectId) {
+  return request('GET', `/api/cafm/plants/${objectId}/logs`);
+}
+
+// PDF eines Protokolls (gibt URL zurück).
+export function getLogPdfUrl(logId) {
+  return `${BASE}/api/cafm/logs/${logId}/pdf`;
+}

@@ -3,6 +3,8 @@
 from typing import Optional
 from pydantic import BaseModel
 
+from backend.schemas.cafm import PlantDataRead
+
 
 class ObjectSummary(BaseModel):
     """Kurzform eines Objekts – für Listen und die Raumdetailansicht."""
@@ -46,6 +48,7 @@ class ObjectDetail(BaseModel):
     audio_path: Optional[str] = None
     ha_sensor_ids: list[str]
     onnx_class_id: Optional[int] = None
+    plant_data: Optional[PlantDataRead] = None
 
     model_config = {"from_attributes": True}
 

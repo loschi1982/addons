@@ -67,6 +67,9 @@
         <a href="#" class="nav-item" data-section="planradar">
           <span class="nav-icon">📋</span> PlanRadar
         </a>
+        <a href="#" class="nav-item" data-section="cafm">
+          <span class="nav-icon">🔧</span> CAFM / Anlagen
+        </a>
         <a href="#" class="nav-item" data-section="statistics">
           <span class="nav-icon">📊</span> Statistik
         </a>
@@ -319,6 +322,71 @@
             <button class="btn-secondary hidden" id="pr-auto-mapping">✨ Auto-Mapping</button>
           </div>
 
+        </div>
+      </section>
+
+      <!-- CAFM / ANLAGEN -->
+      <section id="section-cafm" class="section hidden">
+        <div class="section-header">
+          <h2>CAFM / Technische Anlagen</h2>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tab-bar">
+          <button class="tab-btn active" data-tab="cafm-tab-plants">Anlagen</button>
+          <button class="tab-btn" data-tab="cafm-tab-schedules">Wartungsplanung</button>
+          <button class="tab-btn" data-tab="cafm-tab-logs">Protokolle</button>
+        </div>
+
+        <!-- Tab: Anlagen -->
+        <div id="cafm-tab-plants" class="tab-content">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+            <p class="muted" style="font-size:13px;margin:0;">Alle technischen Anlagen mit Stammdaten und DIN 276 Kostengruppe.</p>
+            <button class="btn-primary" id="btn-new-plant">+ Neue Anlage</button>
+          </div>
+          <div class="table-wrap">
+            <table id="cafm-plants-table">
+              <thead>
+                <tr>
+                  <th>ID</th><th>Objekt</th><th>Hersteller</th><th>Modell</th>
+                  <th>KG</th><th>Status</th><th>Nächste Wartung</th><th>Aktionen</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab: Wartungsplanung -->
+        <div id="cafm-tab-schedules" class="tab-content hidden">
+          <p class="muted" style="font-size:13px;margin-bottom:1rem;">Alle Wartungspläne mit Fälligkeitsstatus.</p>
+          <div class="table-wrap">
+            <table id="cafm-schedules-table">
+              <thead>
+                <tr>
+                  <th>Anlage</th><th>Titel</th><th>Intervall</th>
+                  <th>Nächste Fälligkeit</th><th>Status</th><th>Aktionen</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tab: Protokolle -->
+        <div id="cafm-tab-logs" class="tab-content hidden">
+          <p class="muted" style="font-size:13px;margin-bottom:1rem;">Abgeschlossene Wartungsprotokolle mit PDF-Download.</p>
+          <div class="table-wrap">
+            <table id="cafm-logs-table">
+              <thead>
+                <tr>
+                  <th>Anlage</th><th>Wartung</th><th>Techniker</th>
+                  <th>Datum</th><th>PDF</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
