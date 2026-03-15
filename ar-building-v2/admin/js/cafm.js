@@ -92,6 +92,8 @@ async function loadVDMATemplates() {
 // ====================================================
 
 let overviewMode = 'gantt';
+let overviewMonths = 12;   // Sichtbarer Zeitraum in Monaten
+let overviewOffset = 0;    // Verschiebung in Monaten (0 = jetzt)
 
 async function loadPlants() {
   try {
@@ -231,23 +233,42 @@ function renderLogsTable() {
   }
 
   if (allLogs.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="muted">Keine Protokolle</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="muted">Keine Protokolle</td></tr>';
     return;
   }
 
   allLogs.sort((a, b) => b.performed_at.localeCompare(a.performed_at));
 
   for (const l of allLogs) {
-    const pdfLink = l.pdf_path
-      ? `<a href="${api.getLogPdfUrl(l.id)}" target="_blank" class="btn-sm">PDF</a>`
-      : '–';
+    // Ergebnis-Zusammenfassung aus results
+    const results = l.results || [];
+    const okCount = results.filter(r => r.ok === true).length;
+    const failCount = results.filter(r => r.ok === false).length;
+    const totalCount = results.length;
+    let resultBadge = '–';
+    if (totalCount > 0) {
+      if (failCount === 0) {
+        resultBadge = `<span class="badge badge-green">${okCount}/${totalCount} OK</span>`;
+      } else {
+        resultBadge = `<span class="badge badge-red">${failCount} Mängel</span> <span class="badge badge-green">${okCount} OK</span>`;
+      }
+    }
+
+    const pdfBtn = l.pdf_path
+      ? `<button class="btn-sm" onclick="window._cafmDownloadPdf(${l.id})" title="PDF herunterladen">PDF</button>`
+      : '';
+
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${esc(l.plantName)}</td>
       <td>${esc(l.scheduleName)}</td>
       <td>${esc(l.technician)}</td>
       <td>${fmtDE(l.performed_at.slice(0, 10))}</td>
-      <td>${pdfLink}</td>
+      <td>${resultBadge}</td>
+      <td>
+        <button class="btn-sm" onclick="window._cafmShowLogDetail(${l.id})">Detail</button>
+        ${pdfBtn}
+      </td>
     `;
     tbody.appendChild(tr);
   }
@@ -860,6 +881,87 @@ window._cafmDeleteSchedule = (scheduleId) => {
   });
 };
 
+window._cafmShowLogDetail = (logId) => showLogDetail(logId);
+window._cafmDownloadPdf = async (logId) => {
+  try {
+    await api.downloadLogPdf(logId);
+  } catch (e) {
+    alert('PDF-Download fehlgeschlagen: ' + e.message);
+  }
+};
+
+function showLogDetail(logId) {
+  // Log aus plantsCache suchen.
+  let log = null;
+  let plantName = '';
+  let scheduleName = '';
+  for (const p of plantsCache) {
+    const obj = objectsCache.find(o => o.id === p.object_id);
+    for (const l of (p.logs || [])) {
+      if (l.id === logId) {
+        log = l;
+        plantName = obj ? obj.name : `Objekt #${p.object_id}`;
+        const schedule = (p.schedules || []).find(s => s.id === l.schedule_id);
+        scheduleName = schedule ? schedule.title : '–';
+        break;
+      }
+    }
+    if (log) break;
+  }
+
+  if (!log) { alert('Protokoll nicht gefunden'); return; }
+
+  const results = log.results || [];
+  let checklistHtml = '';
+  if (results.length > 0) {
+    checklistHtml = '<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:1rem;">';
+    checklistHtml += '<thead><tr style="border-bottom:2px solid #444;">';
+    checklistHtml += '<th style="text-align:left;padding:6px;">Prüfpunkt</th>';
+    checklistHtml += '<th style="text-align:center;padding:6px;width:60px;">Status</th>';
+    checklistHtml += '<th style="text-align:left;padding:6px;">Anmerkung</th>';
+    checklistHtml += '</tr></thead><tbody>';
+    for (const r of results) {
+      const statusIcon = r.ok === true
+        ? '<span style="color:#27ae60;font-weight:bold;">&#10003; OK</span>'
+        : r.ok === false
+          ? '<span style="color:#c0392b;font-weight:bold;">&#10007; Mangel</span>'
+          : '<span class="muted">–</span>';
+      checklistHtml += `<tr style="border-bottom:1px solid #333;">
+        <td style="padding:6px;">${esc(r.text || r.id || '–')}</td>
+        <td style="text-align:center;padding:6px;">${statusIcon}</td>
+        <td style="padding:6px;color:#aaa;">${esc(r.note || '')}</td>
+      </tr>`;
+    }
+    checklistHtml += '</tbody></table>';
+  } else {
+    checklistHtml = '<p class="muted" style="font-size:13px;">Keine Prüfpunkte erfasst.</p>';
+  }
+
+  const pdfBtn = log.pdf_path
+    ? `<button class="btn-primary btn-sm" style="margin-top:1rem;" onclick="window._cafmDownloadPdf(${log.id})">PDF herunterladen</button>`
+    : '';
+
+  const html = `
+    <div style="margin-bottom:1rem;">
+      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;margin-bottom:12px;">
+        <div><span class="muted">Anlage:</span> <strong>${esc(plantName)}</strong></div>
+        <div><span class="muted">Wartung:</span> <strong>${esc(scheduleName)}</strong></div>
+        <div><span class="muted">Techniker:</span> <strong>${esc(log.technician)}</strong></div>
+        <div><span class="muted">Datum:</span> <strong>${fmtDE(log.performed_at.slice(0, 10))}</strong></div>
+      </div>
+    </div>
+
+    <h3 style="font-size:14px;margin-bottom:8px;">Checkliste (${results.length} Prüfpunkte)</h3>
+    ${checklistHtml}
+
+    ${log.notes ? `<div style="margin-top:1rem;"><h3 style="font-size:14px;margin-bottom:4px;">Bemerkungen</h3><p style="font-size:13px;color:#ccc;white-space:pre-wrap;">${esc(log.notes)}</p></div>` : ''}
+
+    ${pdfBtn}
+  `;
+
+  openModal(`Wartungsprotokoll #${log.id}`, html);
+}
+
 // ====================================================
 // WARTUNGSÜBERSICHT (GANTT / TABELLE)
 // ====================================================
@@ -878,6 +980,16 @@ function setupOverviewToggle() {
       renderOverview();
     });
   });
+
+  const prevBtn = document.getElementById('cafm-ov-prev');
+  const nextBtn = document.getElementById('cafm-ov-next');
+  const todayBtn = document.getElementById('cafm-ov-today');
+  const rangeSel = document.getElementById('cafm-ov-range-sel');
+
+  if (prevBtn) prevBtn.addEventListener('click', () => { overviewOffset -= Math.max(3, Math.floor(overviewMonths / 2)); renderOverview(); });
+  if (nextBtn) nextBtn.addEventListener('click', () => { overviewOffset += Math.max(3, Math.floor(overviewMonths / 2)); renderOverview(); });
+  if (todayBtn) todayBtn.addEventListener('click', () => { overviewOffset = 0; renderOverview(); });
+  if (rangeSel) rangeSel.addEventListener('change', () => { overviewMonths = parseInt(rangeSel.value); renderOverview(); });
 }
 
 function renderOverview() {
@@ -898,6 +1010,10 @@ function renderOverview() {
     }
   }
 
+  // Zeitraum-Label auch bei leeren Daten aktualisieren.
+  const range = getOverviewRange();
+  updateOverviewRangeLabel(range.startDate, range.endDate);
+
   if (allSchedules.length === 0) {
     container.innerHTML = '<p class="muted" style="font-size:13px;">Keine Wartungspläne vorhanden.</p>';
     return;
@@ -913,6 +1029,8 @@ function renderOverview() {
 }
 
 function renderOverviewTable(container, schedules) {
+  const range = getOverviewRange();
+  updateOverviewRangeLabel(range.startDate, range.endDate);
   const today = new Date().toISOString().slice(0, 10);
   let html = `
     <div class="table-wrap">
@@ -953,17 +1071,25 @@ function renderOverviewTable(container, schedules) {
   container.innerHTML = html;
 }
 
-function renderOverviewGantt(container, schedules) {
-  const today = new Date();
-  const todayISO = today.toISOString().slice(0, 10);
+function updateOverviewRangeLabel(startDate, endDate) {
+  const el = document.getElementById('cafm-ov-range');
+  if (!el) return;
+  const fmt = (d) => d.toLocaleString('de-DE', { month: 'short', year: 'numeric' });
+  el.textContent = `${fmt(startDate)} – ${fmt(endDate)}`;
+}
 
-  // Zeitraum: 2 Monate zurück bis 12 Monate voraus.
-  const startDate = new Date(today);
-  startDate.setMonth(startDate.getMonth() - 2);
-  startDate.setDate(1);
-  const endDate = new Date(today);
-  endDate.setMonth(endDate.getMonth() + 12);
-  endDate.setDate(0); // Letzter Tag des Monats
+function getOverviewRange() {
+  const today = new Date();
+  // 1 Monat zurück + overviewMonths voraus, verschoben um overviewOffset
+  const startDate = new Date(today.getFullYear(), today.getMonth() - 1 + overviewOffset, 1);
+  const endDate = new Date(today.getFullYear(), today.getMonth() + overviewMonths + overviewOffset, 0);
+  return { startDate, endDate, today };
+}
+
+function renderOverviewGantt(container, schedules) {
+  const { startDate, endDate, today } = getOverviewRange();
+  const todayISO = today.toISOString().slice(0, 10);
+  updateOverviewRangeLabel(startDate, endDate);
 
   // Monate als Spalten.
   const months = [];

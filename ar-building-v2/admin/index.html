@@ -360,11 +360,25 @@
 
         <!-- Tab: Wartungsübersicht -->
         <div id="cafm-tab-overview" class="tab-content hidden">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
-            <p class="muted" style="font-size:13px;margin:0;">Zeitliche Übersicht aller Wartungstermine.</p>
-            <div class="overview-toggle">
-              <button class="btn-sm overview-mode active" data-mode="gantt">Gantt</button>
-              <button class="btn-sm overview-mode" data-mode="table">Tabelle</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:8px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <button class="btn-sm" id="cafm-ov-prev" title="Zurück">&larr;</button>
+              <span id="cafm-ov-range" class="muted" style="font-size:13px;min-width:180px;text-align:center;"></span>
+              <button class="btn-sm" id="cafm-ov-next" title="Vor">&rarr;</button>
+              <button class="btn-sm" id="cafm-ov-today" title="Heute" style="margin-left:4px;">Heute</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label class="muted" style="font-size:12px;margin:0;">Zeitraum:</label>
+              <select id="cafm-ov-range-sel" class="btn-sm" style="padding:4px 8px;">
+                <option value="3">3 Monate</option>
+                <option value="6">6 Monate</option>
+                <option value="12" selected>12 Monate</option>
+                <option value="24">24 Monate</option>
+              </select>
+              <div class="overview-toggle" style="margin-left:8px;">
+                <button class="btn-sm overview-mode active" data-mode="gantt">Gantt</button>
+                <button class="btn-sm overview-mode" data-mode="table">Tabelle</button>
+              </div>
             </div>
           </div>
           <div id="cafm-overview-content"></div>
@@ -394,7 +408,7 @@
               <thead>
                 <tr>
                   <th>Anlage</th><th>Wartung</th><th>Techniker</th>
-                  <th>Datum</th><th>PDF</th>
+                  <th>Datum</th><th>Ergebnis</th><th>Aktionen</th>
                 </tr>
               </thead>
               <tbody></tbody>

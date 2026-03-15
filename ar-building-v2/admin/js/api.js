@@ -385,3 +385,23 @@ export async function getPlantLogs(objectId) {
 export function getLogPdfUrl(logId) {
   return `${BASE}/api/cafm/logs/${logId}/pdf`;
 }
+
+// PDF eines Protokolls herunterladen (mit Auth-Header) und im Browser öffnen/speichern.
+export async function downloadLogPdf(logId) {
+  const res = await fetch(`${BASE}/api/cafm/logs/${logId}/pdf`, {
+    headers: authHeader(),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || 'PDF-Download fehlgeschlagen');
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `wartungsprotokoll_${logId}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
