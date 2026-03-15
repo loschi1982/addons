@@ -846,8 +846,8 @@ var panelReady = false;
           msgEl.style.color = '#4caf50';
           msgEl.innerHTML   = '✓ Wartung abgeschlossen.';
           if (log.pdf_path) {
-            msgEl.innerHTML += ' <a href="' + window.AR.api.getLogPdfUrl(log.id) +
-              '" target="_blank" style="color:#4a9eff">PDF herunterladen</a>';
+            msgEl.innerHTML += ' <a href="#" onclick="window.AR.api.downloadLogPdf(' + log.id +
+              ');return false;" style="color:#4a9eff">PDF herunterladen</a>';
           }
           submitBtn.textContent = 'Erledigt';
         })

@@ -159,6 +159,25 @@
     return BASE() + '/api/cafm/logs/' + logId + '/pdf';
   }
 
+  async function downloadLogPdf(logId) {
+    var res = await fetch(BASE() + '/api/cafm/logs/' + logId + '/pdf', {
+      headers: authHeader(),
+    });
+    if (!res.ok) {
+      var data = await res.json().catch(function () { return {}; });
+      throw new Error(data.detail || 'PDF-Download fehlgeschlagen');
+    }
+    var blob = await res.blob();
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'wartungsprotokoll_' + logId + '.pdf';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   window.AR = window.AR || {};
   window.AR.api = {
     loginWithPin:          loginWithPin,
@@ -181,5 +200,6 @@
     getDueMaintenance:     getDueMaintenance,
     completeMaintenance:   completeMaintenance,
     getLogPdfUrl:          getLogPdfUrl,
+    downloadLogPdf:        downloadLogPdf,
   };
 })();
