@@ -86,6 +86,20 @@ async def lifespan(app: FastAPI):
                 print("INFO:     DB-Migration: users.pin_hash auf nullable umgestellt.")
             else:
                 print("INFO:     DB-Migration: nicht erforderlich.")
+
+            # Migration: anlagen_variante Spalte zu plant_data hinzufügen (v1.1.2).
+            tables_result2 = await conn.execute(
+                _sa.text("SELECT name FROM sqlite_master WHERE type='table' AND name='plant_data'")
+            )
+            if tables_result2.fetchone():
+                cols = await conn.execute(_sa.text("PRAGMA table_info(plant_data)"))
+                col_names = {row[1] for row in cols}
+                if "anlagen_variante" not in col_names:
+                    await conn.execute(_sa.text(
+                        "ALTER TABLE plant_data ADD COLUMN anlagen_variante VARCHAR(100)"
+                    ))
+                    print("INFO:     DB-Migration: plant_data.anlagen_variante hinzugefügt.")
+
         except Exception as e:
             print(f"FEHLER:   DB-Migration fehlgeschlagen: {e}")
 
