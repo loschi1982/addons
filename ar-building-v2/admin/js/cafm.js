@@ -19,6 +19,7 @@ let plantsCache = [];
 
 export async function loadCafm() {
   setupCafmTabs();
+  setupPdfSettings();
   await Promise.all([
     loadObjectsCache(),
     loadRoomsCache(),
@@ -1215,4 +1216,108 @@ function fmtDE(iso) {
   if (!iso) return '–';
   const [y, m, d] = iso.split('-');
   return `${parseInt(d, 10)}.${parseInt(m, 10)}.${y}`;
+}
+
+// ====================================================
+// PDF-VORLAGE (BRANDING-EINSTELLUNGEN)
+// ====================================================
+
+let pdfSettingsReady = false;
+
+function setupPdfSettings() {
+  if (pdfSettingsReady) return;
+  pdfSettingsReady = true;
+
+  const form = document.getElementById('pdf-settings-form');
+  if (!form) return;
+
+  // Logo-Upload-Button → hidden file input.
+  document.getElementById('pdf-logo-upload-btn')?.addEventListener('click', () => {
+    document.getElementById('pdf-logo-file')?.click();
+  });
+
+  // Logo-Datei gewählt → hochladen.
+  document.getElementById('pdf-logo-file')?.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const res = await api.uploadPdfLogo(fd);
+      updateLogoPreview(res.logo_path);
+      showPdfMsg('Logo hochgeladen');
+    } catch (err) {
+      alert('Logo-Upload fehlgeschlagen: ' + err.message);
+    }
+  });
+
+  // Logo löschen.
+  document.getElementById('pdf-logo-delete-btn')?.addEventListener('click', async () => {
+    try {
+      await api.deletePdfLogo();
+      updateLogoPreview('');
+      showPdfMsg('Logo entfernt');
+    } catch (err) {
+      alert('Fehler: ' + err.message);
+    }
+  });
+
+  // Formular absenden.
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const data = {
+      company_name: document.getElementById('pdf-company-name').value.trim(),
+      header_line1: document.getElementById('pdf-header-line1').value.trim(),
+      header_line2: document.getElementById('pdf-header-line2').value.trim(),
+      footer_text: document.getElementById('pdf-footer-text').value.trim(),
+      show_header: document.getElementById('pdf-show-header').checked,
+      show_footer: document.getElementById('pdf-show-footer').checked,
+    };
+    try {
+      await api.savePdfSettings(data);
+      showPdfMsg('Gespeichert');
+    } catch (err) {
+      alert('Fehler: ' + err.message);
+    }
+  });
+
+  // Einstellungen laden.
+  loadPdfSettings();
+}
+
+async function loadPdfSettings() {
+  try {
+    const s = await api.getPdfSettings();
+    document.getElementById('pdf-company-name').value = s.company_name || '';
+    document.getElementById('pdf-header-line1').value = s.header_line1 || '';
+    document.getElementById('pdf-header-line2').value = s.header_line2 || '';
+    document.getElementById('pdf-footer-text').value = s.footer_text || '';
+    document.getElementById('pdf-show-header').checked = s.show_header !== false;
+    document.getElementById('pdf-show-footer').checked = s.show_footer !== false;
+    updateLogoPreview(s.logo_path || '');
+  } catch (e) {
+    console.error('PDF-Einstellungen laden fehlgeschlagen:', e.message);
+  }
+}
+
+function updateLogoPreview(logoPath) {
+  const preview = document.getElementById('pdf-logo-preview');
+  const deleteBtn = document.getElementById('pdf-logo-delete-btn');
+  if (!preview) return;
+
+  if (logoPath) {
+    const base = window.APP_CONFIG.apiBase;
+    preview.innerHTML = `<img src="${base}${logoPath}" style="max-width:120px;max-height:60px;object-fit:contain;" />`;
+    if (deleteBtn) deleteBtn.style.display = '';
+  } else {
+    preview.innerHTML = '<span class="muted" style="font-size:11px;">Kein Logo</span>';
+    if (deleteBtn) deleteBtn.style.display = 'none';
+  }
+}
+
+function showPdfMsg(text) {
+  const el = document.getElementById('pdf-settings-msg');
+  if (!el) return;
+  el.textContent = text;
+  setTimeout(() => { el.textContent = ''; }, 3000);
 }

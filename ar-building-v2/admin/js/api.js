@@ -386,6 +386,28 @@ export function getLogPdfUrl(logId) {
   return `${BASE}/api/cafm/logs/${logId}/pdf`;
 }
 
+// ---- CAFM PDF-BRANDING ---- //
+
+// PDF-Branding-Einstellungen laden.
+export async function getPdfSettings() {
+  return request('GET', '/api/cafm/pdf-settings');
+}
+
+// PDF-Branding-Einstellungen speichern.
+export async function savePdfSettings(data) {
+  return request('PUT', '/api/cafm/pdf-settings', data);
+}
+
+// Logo hochladen (FormData mit file).
+export async function uploadPdfLogo(formData) {
+  return request('POST', '/api/cafm/pdf-settings/logo', formData, true);
+}
+
+// Logo löschen.
+export async function deletePdfLogo() {
+  return request('DELETE', '/api/cafm/pdf-settings/logo');
+}
+
 // PDF eines Protokolls herunterladen (mit Auth-Header) und im Browser öffnen/speichern.
 export async function downloadLogPdf(logId) {
   const res = await fetch(`${BASE}/api/cafm/logs/${logId}/pdf`, {

@@ -337,6 +337,7 @@
           <button class="tab-btn" data-tab="cafm-tab-overview">Wartungsübersicht</button>
           <button class="tab-btn" data-tab="cafm-tab-schedules">Wartungsplanung</button>
           <button class="tab-btn" data-tab="cafm-tab-logs">Protokolle</button>
+          <button class="tab-btn" data-tab="cafm-tab-pdf">PDF-Vorlage</button>
         </div>
 
         <!-- Tab: Anlagen -->
@@ -413,6 +414,58 @@
               </thead>
               <tbody></tbody>
             </table>
+          </div>
+        </div>
+
+        <!-- Tab: PDF-Vorlage -->
+        <div id="cafm-tab-pdf" class="tab-content hidden">
+          <p class="muted" style="font-size:13px;margin-bottom:1rem;">Kopfzeile, Fußzeile und Logo für Wartungsprotokolle konfigurieren.</p>
+          <div class="card" style="max-width:700px;">
+            <form id="pdf-settings-form">
+              <h3 style="font-size:15px;margin-bottom:12px;">Logo</h3>
+              <div style="display:flex;align-items:center;gap:16px;margin-bottom:1rem;">
+                <div id="pdf-logo-preview" style="width:120px;height:60px;border:1px dashed #555;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#1a1a2e;">
+                  <span class="muted" style="font-size:11px;">Kein Logo</span>
+                </div>
+                <div>
+                  <input type="file" id="pdf-logo-file" accept="image/png,image/jpeg" style="display:none;" />
+                  <button type="button" class="btn-secondary btn-sm" id="pdf-logo-upload-btn">Logo hochladen</button>
+                  <button type="button" class="btn-sm btn-danger" id="pdf-logo-delete-btn" style="display:none;">Entfernen</button>
+                  <p class="muted" style="font-size:11px;margin-top:4px;">PNG oder JPG, max. 2 MB</p>
+                </div>
+              </div>
+
+              <h3 style="font-size:15px;margin-bottom:12px;">Kopfzeile</h3>
+              <label>Firmenname</label>
+              <input type="text" id="pdf-company-name" placeholder="z.B. Mustermann Facility Services GmbH" />
+
+              <label>Zeile 1 (z.B. Adresse)</label>
+              <input type="text" id="pdf-header-line1" placeholder="z.B. Musterstraße 42, 12345 Musterstadt" />
+
+              <label>Zeile 2 (z.B. Kontakt)</label>
+              <input type="text" id="pdf-header-line2" placeholder="z.B. Tel. 0123/456789 | info@example.de" />
+
+              <div class="form-row" style="margin-top:8px;">
+                <label style="display:flex;align-items:center;gap:8px;">
+                  <input type="checkbox" id="pdf-show-header" checked /> Kopfzeile anzeigen
+                </label>
+              </div>
+
+              <h3 style="font-size:15px;margin:1rem 0 12px;">Fußzeile</h3>
+              <label>Fußzeilen-Text</label>
+              <input type="text" id="pdf-footer-text" placeholder="z.B. Erstellt mit AR Building CAFM" />
+
+              <div class="form-row" style="margin-top:8px;">
+                <label style="display:flex;align-items:center;gap:8px;">
+                  <input type="checkbox" id="pdf-show-footer" checked /> Fußzeile anzeigen (inkl. Seitenzahl)
+                </label>
+              </div>
+
+              <div style="margin-top:1.5rem;display:flex;gap:8px;">
+                <button type="submit" class="btn-primary">Einstellungen speichern</button>
+                <span id="pdf-settings-msg" class="muted" style="line-height:2.4;font-size:13px;"></span>
+              </div>
+            </form>
           </div>
         </div>
       </section>

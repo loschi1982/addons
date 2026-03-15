@@ -473,3 +473,110 @@ async def download_log_pdf(
         raise HTTPException(status_code=404, detail="PDF-Datei nicht gefunden")
 
     return FileResponse(abs_path, media_type="application/pdf", filename=os.path.basename(log.pdf_path))
+
+
+# ─── PDF-Branding-Einstellungen ──────────────────────────────────────────────
+
+PDF_SETTINGS_PATH = "/data/cafm_pdf_settings.json"
+
+DEFAULT_PDF_SETTINGS = {
+    "company_name": "",
+    "header_line1": "",
+    "header_line2": "",
+    "footer_text": "Erstellt mit AR Building CAFM",
+    "logo_path": "",
+    "show_logo": True,
+    "show_header": True,
+    "show_footer": True,
+}
+
+
+def _load_pdf_settings() -> dict:
+    import json as _json
+    if os.path.exists(PDF_SETTINGS_PATH):
+        try:
+            with open(PDF_SETTINGS_PATH, "r") as f:
+                data = _json.load(f)
+            for k, v in DEFAULT_PDF_SETTINGS.items():
+                if k not in data:
+                    data[k] = v
+            return data
+        except Exception:
+            pass
+    return DEFAULT_PDF_SETTINGS.copy()
+
+
+def _save_pdf_settings(settings: dict) -> dict:
+    import json as _json
+    os.makedirs(os.path.dirname(PDF_SETTINGS_PATH) or "/data", exist_ok=True)
+    with open(PDF_SETTINGS_PATH, "w") as f:
+        _json.dump(settings, f, indent=2)
+    return settings
+
+
+@router.get("/pdf-settings")
+async def get_pdf_settings(_user=Depends(require_admin())):
+    """PDF-Branding-Einstellungen laden."""
+    return _load_pdf_settings()
+
+
+@router.put("/pdf-settings")
+async def update_pdf_settings(
+    body: dict,
+    _user=Depends(require_admin()),
+):
+    """PDF-Branding-Einstellungen speichern."""
+    current = _load_pdf_settings()
+    for key in DEFAULT_PDF_SETTINGS:
+        if key in body:
+            current[key] = body[key]
+    return _save_pdf_settings(current)
+
+
+@router.post("/pdf-settings/logo", status_code=201)
+async def upload_pdf_logo(
+    file: UploadFile = File(...),
+    _user=Depends(require_admin()),
+):
+    """Logo für PDF-Protokolle hochladen (PNG/JPG, max 2 MB)."""
+    if file.content_type not in ("image/png", "image/jpeg", "image/jpg"):
+        raise HTTPException(status_code=400, detail="Nur PNG oder JPG erlaubt")
+
+    content = await file.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Datei zu groß (max. 2 MB)")
+
+    logo_dir = "/data/uploads/cafm/branding"
+    os.makedirs(logo_dir, exist_ok=True)
+
+    ext = "png" if "png" in file.content_type else "jpg"
+    logo_path = os.path.join(logo_dir, f"logo.{ext}")
+
+    # Alte Logos entfernen.
+    for old in ("logo.png", "logo.jpg"):
+        old_path = os.path.join(logo_dir, old)
+        if os.path.exists(old_path):
+            os.remove(old_path)
+
+    with open(logo_path, "wb") as f:
+        f.write(content)
+
+    # Pfad in Einstellungen speichern.
+    settings = _load_pdf_settings()
+    settings["logo_path"] = f"/uploads/cafm/branding/logo.{ext}"
+    _save_pdf_settings(settings)
+
+    return {"logo_path": settings["logo_path"]}
+
+
+@router.delete("/pdf-settings/logo", status_code=204)
+async def delete_pdf_logo(_user=Depends(require_admin())):
+    """Logo löschen."""
+    logo_dir = "/data/uploads/cafm/branding"
+    for name in ("logo.png", "logo.jpg"):
+        path = os.path.join(logo_dir, name)
+        if os.path.exists(path):
+            os.remove(path)
+    settings = _load_pdf_settings()
+    settings["logo_path"] = ""
+    _save_pdf_settings(settings)
