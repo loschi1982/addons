@@ -20,11 +20,11 @@ from backend.schemas.cafm import (
     PlantDocumentRead,
     ScheduleRead, ScheduleCreate,
     LogRead, LogCreate,
-    VDMATemplate, VDMAChecklistItem,
+    VDMATemplate,
 )
 from backend.vdma_templates import (
-    DIN276_KOSTENGRUPPEN, VDMA_CHECKLISTS,
     get_template_for_kg, get_all_templates,
+    get_varianten_for_kg, get_checklist_for_variante,
 )
 
 router = APIRouter(redirect_slashes=False)
@@ -78,6 +78,21 @@ async def get_vdma_template(kg: str, _user=Depends(require_any_role())):
     if tpl is None:
         raise HTTPException(status_code=404, detail=f"Keine Vorlage für KG {kg}")
     return tpl
+
+
+@router.get("/vdma-templates/{kg}/varianten/{variante_key}")
+async def get_vdma_variante_checklist(
+    kg: str, variante_key: str,
+    _user=Depends(require_any_role()),
+):
+    """Wartungscheckliste für eine bestimmte Anlagenvariante."""
+    checklist = get_checklist_for_variante(kg, variante_key)
+    if checklist is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Keine Variante '{variante_key}' für KG {kg}",
+        )
+    return checklist
 
 
 # ─── Anlagenstammdaten ───────────────────────────────────────────────────────
@@ -263,9 +278,17 @@ async def create_schedule(
 
     checklist = body.checklist
     if not checklist and plant.din276_kg:
-        tpl = get_template_for_kg(plant.din276_kg)
-        if tpl:
-            checklist = tpl["checklist"]
+        # Variante-spezifische Checkliste laden
+        if plant.anlagen_variante:
+            cl = get_checklist_for_variante(
+                plant.din276_kg, plant.anlagen_variante
+            )
+            if cl:
+                checklist = cl
+        if not checklist:
+            tpl = get_template_for_kg(plant.din276_kg)
+            if tpl:
+                checklist = tpl["checklist"]
 
     schedule = MaintenanceSchedule(
         plant_id=plant.id,

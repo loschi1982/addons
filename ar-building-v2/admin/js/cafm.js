@@ -121,6 +121,7 @@ function renderPlantsTable() {
     const objName = obj ? obj.name : `Objekt #${p.object_id}`;
     const nextDue = getNextDue(p.schedules);
     const dueClass = nextDue.overdue ? 'style="color:#c0392b;font-weight:bold;"' : '';
+    const varianteLabel = getVarianteLabel(p.din276_kg, p.anlagen_variante);
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -128,7 +129,7 @@ function renderPlantsTable() {
       <td>${esc(objName)}</td>
       <td>${esc(p.hersteller || '–')}</td>
       <td>${esc(p.modell || '–')}</td>
-      <td>${esc(p.din276_kg || '–')}</td>
+      <td>${esc(p.din276_kg || '–')}${varianteLabel ? '<br><span class="muted" style="font-size:11px;">' + esc(varianteLabel) + '</span>' : ''}</td>
       <td><span class="badge badge-${statusColor(p.status)}">${esc(p.status)}</span></td>
       <td ${dueClass}>${nextDue.label}</td>
       <td>
@@ -334,6 +335,19 @@ export function openNewPlantModal() {
         </div>
       </div>
 
+      <div class="form-row" id="pf-variante-row" style="display:none;">
+        <div class="form-col">
+          <label>Anlagenvariante</label>
+          <select id="pf-variante">
+            <option value="">– Bitte wählen –</option>
+          </select>
+        </div>
+        <div class="form-col">
+          <label>Wartungsanweisungen</label>
+          <span id="pf-variante-info" class="muted" style="font-size:12px;line-height:2.4;"></span>
+        </div>
+      </div>
+
       <div class="form-row">
         <div class="form-col">
           <label>Status</label>
@@ -353,7 +367,7 @@ export function openNewPlantModal() {
   `;
 
   openModal('Neue Anlage', html);
-  setupPlantFormEvents();
+  setupPlantFormEvents(null);
 
   // Standort-Detail aus dem Raum des gewählten Objekts vorbelegen.
   const objectSelect = document.getElementById('pf-object-id');
@@ -458,6 +472,19 @@ export async function editPlant(objectId) {
         </div>
       </div>
 
+      <div class="form-row" id="pf-variante-row" style="display:none;">
+        <div class="form-col">
+          <label>Anlagenvariante</label>
+          <select id="pf-variante">
+            <option value="">– Bitte wählen –</option>
+          </select>
+        </div>
+        <div class="form-col">
+          <label>Wartungsanweisungen</label>
+          <span id="pf-variante-info" class="muted" style="font-size:12px;line-height:2.4;"></span>
+        </div>
+      </div>
+
       <div class="form-row">
         <div class="form-col">
           <label>Status</label>
@@ -485,8 +512,7 @@ export async function editPlant(objectId) {
   `;
 
   openModal(`Anlage bearbeiten – ${objName}`, html);
-  setupPlantFormEvents();
-  updateGewerkDisplay();
+  setupPlantFormEvents(plant.anlagen_variante || null);
 
   document.getElementById('plant-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -501,11 +527,19 @@ export async function editPlant(objectId) {
   });
 }
 
-function setupPlantFormEvents() {
+function setupPlantFormEvents(preselectedVariante) {
   const din276Select = document.getElementById('pf-din276');
   if (din276Select) {
-    din276Select.addEventListener('change', updateGewerkDisplay);
+    din276Select.addEventListener('change', () => {
+      updateGewerkDisplay();
+      updateVariantenDropdown();
+    });
     updateGewerkDisplay();
+    updateVariantenDropdown(preselectedVariante);
+  }
+  const varianteSelect = document.getElementById('pf-variante');
+  if (varianteSelect) {
+    varianteSelect.addEventListener('change', updateVarianteInfo);
   }
 }
 
@@ -520,6 +554,60 @@ function updateGewerkDisplay() {
   gewerkInput.value = tpl ? tpl.gewerk : '';
 }
 
+function updateVariantenDropdown(preselect) {
+  const kg = document.getElementById('pf-din276').value;
+  const row = document.getElementById('pf-variante-row');
+  const sel = document.getElementById('pf-variante');
+  const info = document.getElementById('pf-variante-info');
+  if (!row || !sel) return;
+
+  if (!kg) {
+    row.style.display = 'none';
+    sel.innerHTML = '<option value="">– Bitte wählen –</option>';
+    if (info) info.textContent = '';
+    return;
+  }
+
+  const tpl = vdmaTemplates.find(t => t.kg === kg);
+  if (!tpl || !tpl.varianten || tpl.varianten.length === 0) {
+    row.style.display = 'none';
+    return;
+  }
+
+  row.style.display = '';
+  let options = '<option value="">– Bitte wählen –</option>';
+  for (const v of tpl.varianten) {
+    const selected = (preselect && preselect === v.key) ? ' selected' : '';
+    options += `<option value="${esc(v.key)}"${selected}>${esc(v.label)} (${v.wartung_count} Prüfpunkte)</option>`;
+  }
+  sel.innerHTML = options;
+
+  // Auto-select wenn nur eine Variante
+  if (tpl.varianten.length === 1) {
+    sel.value = tpl.varianten[0].key;
+  }
+
+  updateVarianteInfo();
+}
+
+function updateVarianteInfo() {
+  const info = document.getElementById('pf-variante-info');
+  const sel = document.getElementById('pf-variante');
+  const kg = document.getElementById('pf-din276').value;
+  if (!info || !sel) return;
+
+  const key = sel.value;
+  if (!key || !kg) {
+    info.textContent = '';
+    return;
+  }
+
+  const tpl = vdmaTemplates.find(t => t.kg === kg);
+  if (!tpl || !tpl.varianten) return;
+  const v = tpl.varianten.find(x => x.key === key);
+  info.textContent = v ? `${v.wartung_count} Wartungsanweisungen nach VDMA 24186` : '';
+}
+
 function collectPlantFormData() {
   return {
     hersteller: document.getElementById('pf-hersteller').value || null,
@@ -530,6 +618,7 @@ function collectPlantFormData() {
     garantie_bis: document.getElementById('pf-garantie-bis').value || null,
     standort_detail: document.getElementById('pf-standort').value || null,
     din276_kg: document.getElementById('pf-din276').value || null,
+    anlagen_variante: document.getElementById('pf-variante').value || null,
     status: document.getElementById('pf-status').value,
     bemerkungen: document.getElementById('pf-bemerkungen').value || '',
   };
@@ -664,7 +753,7 @@ export async function openScheduleModal(objectId, scheduleId = null) {
       <textarea id="sf-checklist" rows="10" style="font-family:monospace;font-size:12px;">${esc(checklistJson)}</textarea>
 
       ${!schedule && plant.din276_kg ? `
-        <button type="button" class="btn-secondary btn-sm" style="margin-top:0.5rem;" id="sf-load-vdma">VDMA-Vorlage laden (KG ${plant.din276_kg})</button>
+        <button type="button" class="btn-secondary btn-sm" style="margin-top:0.5rem;" id="sf-load-vdma">VDMA-Vorlage laden${plant.anlagen_variante ? '' : ` (KG ${plant.din276_kg})`}</button>
       ` : ''}
 
       <button type="submit" class="btn-primary" style="margin-top:1rem;">Speichern</button>
@@ -677,8 +766,14 @@ export async function openScheduleModal(objectId, scheduleId = null) {
   if (vdmaBtn) {
     vdmaBtn.addEventListener('click', async () => {
       try {
-        const tpl = await api.getVDMATemplate(plant.din276_kg);
-        document.getElementById('sf-checklist').value = JSON.stringify(tpl.checklist, null, 2);
+        let checklist;
+        if (plant.anlagen_variante) {
+          checklist = await api.getVDMAVarianteChecklist(plant.din276_kg, plant.anlagen_variante);
+        } else {
+          const tpl = await api.getVDMATemplate(plant.din276_kg);
+          checklist = tpl.checklist;
+        }
+        document.getElementById('sf-checklist').value = JSON.stringify(checklist, null, 2);
       } catch (e) {
         alert('Vorlage nicht gefunden: ' + e.message);
       }
@@ -973,6 +1068,14 @@ function isoDate(d) {
 // ====================================================
 // HILFSFUNKTIONEN
 // ====================================================
+
+function getVarianteLabel(kg, varianteKey) {
+  if (!kg || !varianteKey) return '';
+  const tpl = vdmaTemplates.find(t => t.kg === kg);
+  if (!tpl || !tpl.varianten) return '';
+  const v = tpl.varianten.find(x => x.key === varianteKey);
+  return v ? v.label : '';
+}
 
 function esc(str) {
   return String(str ?? '')

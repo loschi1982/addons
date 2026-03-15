@@ -687,6 +687,7 @@ var panelReady = false;
     html += _plantRow('Garantie bis', p.garantie_bis ? formatDate(p.garantie_bis) : null);
     html += _plantRow('Status', p.status);
     html += _plantRow('DIN 276 KG', p.din276_kg);
+    html += _plantRow('Anlagentyp', p.anlagen_variante ? p.anlagen_variante.replace(/_/g, ' ') : null);
     html += '</div>';
 
     // Dokumente.

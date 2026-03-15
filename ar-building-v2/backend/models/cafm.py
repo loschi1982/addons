@@ -23,6 +23,7 @@ class PlantData(Base):
     garantie_bis: Mapped[str | None] = mapped_column(String(10), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="aktiv", nullable=False)
     din276_kg: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    anlagen_variante: Mapped[str | None] = mapped_column(String(100), nullable=True)
     bemerkungen: Mapped[str] = mapped_column(Text, default="")
 
     # Beziehungen

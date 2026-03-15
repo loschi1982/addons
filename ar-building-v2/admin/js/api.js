@@ -301,6 +301,11 @@ export async function getVDMATemplate(kg) {
   return request('GET', `/api/cafm/vdma-templates/${encodeURIComponent(kg)}`);
 }
 
+// Gibt die Wartungscheckliste einer Anlagenvariante zurück.
+export async function getVDMAVarianteChecklist(kg, varianteKey) {
+  return request('GET', `/api/cafm/vdma-templates/${encodeURIComponent(kg)}/varianten/${encodeURIComponent(varianteKey)}`);
+}
+
 // Gibt alle Anlagen zurück.
 export async function getPlants() {
   return request('GET', '/api/cafm/plants');

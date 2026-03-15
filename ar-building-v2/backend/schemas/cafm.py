@@ -10,14 +10,23 @@ from pydantic import BaseModel, computed_field
 class VDMAChecklistItem(BaseModel):
     id: str
     text: str
-    group: str
+    interval_months: Optional[int] = None
+    priority: Optional[str] = None
+    group: Optional[str] = None
+
+
+class VDMAVariante(BaseModel):
+    key: str
+    label: str
+    wartung_count: int
 
 
 class VDMATemplate(BaseModel):
     kg: str
     label: str
     gewerk: str
-    checklist: list[VDMAChecklistItem]
+    checklist: list[VDMAChecklistItem] = []
+    varianten: list[VDMAVariante] = []
 
 
 # ---- Dokumente ---- #
@@ -108,6 +117,7 @@ class PlantDataRead(BaseModel):
     garantie_bis: Optional[str] = None
     status: str
     din276_kg: Optional[str] = None
+    anlagen_variante: Optional[str] = None
     bemerkungen: str
 
     documents: list[PlantDocumentRead] = []
@@ -127,4 +137,5 @@ class PlantDataCreate(BaseModel):
     garantie_bis: Optional[str] = None
     status: str = "aktiv"
     din276_kg: Optional[str] = None
+    anlagen_variante: Optional[str] = None
     bemerkungen: str = ""
