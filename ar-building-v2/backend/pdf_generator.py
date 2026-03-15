@@ -78,17 +78,17 @@ class BrandedPDF(FPDF):
             if company:
                 self.set_font("Helvetica", "B", 12)
                 self.set_xy(text_x, 8)
-                self.cell(text_w, 6, company, align="L")
+                self.cell(text_w, 6, _safe(company), align="L")
 
             if line1:
                 self.set_font("Helvetica", "", 9)
                 self.set_xy(text_x, 14)
-                self.cell(text_w, 5, line1, align="L")
+                self.cell(text_w, 5, _safe(line1), align="L")
 
             if line2:
                 self.set_font("Helvetica", "", 9)
                 self.set_xy(text_x, 19)
-                self.cell(text_w, 5, line2, align="L")
+                self.cell(text_w, 5, _safe(line2), align="L")
 
             # Trennlinie.
             self.set_draw_color(180, 180, 180)
@@ -113,7 +113,7 @@ class BrandedPDF(FPDF):
         footer_text = self.branding.get("footer_text", "")
         if footer_text:
             self.set_font("Helvetica", "I", 8)
-            self.cell(0, 4, footer_text, align="L")
+            self.cell(0, 4, _safe(footer_text), align="L")
 
         # Seitenzahl rechts.
         self.set_font("Helvetica", "I", 8)
@@ -144,7 +144,7 @@ def generate_maintenance_pdf(log, schedule, plant) -> str:
     pdf.ln(2)
 
     pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 7, schedule.title if schedule else "Wartung", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.cell(0, 7, _safe(schedule.title if schedule else "Wartung"), new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(6)
 
     # ── Anlagendaten ──
@@ -152,17 +152,17 @@ def generate_maintenance_pdf(log, schedule, plant) -> str:
 
     pdf.set_font("Helvetica", "", 10)
     if plant:
-        _row(pdf, "Hersteller", plant.hersteller or "\u2013")
-        _row(pdf, "Modell", plant.modell or "\u2013")
-        _row(pdf, "Seriennummer", plant.seriennummer or "\u2013")
-        _row(pdf, "Baujahr", str(plant.baujahr) if plant.baujahr else "\u2013")
-        _row(pdf, "Standort", plant.standort_detail or "\u2013")
-        _row(pdf, "Status", plant.status or "\u2013")
+        _row(pdf, "Hersteller", plant.hersteller or "-")
+        _row(pdf, "Modell", plant.modell or "-")
+        _row(pdf, "Seriennummer", plant.seriennummer or "-")
+        _row(pdf, "Baujahr", str(plant.baujahr) if plant.baujahr else "-")
+        _row(pdf, "Standort", plant.standort_detail or "-")
+        _row(pdf, "Status", plant.status or "-")
         kg = plant.din276_kg or ""
         kg_info = DIN276_KOSTENGRUPPEN.get(kg, {})
-        kg_label = f"KG {kg} \u2013 {kg_info.get('label', '')}" if kg else "\u2013"
+        kg_label = f"KG {kg}  - {kg_info.get('label', '')}" if kg else "-"
         _row(pdf, "DIN 276 KG", kg_label)
-        _row(pdf, "VDMA-Gewerk", kg_info.get("gewerk", "\u2013"))
+        _row(pdf, "VDMA-Gewerk", kg_info.get("gewerk", "-"))
         if plant.anlagen_variante:
             _row(pdf, "Anlagenvariante", plant.anlagen_variante)
     pdf.ln(4)
@@ -172,8 +172,8 @@ def generate_maintenance_pdf(log, schedule, plant) -> str:
 
     pdf.set_font("Helvetica", "", 10)
     _row(pdf, "Techniker", log.technician)
-    _row(pdf, "Datum", log.performed_at[:10] if log.performed_at else "\u2013")
-    _row(pdf, "Intervall", f"{schedule.interval_months} Monate" if schedule else "\u2013")
+    _row(pdf, "Datum", log.performed_at[:10] if log.performed_at else "-")
+    _row(pdf, "Intervall", f"{schedule.interval_months} Monate" if schedule else "-")
     pdf.ln(4)
 
     # ── Checkliste ──
@@ -185,7 +185,7 @@ def generate_maintenance_pdf(log, schedule, plant) -> str:
         ok_count = sum(1 for r in results if r.get("ok") is True)
         fail_count = sum(1 for r in results if r.get("ok") is False)
         pdf.set_font("Helvetica", "I", 9)
-        pdf.cell(0, 5, f"{len(results)} Prüfpunkte | {ok_count} OK | {fail_count} Mängel",
+        pdf.cell(0, 5, _safe(f"{len(results)} Prüfpunkte | {ok_count} OK | {fail_count} Mängel"),
                  new_x="LMARGIN", new_y="NEXT")
         pdf.ln(2)
 
@@ -218,7 +218,7 @@ def generate_maintenance_pdf(log, schedule, plant) -> str:
     if log.notes:
         _section_header(pdf, "Bemerkungen")
         pdf.set_font("Helvetica", "", 10)
-        pdf.multi_cell(0, 5, log.notes)
+        pdf.multi_cell(0, 5, _safe(log.notes))
         pdf.ln(4)
 
     # ── Unterschriftenzeile ──
@@ -235,7 +235,7 @@ def generate_maintenance_pdf(log, schedule, plant) -> str:
     # Unterschrift Techniker.
     pdf.line(110, y, 200, y)
     pdf.set_xy(110, y + 1)
-    pdf.cell(90, 5, f"Unterschrift ({log.technician})", align="C")
+    pdf.cell(90, 5, _safe(f"Unterschrift ({log.technician})"), align="C")
 
     # Datei speichern.
     object_id = plant.object_id if plant else 0
@@ -253,7 +253,7 @@ def generate_maintenance_pdf(log, schedule, plant) -> str:
 def _section_header(pdf: FPDF, title: str):
     """Sektionsüberschrift mit Linie."""
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, title, new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, _safe(title), new_x="LMARGIN", new_y="NEXT")
     pdf.set_draw_color(100, 100, 100)
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(3)
@@ -262,14 +262,35 @@ def _section_header(pdf: FPDF, title: str):
 def _row(pdf: FPDF, label: str, value: str):
     """Zeile mit Label (fett) + Wert."""
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(45, 6, label + ":", align="R")
+    pdf.cell(45, 6, _safe(label) + ":", align="R")
     pdf.cell(3, 6, "")
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 6, value, new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, _safe(value), new_x="LMARGIN", new_y="NEXT")
+
+
+def _safe(text: str) -> str:
+    """Ersetzt Unicode-Zeichen die Helvetica nicht unterstützt durch ASCII-Äquivalente."""
+    return (
+        str(text)
+        .replace("\u2013", "-")   # En-Dash
+        .replace("\u2014", "-")   # Em-Dash
+        .replace("\u2026", "...")  # Ellipsis
+        .replace("\u201c", '"')   # Left double quote
+        .replace("\u201d", '"')   # Right double quote
+        .replace("\u2018", "'")   # Left single quote
+        .replace("\u2019", "'")   # Right single quote
+        .replace("\u00b2", "2")   # Superscript 2
+        .replace("\u00b3", "3")   # Superscript 3
+        .replace("\u00b0", " Grad")  # Degree sign
+        .replace("\u2022", "-")   # Bullet
+        .encode("latin-1", errors="replace")
+        .decode("latin-1")
+    )
 
 
 def _trunc(text: str, max_len: int) -> str:
     """Kürzt Text auf max_len Zeichen."""
+    text = _safe(text)
     if len(text) <= max_len:
         return text
-    return text[: max_len - 1] + "\u2026"
+    return text[: max_len - 1] + "..."
