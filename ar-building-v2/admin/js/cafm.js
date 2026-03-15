@@ -255,10 +255,6 @@ function renderLogsTable() {
       }
     }
 
-    const pdfBtn = l.pdf_path
-      ? `<button class="btn-sm" onclick="window._cafmDownloadPdf(${l.id})" title="PDF herunterladen">PDF</button>`
-      : '';
-
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${esc(l.plantName)}</td>
@@ -266,9 +262,9 @@ function renderLogsTable() {
       <td>${esc(l.technician)}</td>
       <td>${fmtDE(l.performed_at.slice(0, 10))}</td>
       <td>${resultBadge}</td>
-      <td>
+      <td style="white-space:nowrap;">
         <button class="btn-sm" onclick="window._cafmShowLogDetail(${l.id})">Detail</button>
-        ${pdfBtn}
+        <button class="btn-sm" onclick="window._cafmDownloadPdf(${l.id})" title="PDF herunterladen"${l.pdf_path ? '' : ' disabled style="opacity:0.4;"'}>PDF</button>
       </td>
     `;
     tbody.appendChild(tr);
@@ -938,10 +934,6 @@ function showLogDetail(logId) {
     checklistHtml = '<p class="muted" style="font-size:13px;">Keine Prüfpunkte erfasst.</p>';
   }
 
-  const pdfBtn = log.pdf_path
-    ? `<button class="btn-primary btn-sm" style="margin-top:1rem;" onclick="window._cafmDownloadPdf(${log.id})">PDF herunterladen</button>`
-    : '';
-
   const html = `
     <div style="margin-bottom:1rem;">
       <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;margin-bottom:12px;">
@@ -957,7 +949,7 @@ function showLogDetail(logId) {
 
     ${log.notes ? `<div style="margin-top:1rem;"><h3 style="font-size:14px;margin-bottom:4px;">Bemerkungen</h3><p style="font-size:13px;color:#ccc;white-space:pre-wrap;">${esc(log.notes)}</p></div>` : ''}
 
-    ${pdfBtn}
+    <button class="btn-primary btn-sm" style="margin-top:1rem;" onclick="window._cafmDownloadPdf(${log.id})"${log.pdf_path ? '' : ' disabled'}>PDF herunterladen</button>
   `;
 
   openModal(`Wartungsprotokoll #${log.id}`, html);
