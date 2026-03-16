@@ -203,8 +203,22 @@ var panelReady = false;
     // ── Metadaten ───────────────────────────────────────────────────
     var metaRows = '';
     if (ticket.assignee)   metaRows += _metaRow('Assignee',  esc(ticket.assignee));
+    if (ticket.author)     metaRows += _metaRow('Ersteller', esc(ticket.author));
+    if (ticket.priority)   metaRows += _metaRow('Priorität', esc(ticket.priority));
+    if (ticket.due_date)   metaRows += _metaRow('Fällig',    esc(formatDate(ticket.due_date)));
+    if (ticket.progress != null) metaRows += _metaRow('Fortschritt', esc(ticket.progress + '%'));
     if (ticket.created_at) metaRows += _metaRow('Erstellt',  esc(formatDate(ticket.created_at)));
+    if (ticket.updated_at) metaRows += _metaRow('Aktualisiert', esc(formatDate(ticket.updated_at)));
     if (ticket.id)         metaRows += _metaRow('Ticket-ID', esc(String(ticket.id)));
+
+    // Extra-Felder aus Feldkonfiguration hinzufügen
+    if (ticket.extra_fields) {
+      var keys = Object.keys(ticket.extra_fields);
+      for (var ei = 0; ei < keys.length; ei++) {
+        metaRows += _metaRow(keys[ei], esc(String(ticket.extra_fields[keys[ei]])));
+      }
+    }
+
     if (metaRows) {
       body.appendChild(_section('Details',
         '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:.85rem">' +
@@ -599,6 +613,20 @@ var panelReady = false;
     if (el) el.innerHTML = chips.join('');
   }
 
+  // Feldkonfiguration (gecached nach erstem Laden)
+  var _fieldConfig = null;
+
+  async function getFieldConfig() {
+    if (_fieldConfig) return _fieldConfig;
+    try {
+      var cfg = await window.AR.api.getPlanRadarFieldConfig();
+      _fieldConfig = cfg && cfg.fields ? cfg.fields : [];
+    } catch (e) {
+      _fieldConfig = [];
+    }
+    return _fieldConfig;
+  }
+
   // Lädt Tickets per marker_id und rendert sie als klickbare Karten.
   async function loadTicketsByMarker(markerId) {
     var el = document.getElementById('detail-tickets');
@@ -617,6 +645,10 @@ var panelReady = false;
       return;
     }
 
+    // Feldkonfiguration laden für extra_fields Anzeige
+    var fieldCfg = await getFieldConfig();
+    var listFields = fieldCfg.filter(function (f) { return f.show_in_list; });
+
     el.innerHTML = '';
     tickets.forEach(function (t) {
       var cfg = STATUS_CONFIG[t.status] || { label: t.status || '?', color: '#aaa' };
@@ -625,6 +657,18 @@ var panelReady = false;
       card.className = 'ticket-card';
       // Farbiger linker Rand zeigt Status auf einen Blick
       card.style.borderLeft = '4px solid ' + cfg.color;
+
+      // Extra-Felder für die Listenansicht zusammenbauen
+      var extraHtml = '';
+      if (t.extra_fields && listFields.length > 0) {
+        listFields.forEach(function (fc) {
+          var val = t.extra_fields[fc.label];
+          if (val) {
+            extraHtml += '<span style="color:#888;font-size:.78rem">' +
+              esc(fc.label) + ': ' + esc(String(val)) + '</span> ';
+          }
+        });
+      }
 
       card.innerHTML =
         '<div class="ticket-card__header">' +
@@ -645,7 +689,9 @@ var panelReady = false;
         '<div class="ticket-card__meta">' +
           (t.assignee   ? '<span>👤 ' + esc(t.assignee) + '</span>' : '') +
           (t.created_at ? '<span>📅 ' + esc(formatDate(t.created_at)) + '</span>' : '') +
-        '</div>';
+          (t.priority && t.priority !== 'normal' ? '<span>⚡ ' + esc(t.priority) + '</span>' : '') +
+        '</div>' +
+        (extraHtml ? '<div class="ticket-card__meta" style="margin-top:2px">' + extraHtml + '</div>' : '');
 
       // Klick öffnet den Ticket-Detail-Drawer
       card.addEventListener('click', function (e) {

@@ -1,16 +1,22 @@
 # Router für den PlanRadar-Proxy und die PlanRadar-Konfiguration.
 # Endpunkte:
 #   GET  /api/planradar/projects                              – Projekte abrufen (Proxy)
-#   GET  /api/planradar/projects/{project_id}/list-fields     – NEU: Listenfelder eines Projekts (Hilfsendpunkt)
+#   GET  /api/planradar/projects/{project_id}/list-fields     – Listenfelder eines Projekts (Hilfsendpunkt)
+#   GET  /api/planradar/projects/{project_id}/scan-fields     – Felder eines Projekts scannen (Sample-Ticket)
 #   GET  /api/planradar/lists                                 – Listen eines Projekts abrufen (Proxy)
 #   GET  /api/planradar/lists/{list_id}/entries               – Listeneinträge abrufen (Proxy)
 #   GET  /api/planradar/project-roles                         – Rollenzuordnungen laden (DB)
 #   PUT  /api/planradar/project-roles                         – Rollenzuordnungen speichern (DB)
+#   GET  /api/planradar/field-config                          – Feldkonfiguration laden (JSON-Datei)
+#   PUT  /api/planradar/field-config                          – Feldkonfiguration speichern (JSON-Datei)
 #   GET  /api/planradar/mappings                              – Marker-Mappings laden (DB)
 #   POST /api/planradar/mappings                              – Marker-Mapping anlegen/aktualisieren (DB)
 #   DELETE /api/planradar/mappings/{mapping_id}               – Mapping löschen (DB)
 #   GET  /api/planradar/tickets                               – Tickets laden (Proxy, mit marker_id-Logik)
 #   PUT  /api/planradar/tickets/{ticket_id}/status            – Ticket-Status setzen (Proxy)
+
+import json
+import pathlib
 
 import aiohttp
 import aiohttp.resolver
@@ -134,10 +140,23 @@ PRIORITY_MAP = {
 }
 
 
-def normalize_ticket(raw: dict, project_id: str = "") -> dict:
+def _resolve_attr_value(attrs: dict, key: str):
+    """Löst einen Attributwert auf — bei Personen-Objekten den Namen extrahieren."""
+    val = attrs.get(key)
+    if val is None:
+        return None
+    if isinstance(val, dict):
+        return val.get("name") or val.get("full-name") or str(val)
+    return val
+
+
+def normalize_ticket(raw: dict, project_id: str = "", field_config: list | None = None) -> dict:
     """Wandelt ein PlanRadar-Ticket im JSON:API-Format in unser Schema um.
     Liefert alle darstellbaren Felder — project_id wird mitgeliefert damit das
-    Frontend sie für Status- und Kommentar-Calls zurückschicken kann."""
+    Frontend sie für Status- und Kommentar-Calls zurückschicken kann.
+
+    Wenn field_config übergeben wird, werden zusätzlich alle konfigurierten
+    Felder in extra_fields aufgenommen (für die dynamische Anzeige im Frontend)."""
     attrs = raw.get("attributes", {})
     status_id   = attrs.get("status-id", "")
     priority_id = attrs.get("priority-id") or attrs.get("priority_id")
@@ -158,7 +177,7 @@ def normalize_ticket(raw: dict, project_id: str = "") -> dict:
     elif isinstance(author_raw, str):
         author_name = author_raw
 
-    return {
+    result = {
         "id":          attrs.get("uuid") or raw.get("id", ""),
         "title":       attrs.get("subject", ""),
         "description": attrs.get("description") or "",
@@ -173,6 +192,33 @@ def normalize_ticket(raw: dict, project_id: str = "") -> dict:
         "author":      author_name,
         "project_id":  project_id,
     }
+
+    # Extra-Felder aus Feldkonfiguration anhängen
+    if field_config:
+        typed_values = attrs.get("typed-values", {}) or {}
+        extra = {}
+        for fc in field_config:
+            key = fc.get("key", "")
+            label = fc.get("label", key)
+            source = fc.get("source", "standard")
+            if source == "typed-values":
+                val = typed_values.get(key)
+                if isinstance(val, dict):
+                    val = val.get("name") or str(val)
+                if val is not None:
+                    extra[label] = str(val) if not isinstance(val, str) else val
+            elif source == "standard":
+                # Nur Felder die nicht schon im Basis-Result sind
+                val = _resolve_attr_value(attrs, key)
+                if val is not None and key not in (
+                    "subject", "description", "status-id", "priority-id",
+                    "assigned-to", "author", "created-at", "updated-at",
+                    "closed-at", "due-date", "progress",
+                ):
+                    extra[label] = str(val) if not isinstance(val, str) else val
+        result["extra_fields"] = extra
+
+    return result
 
 
 def map_ticket(raw: dict) -> dict:
@@ -353,6 +399,178 @@ async def get_project_list_fields(
             })
 
     return fields
+
+
+# ─── 1c. Felder eines Projekts scannen (Sample-Ticket) ──────────────────────
+
+# Bekannte Standard-Attribute eines PlanRadar-Tickets (JSON:API attributes).
+# Diese werden immer angeboten – unabhängig davon ob ein Sample-Ticket existiert.
+_STANDARD_FIELDS = [
+    {"key": "subject",      "label": "Titel",          "type": "string"},
+    {"key": "description",  "label": "Beschreibung",   "type": "string"},
+    {"key": "status-id",    "label": "Status",         "type": "status"},
+    {"key": "priority-id",  "label": "Priorität",      "type": "priority"},
+    {"key": "progress",     "label": "Fortschritt",    "type": "number"},
+    {"key": "due-date",     "label": "Fälligkeitsdatum", "type": "date"},
+    {"key": "created-at",   "label": "Erstellt am",    "type": "datetime"},
+    {"key": "updated-at",   "label": "Aktualisiert am", "type": "datetime"},
+    {"key": "closed-at",    "label": "Geschlossen am", "type": "datetime"},
+    {"key": "assigned-to",  "label": "Zugewiesen an",  "type": "person"},
+    {"key": "author",       "label": "Ersteller",      "type": "person"},
+]
+
+
+@router.get("/projects/{project_id}/scan-fields")
+async def scan_project_fields(
+    project_id: str,
+    _user=Depends(require_admin()),
+):
+    """Scannt ein Projekt und gibt alle verfügbaren Ticketfelder zurück.
+
+    Lädt bis zu 5 Tickets des Projekts, sammelt alle Attribute
+    und typed-values-Schlüssel und gibt sie als auswählbare Feldliste zurück.
+
+    Jedes Feld hat: key, label, type, source ('standard' oder 'typed-values'),
+    und optional sample (Beispielwert).
+    """
+    _, customer_id, headers = get_planradar_config()
+
+    # Standard-Felder immer zurückgeben
+    fields: list[dict] = [
+        {**f, "source": "standard", "sample": None}
+        for f in _STANDARD_FIELDS
+    ]
+
+    # Sample-Tickets laden um typed-values zu entdecken
+    url = f"{PLANRADAR_API_V2}/{customer_id}/projects/{project_id}/tickets"
+    params = {"pagesize": 5}
+    try:
+        async with _make_session() as session:
+            async with session.get(url, headers=headers, params=params, ssl=True) as resp:
+                if resp.status != 200:
+                    # Keine Tickets → nur Standard-Felder zurückgeben
+                    return fields
+                data = await resp.json()
+    except aiohttp.ClientError:
+        return fields
+
+    items = data.get("data", data) if isinstance(data, dict) else data
+    if not items:
+        return fields
+
+    # Standard-Felder mit Sample-Werten anreichern
+    first_attrs = items[0].get("attributes", {}) if isinstance(items[0], dict) else {}
+    for f in fields:
+        val = first_attrs.get(f["key"])
+        if val is not None:
+            if isinstance(val, dict):
+                f["sample"] = val.get("name") or val.get("full-name") or str(val)
+            else:
+                f["sample"] = str(val)[:100]
+
+    # typed-values-Felder sammeln (projektspezifische Custom-Felder)
+    seen_tv_keys: set[str] = set()
+    for ticket in items:
+        attrs = ticket.get("attributes", {}) if isinstance(ticket, dict) else {}
+        typed_values = attrs.get("typed-values", {})
+        if not isinstance(typed_values, dict):
+            continue
+        for tv_key, tv_val in typed_values.items():
+            if tv_key in seen_tv_keys:
+                continue
+            seen_tv_keys.add(tv_key)
+            # Typ und Sample bestimmen
+            val_type = "string"
+            sample = None
+            if tv_val is None:
+                val_type = "string"
+            elif isinstance(tv_val, bool):
+                val_type = "boolean"
+                sample = str(tv_val)
+            elif isinstance(tv_val, (int, float)):
+                val_type = "number"
+                sample = str(tv_val)
+            elif isinstance(tv_val, dict):
+                val_type = "object"
+                sample = tv_val.get("name") or str(tv_val)[:100]
+            elif isinstance(tv_val, list):
+                val_type = "list"
+                sample = str(tv_val)[:100]
+            else:
+                sample = str(tv_val)[:100]
+
+            fields.append({
+                "key": tv_key,
+                "label": tv_key,  # Admin kann Label im UI anpassen
+                "type": val_type,
+                "source": "typed-values",
+                "sample": sample,
+            })
+
+    # List-Fields-Info hinzufügen (lesbare Namen für typed-values-Felder)
+    try:
+        list_fields = await get_project_list_fields(project_id, _user=_user)
+        lf_map = {lf["field_key"]: lf["field_label"] for lf in list_fields}
+        for f in fields:
+            if f["source"] == "typed-values" and f["key"] in lf_map:
+                f["label"] = lf_map[f["key"]]
+                f["type"] = "list-field"
+    except Exception:
+        pass
+
+    return fields
+
+
+# ─── 1d. Feldkonfiguration laden/speichern ───────────────────────────────────
+
+FIELD_CONFIG_PATH = pathlib.Path("/data/planradar_field_config.json")
+
+DEFAULT_FIELD_CONFIG: dict = {
+    "fields": [
+        # Standardmäßig aktivierte Felder
+        {"key": "subject",     "label": "Titel",        "source": "standard", "show_in_list": True, "show_in_detail": True, "editable": False},
+        {"key": "description", "label": "Beschreibung", "source": "standard", "show_in_list": False, "show_in_detail": True, "editable": False},
+        {"key": "status-id",   "label": "Status",       "source": "standard", "show_in_list": True, "show_in_detail": True, "editable": True},
+        {"key": "priority-id", "label": "Priorität",    "source": "standard", "show_in_list": True, "show_in_detail": True, "editable": False},
+        {"key": "assigned-to", "label": "Zugewiesen an", "source": "standard", "show_in_list": True, "show_in_detail": True, "editable": False},
+        {"key": "created-at",  "label": "Erstellt am",  "source": "standard", "show_in_list": True, "show_in_detail": True, "editable": False},
+        {"key": "due-date",    "label": "Fällig",       "source": "standard", "show_in_list": False, "show_in_detail": True, "editable": False},
+        {"key": "progress",    "label": "Fortschritt",  "source": "standard", "show_in_list": False, "show_in_detail": True, "editable": False},
+    ],
+}
+
+
+def _load_field_config() -> dict:
+    """Lädt die Feldkonfiguration aus der JSON-Datei."""
+    if FIELD_CONFIG_PATH.exists():
+        try:
+            return json.loads(FIELD_CONFIG_PATH.read_text("utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return DEFAULT_FIELD_CONFIG.copy()
+
+
+def _save_field_config(config: dict) -> None:
+    """Speichert die Feldkonfiguration in die JSON-Datei."""
+    FIELD_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    FIELD_CONFIG_PATH.write_text(json.dumps(config, ensure_ascii=False, indent=2), "utf-8")
+
+
+@router.get("/field-config")
+async def get_field_config(_user=Depends(require_admin())):
+    """Gibt die gespeicherte Feldkonfiguration zurück.
+    Definiert welche Ticketfelder in Liste und Detail angezeigt werden."""
+    return _load_field_config()
+
+
+@router.put("/field-config")
+async def save_field_config(body: dict, _user=Depends(require_admin())):
+    """Speichert die Feldkonfiguration.
+    Erwartet: { fields: [{ key, label, source, show_in_list, show_in_detail, editable }] }"""
+    if "fields" not in body or not isinstance(body["fields"], list):
+        raise HTTPException(status_code=400, detail="'fields' muss eine Liste sein")
+    _save_field_config(body)
+    return body
 
 
 # ─── 2. Listen abrufen ────────────────────────────────────────────────────────
@@ -592,6 +810,12 @@ async def get_tickets(
     """
     user_role = current_user.get("role") if isinstance(current_user, dict) else getattr(current_user, "role", None)
 
+    # Feldkonfiguration laden (für extra_fields im Ticket-Response)
+    fc = _load_field_config()
+    fc_fields = fc.get("fields", [])
+    # Nur Felder die in Liste oder Detail angezeigt werden sollen
+    active_fields = [f for f in fc_fields if f.get("show_in_list") or f.get("show_in_detail")]
+
     # ── Neue Logik: marker_id übergeben ──────────────────────────────────────
     if marker_id is not None:
         # Schritt 1+2: Mapping nachschlagen, Rollencheck
@@ -642,7 +866,7 @@ async def get_tickets(
         # Kein field_key gefunden → Fallback: alle Tickets des Projekts zurückgeben (kein Filter)
 
         pid = mapping.planradar_project_id
-        result = [normalize_ticket(t, project_id=pid) for t in items]
+        result = [normalize_ticket(t, project_id=pid, field_config=active_fields) for t in items]
 
         # Cache befüllen: ticket_uuid → project_id.
         # Damit braucht das Frontend project_id nicht mitzuschicken.

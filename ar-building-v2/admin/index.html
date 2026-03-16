@@ -323,6 +323,46 @@
           </div>
 
         </div>
+
+        <!-- Karte 4: Feldkonfiguration -->
+        <div class="card">
+          <h3>Feldkonfiguration</h3>
+          <p class="muted">Legt fest, welche Ticketfelder im Frontend (Liste & Detail) angezeigt und bearbeitbar sind.</p>
+
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:16px; flex-wrap:wrap;">
+            <label class="pr-field-label" style="margin:0">Projekt zum Scannen
+              <select id="pr-fc-project" style="margin-top:4px; min-width:200px;">
+                <option value="">– Projekt wählen –</option>
+              </select>
+            </label>
+            <button class="btn-secondary" id="pr-fc-scan" style="align-self:flex-end;">Felder scannen</button>
+            <span id="pr-fc-scan-msg" class="muted" style="font-size:13px;"></span>
+          </div>
+
+          <div class="table-wrap" style="max-height:420px; overflow-y:auto;">
+            <table id="pr-fc-table">
+              <thead>
+                <tr>
+                  <th>Feld</th>
+                  <th>Label</th>
+                  <th>Quelle</th>
+                  <th>Beispiel</th>
+                  <th title="In Ticket-Liste anzeigen">Liste</th>
+                  <th title="In Ticket-Detail anzeigen">Detail</th>
+                  <th title="Im Frontend bearbeitbar">Bearbeitbar</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="7" class="muted" style="padding:20px">Felder werden beim Scannen geladen.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div style="margin-top:14px; display:flex; gap:8px; align-items:center;">
+            <button class="btn-primary" id="pr-fc-save">Konfiguration speichern</button>
+            <span id="pr-fc-save-msg" class="muted" style="font-size:13px;"></span>
+          </div>
+        </div>
       </section>
 
       <!-- CAFM / ANLAGEN -->

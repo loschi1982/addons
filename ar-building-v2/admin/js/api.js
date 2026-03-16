@@ -289,6 +289,21 @@ export async function deletePlanRadarMapping(id) {
   return request('DELETE', `/api/planradar/mappings/${id}`);
 }
 
+// Scannt die verfügbaren Felder eines PlanRadar-Projekts (Sample-Tickets).
+export async function scanPlanRadarFields(projectId) {
+  return request('GET', `/api/planradar/projects/${encodeURIComponent(projectId)}/scan-fields`);
+}
+
+// Lädt die gespeicherte Feldkonfiguration (welche Felder in Liste/Detail angezeigt werden).
+export async function getPlanRadarFieldConfig() {
+  return request('GET', '/api/planradar/field-config');
+}
+
+// Speichert die Feldkonfiguration.
+export async function savePlanRadarFieldConfig(data) {
+  return request('PUT', '/api/planradar/field-config', data);
+}
+
 // ---- CAFM ---- //
 
 // Gibt alle VDMA-Vorlagen zurück.

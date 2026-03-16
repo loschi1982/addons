@@ -26,6 +26,7 @@ export async function loadPlanRadar() {
   await loadConnectionCard();
   await loadProjectsCard();
   await loadMappingCard();
+  await loadFieldConfigCard();
 }
 
 // ====================================================
@@ -859,6 +860,164 @@ function showAutoModal(title, bodyHtml) {
 function closeAutoModal() {
   const overlay = document.getElementById('pr-auto-overlay');
   if (overlay) overlay.style.display = 'none';
+}
+
+// ====================================================
+// KARTE 4 – FELDKONFIGURATION
+// ====================================================
+
+// Zustand: gescannte Felder + gespeicherte Konfiguration
+let _scannedFields = [];
+let _savedFieldConfig = { fields: [] };
+
+async function loadFieldConfigCard() {
+  // Projekt-Dropdown befüllen
+  const select = document.getElementById('pr-fc-project');
+  if (!select) return;
+  try {
+    const projects = await api.getPlanRadarProjects();
+    select.innerHTML = '<option value="">– Projekt wählen –</option>' +
+      projects.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  } catch (e) {
+    select.innerHTML = '<option value="">Fehler beim Laden</option>';
+  }
+
+  // Gespeicherte Konfiguration laden und Tabelle rendern
+  try {
+    _savedFieldConfig = await api.getPlanRadarFieldConfig();
+  } catch (e) {
+    _savedFieldConfig = { fields: [] };
+  }
+  if (_savedFieldConfig.fields.length > 0) {
+    renderFieldConfigTable(_savedFieldConfig.fields, true);
+  }
+
+  // Events
+  document.getElementById('pr-fc-scan').addEventListener('click', scanFields);
+  document.getElementById('pr-fc-save').addEventListener('click', saveFieldConfig);
+}
+
+async function scanFields() {
+  const projectId = document.getElementById('pr-fc-project').value;
+  const msgEl = document.getElementById('pr-fc-scan-msg');
+  if (!projectId) {
+    msgEl.textContent = 'Bitte erst ein Projekt auswählen.';
+    msgEl.style.color = '#f0a500';
+    return;
+  }
+
+  msgEl.textContent = 'Scannt Felder…';
+  msgEl.style.color = 'var(--muted)';
+
+  try {
+    _scannedFields = await api.scanPlanRadarFields(projectId);
+    msgEl.textContent = `✓ ${_scannedFields.length} Felder gefunden`;
+    msgEl.style.color = 'var(--success)';
+
+    // Merge: gescannte Felder mit gespeicherter Konfiguration zusammenführen
+    const savedMap = {};
+    for (const f of (_savedFieldConfig.fields || [])) {
+      savedMap[f.key] = f;
+    }
+
+    const merged = _scannedFields.map(f => {
+      const saved = savedMap[f.key];
+      return {
+        key: f.key,
+        label: saved ? saved.label : f.label,
+        source: f.source,
+        sample: f.sample || null,
+        show_in_list: saved ? saved.show_in_list : false,
+        show_in_detail: saved ? saved.show_in_detail : false,
+        editable: saved ? (saved.editable || false) : false,
+      };
+    });
+
+    renderFieldConfigTable(merged, false);
+
+  } catch (e) {
+    msgEl.textContent = '✗ ' + e.message;
+    msgEl.style.color = '#e74c3c';
+  }
+}
+
+function renderFieldConfigTable(fields, isSavedOnly) {
+  const tbody = document.querySelector('#pr-fc-table tbody');
+  if (!tbody) return;
+
+  if (!fields || fields.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="muted" style="padding:20px">Keine Felder vorhanden.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = '';
+  fields.forEach((f, idx) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><code style="font-size:12px">${esc(f.key)}</code></td>
+      <td><input type="text" class="pr-fc-label" data-idx="${idx}" value="${esc(f.label)}"
+        style="background:#0f0f23;color:#e0e0e0;border:1px solid #333;border-radius:4px;padding:3px 6px;font-size:13px;width:120px;" /></td>
+      <td><span class="pr-status-badge ${f.source === 'typed-values' ? 'pr-status-active' : 'pr-status-inactive'}" style="font-size:11px;">
+        ${f.source === 'typed-values' ? 'Custom' : 'Standard'}
+      </span></td>
+      <td style="font-size:12px;color:#888;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+        title="${esc(f.sample || '')}">${esc(f.sample || '–')}</td>
+      <td style="text-align:center"><input type="checkbox" class="pr-fc-list" data-idx="${idx}" ${f.show_in_list ? 'checked' : ''} /></td>
+      <td style="text-align:center"><input type="checkbox" class="pr-fc-detail" data-idx="${idx}" ${f.show_in_detail ? 'checked' : ''} /></td>
+      <td style="text-align:center"><input type="checkbox" class="pr-fc-edit" data-idx="${idx}" ${f.editable ? 'checked' : ''} /></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function saveFieldConfig() {
+  const msgEl = document.getElementById('pr-fc-save-msg');
+  const tbody = document.querySelector('#pr-fc-table tbody');
+  if (!tbody) return;
+
+  const rows = tbody.querySelectorAll('tr');
+  const fields = [];
+
+  rows.forEach((tr, idx) => {
+    const labelInput = tr.querySelector('.pr-fc-label');
+    const listCb = tr.querySelector('.pr-fc-list');
+    const detailCb = tr.querySelector('.pr-fc-detail');
+    const editCb = tr.querySelector('.pr-fc-edit');
+    if (!labelInput) return; // Platzhalter-Zeile
+
+    // Key aus der code-Zelle holen
+    const codeEl = tr.querySelector('code');
+    const key = codeEl ? codeEl.textContent.trim() : '';
+    // Source aus Badge
+    const badge = tr.querySelector('.pr-status-badge');
+    const source = badge && badge.textContent.trim() === 'Custom' ? 'typed-values' : 'standard';
+
+    fields.push({
+      key,
+      label: labelInput.value.trim() || key,
+      source,
+      show_in_list: listCb ? listCb.checked : false,
+      show_in_detail: detailCb ? detailCb.checked : false,
+      editable: editCb ? editCb.checked : false,
+    });
+  });
+
+  // Nur Felder speichern die mindestens eine Checkbox haben
+  const activeFields = fields.filter(f => f.show_in_list || f.show_in_detail || f.editable);
+  // Alle Felder speichern (auch deaktivierte) damit Labels erhalten bleiben
+  const config = { fields };
+
+  try {
+    msgEl.textContent = 'Speichert…';
+    msgEl.style.color = 'var(--muted)';
+    await api.savePlanRadarFieldConfig(config);
+    _savedFieldConfig = config;
+    msgEl.textContent = '✓ Konfiguration gespeichert';
+    msgEl.style.color = 'var(--success)';
+  } catch (e) {
+    msgEl.textContent = '✗ ' + e.message;
+    msgEl.style.color = '#e74c3c';
+  }
 }
 
 // ====================================================

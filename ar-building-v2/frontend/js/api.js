@@ -120,6 +120,11 @@
     );
   }
 
+  // Feldkonfiguration laden (für dynamische Ticket-Anzeige)
+  function getPlanRadarFieldConfig() {
+    return request('GET', '/api/planradar/field-config');
+  }
+
   // ---- Statistik ----
 
   function postEvent(eventType, sessionId, opts) {
@@ -194,6 +199,7 @@
     getTicketAttachments:  getTicketAttachments,
     updateTicketStatus:    updateTicketStatus,
     addTicketComment:      addTicketComment,
+    getPlanRadarFieldConfig: getPlanRadarFieldConfig,
     postEvent:             postEvent,
     postHeartbeat:         postHeartbeat,
     getPlantData:          getPlantData,
