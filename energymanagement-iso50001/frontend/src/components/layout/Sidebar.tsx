@@ -12,6 +12,7 @@ import {
   Users,
   Upload,
   LayoutDashboard,
+  Plug,
   ChevronLeft,
   ChevronRight,
   Leaf,
@@ -31,6 +32,7 @@ const navItems = [
   { path: '/climate', label: 'Klimasensoren', icon: Thermometer },
   { path: '/reports', label: 'Berichte', icon: FileText },
   { path: '/import', label: 'Datenimport', icon: Upload },
+  { path: '/integrations', label: 'Integrationen', icon: Plug },
   { path: '/iso', label: 'ISO 50001', icon: Shield },
   { path: '/users', label: 'Benutzer', icon: Users },
 ];

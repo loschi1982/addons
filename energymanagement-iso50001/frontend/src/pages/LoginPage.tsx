@@ -1,21 +1,38 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
-import { login } from '@/store/slices/authSlice';
+import { login, checkSetupStatus } from '@/store/slices/authSlice';
 
 export default function LoginPage() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  const { loading, error } = useAppSelector((state) => state.auth);
+  const { loading, error, setupRequired } = useAppSelector((state) => state.auth);
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+
+  // Beim Laden: Setup-Status prüfen
+  useEffect(() => {
+    dispatch(checkSetupStatus());
+  }, [dispatch]);
+
+  // Wenn Setup nötig → zur Setup-Seite weiterleiten
+  useEffect(() => {
+    if (setupRequired === true) {
+      navigate('/setup');
+    }
+  }, [setupRequired, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const result = await dispatch(login({ username, password }));
     if (login.fulfilled.match(result)) {
-      navigate('/dashboard');
+      // Prüfen ob Passwortänderung erforderlich
+      if (result.payload.must_change_password) {
+        navigate('/change-password');
+      } else {
+        navigate('/dashboard');
+      }
     }
   };
 

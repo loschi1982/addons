@@ -23,8 +23,24 @@ from app.schemas.reading import (
     ReadingResponse,
     ReadingUpdate,
 )
+from app.services.reading_service import ReadingService
 
 router = APIRouter()
+
+
+def _reading_to_response(r) -> ReadingResponse:
+    """MeterReading → ReadingResponse."""
+    return ReadingResponse(
+        id=r.id,
+        meter_id=r.meter_id,
+        timestamp=r.timestamp,
+        value=r.value,
+        consumption=r.consumption,
+        source=r.source,
+        quality=r.quality,
+        notes=r.notes,
+        import_batch_id=r.import_batch_id,
+    )
 
 
 @router.get("", response_model=PaginatedResponse[ReadingResponse])
@@ -39,27 +55,50 @@ async def list_readings(
     db: AsyncSession = Depends(get_db),
 ):
     """Zählerstände auflisten mit Filtern."""
-    raise NotImplementedError("ReadingService noch nicht implementiert")
+    service = ReadingService(db)
+    result = await service.list_readings(
+        meter_id=meter_id,
+        start_date=start_date,
+        end_date=end_date,
+        source=source,
+        page=page,
+        page_size=page_size,
+    )
+
+    total = result["total"]
+    return PaginatedResponse(
+        items=[_reading_to_response(r) for r in result["items"]],
+        total=total,
+        page=result["page"],
+        page_size=result["page_size"],
+        total_pages=(total + page_size - 1) // page_size if total > 0 else 0,
+    )
 
 
 @router.post("", response_model=ReadingResponse, status_code=201)
 async def create_reading(
     request: ReadingCreate,
-    current_user: User = Depends(require_permission("readings", "create")),
+    current_user: User = require_permission("readings", "create"),
     db: AsyncSession = Depends(get_db),
 ):
     """Einzelnen Zählerstand erfassen."""
-    raise NotImplementedError("ReadingService noch nicht implementiert")
+    service = ReadingService(db)
+    reading = await service.create_reading(request.model_dump())
+    return _reading_to_response(reading)
 
 
 @router.post("/bulk", response_model=list[ReadingResponse], status_code=201)
 async def create_readings_bulk(
     request: ReadingBulkCreate,
-    current_user: User = Depends(require_permission("readings", "create")),
+    current_user: User = require_permission("readings", "create"),
     db: AsyncSession = Depends(get_db),
 ):
     """Mehrere Zählerstände auf einmal erfassen."""
-    raise NotImplementedError("ReadingService noch nicht implementiert")
+    service = ReadingService(db)
+    readings = await service.create_readings_bulk(
+        [r.model_dump() for r in request.readings]
+    )
+    return [_reading_to_response(r) for r in readings]
 
 
 @router.get("/{reading_id}", response_model=ReadingResponse)
@@ -69,28 +108,36 @@ async def get_reading(
     db: AsyncSession = Depends(get_db),
 ):
     """Einzelnen Zählerstand abrufen."""
-    raise NotImplementedError("ReadingService noch nicht implementiert")
+    service = ReadingService(db)
+    reading = await service.get_reading(reading_id)
+    return _reading_to_response(reading)
 
 
 @router.put("/{reading_id}", response_model=ReadingResponse)
 async def update_reading(
     reading_id: uuid.UUID,
     request: ReadingUpdate,
-    current_user: User = Depends(require_permission("readings", "update")),
+    current_user: User = require_permission("readings", "update"),
     db: AsyncSession = Depends(get_db),
 ):
     """Zählerstand korrigieren."""
-    raise NotImplementedError("ReadingService noch nicht implementiert")
+    service = ReadingService(db)
+    reading = await service.update_reading(
+        reading_id, request.model_dump(exclude_unset=True)
+    )
+    return _reading_to_response(reading)
 
 
 @router.delete("/{reading_id}", response_model=DeleteResponse)
 async def delete_reading(
     reading_id: uuid.UUID,
-    current_user: User = Depends(require_permission("readings", "delete")),
+    current_user: User = require_permission("readings", "delete"),
     db: AsyncSession = Depends(get_db),
 ):
     """Zählerstand löschen."""
-    raise NotImplementedError("ReadingService noch nicht implementiert")
+    service = ReadingService(db)
+    await service.delete_reading(reading_id)
+    return DeleteResponse(id=reading_id)
 
 
 # ---------------------------------------------------------------------------
@@ -107,4 +154,15 @@ async def get_consumption_summary(
     db: AsyncSession = Depends(get_db),
 ):
     """Verbrauchszusammenfassung für Zeitraum und Zähler."""
-    raise NotImplementedError("ConsumptionService noch nicht implementiert")
+    parsed_ids = []
+    if meter_ids:
+        for mid in meter_ids.split(","):
+            parsed_ids.append(uuid.UUID(mid.strip()))
+
+    service = ReadingService(db)
+    return await service.get_consumption_summary(
+        meter_ids=parsed_ids,
+        start_date=start_date,
+        end_date=end_date,
+        granularity=granularity,
+    )

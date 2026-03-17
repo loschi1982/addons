@@ -25,8 +25,46 @@ from app.schemas.climate import (
     ClimateZoneSummaryResponse,
 )
 from app.schemas.common import DeleteResponse, PaginatedResponse
+from app.services.climate_service import ClimateService
 
 router = APIRouter()
+
+
+def _sensor_to_response(s) -> ClimateSensorResponse:
+    """ClimateSensor → ClimateSensorResponse."""
+    return ClimateSensorResponse(
+        id=s.id,
+        name=s.name,
+        sensor_type=s.sensor_type,
+        location=s.location,
+        zone=s.zone,
+        usage_unit_id=s.usage_unit_id,
+        ha_entity_id_temp=s.ha_entity_id_temp,
+        ha_entity_id_humidity=s.ha_entity_id_humidity,
+        data_source=s.data_source,
+        source_config=s.source_config,
+        target_temp_min=s.target_temp_min,
+        target_temp_max=s.target_temp_max,
+        target_humidity_min=s.target_humidity_min,
+        target_humidity_max=s.target_humidity_max,
+        associated_meter_ids=s.associated_meter_ids,
+        is_active=s.is_active,
+        created_at=s.created_at,
+    )
+
+
+def _reading_to_response(r) -> ClimateReadingResponse:
+    """ClimateReading → ClimateReadingResponse."""
+    return ClimateReadingResponse(
+        id=r.id,
+        sensor_id=r.sensor_id,
+        timestamp=r.timestamp,
+        temperature=r.temperature,
+        humidity=r.humidity,
+        dew_point=r.dew_point,
+        source=r.source,
+        quality=r.quality,
+    )
 
 
 @router.get("/sensors", response_model=PaginatedResponse[ClimateSensorResponse])
@@ -39,7 +77,18 @@ async def list_sensors(
     db: AsyncSession = Depends(get_db),
 ):
     """Alle Klimasensoren auflisten."""
-    raise NotImplementedError("ClimateService noch nicht implementiert")
+    service = ClimateService(db)
+    result = await service.list_sensors(
+        zone=zone, is_active=is_active, page=page, page_size=page_size
+    )
+    total = result["total"]
+    return PaginatedResponse(
+        items=[_sensor_to_response(s) for s in result["items"]],
+        total=total,
+        page=result["page"],
+        page_size=result["page_size"],
+        total_pages=(total + page_size - 1) // page_size if total > 0 else 0,
+    )
 
 
 @router.post("/sensors", response_model=ClimateSensorResponse, status_code=201)
@@ -49,7 +98,9 @@ async def create_sensor(
     db: AsyncSession = Depends(get_db),
 ):
     """Neuen Klimasensor anlegen."""
-    raise NotImplementedError("ClimateService noch nicht implementiert")
+    service = ClimateService(db)
+    sensor = await service.create_sensor(request.model_dump())
+    return _sensor_to_response(sensor)
 
 
 @router.get("/sensors/{sensor_id}", response_model=ClimateSensorResponse)
@@ -59,7 +110,9 @@ async def get_sensor(
     db: AsyncSession = Depends(get_db),
 ):
     """Klimasensor abrufen."""
-    raise NotImplementedError("ClimateService noch nicht implementiert")
+    service = ClimateService(db)
+    sensor = await service.get_sensor(sensor_id)
+    return _sensor_to_response(sensor)
 
 
 @router.put("/sensors/{sensor_id}", response_model=ClimateSensorResponse)
@@ -70,7 +123,9 @@ async def update_sensor(
     db: AsyncSession = Depends(get_db),
 ):
     """Klimasensor aktualisieren."""
-    raise NotImplementedError("ClimateService noch nicht implementiert")
+    service = ClimateService(db)
+    sensor = await service.update_sensor(sensor_id, request.model_dump(exclude_unset=True))
+    return _sensor_to_response(sensor)
 
 
 @router.delete("/sensors/{sensor_id}", response_model=DeleteResponse)
@@ -80,7 +135,9 @@ async def delete_sensor(
     db: AsyncSession = Depends(get_db),
 ):
     """Klimasensor löschen."""
-    raise NotImplementedError("ClimateService noch nicht implementiert")
+    service = ClimateService(db)
+    await service.delete_sensor(sensor_id)
+    return DeleteResponse(id=sensor_id)
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +155,18 @@ async def list_readings(
     db: AsyncSession = Depends(get_db),
 ):
     """Klimamesswerte auflisten."""
-    raise NotImplementedError("ClimateService noch nicht implementiert")
+    service = ClimateService(db)
+    result = await service.list_readings(
+        sensor_id=sensor_id, start=start, end=end, page=page, page_size=page_size
+    )
+    total = result["total"]
+    return PaginatedResponse(
+        items=[_reading_to_response(r) for r in result["items"]],
+        total=total,
+        page=result["page"],
+        page_size=result["page_size"],
+        total_pages=(total + page_size - 1) // page_size if total > 0 else 0,
+    )
 
 
 @router.post("/readings", response_model=ClimateReadingResponse, status_code=201)
@@ -108,7 +176,9 @@ async def create_reading(
     db: AsyncSession = Depends(get_db),
 ):
     """Klimamesswert manuell erfassen."""
-    raise NotImplementedError("ClimateService noch nicht implementiert")
+    service = ClimateService(db)
+    reading = await service.create_reading(request.model_dump())
+    return _reading_to_response(reading)
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +193,13 @@ async def get_comfort_dashboard(
     db: AsyncSession = Depends(get_db),
 ):
     """Klima-Komfort-Dashboard abrufen."""
-    raise NotImplementedError("ClimateService noch nicht implementiert")
+    service = ClimateService(db)
+    data = await service.get_comfort_dashboard(period_start, period_end)
+    return ClimateComfortDashboard(
+        zones=data["zones"],
+        current_readings=[_reading_to_response(r) for r in data["current_readings"]],
+        alerts=data["alerts"],
+    )
 
 
 @router.get("/zones/summary", response_model=list[ClimateZoneSummaryResponse])
@@ -134,4 +210,5 @@ async def get_zone_summaries(
     db: AsyncSession = Depends(get_db),
 ):
     """Zonen-Zusammenfassungen für einen Zeitraum."""
-    raise NotImplementedError("ClimateService noch nicht implementiert")
+    service = ClimateService(db)
+    return await service.get_zone_summaries(period_start, period_end)

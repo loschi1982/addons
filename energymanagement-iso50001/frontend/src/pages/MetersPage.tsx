@@ -1,12 +1,386 @@
+import { useEffect, useState, useCallback } from 'react';
+import { apiClient } from '@/utils/api';
+import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
+
+// ── Typen ──
+
+interface Meter {
+  id: string;
+  name: string;
+  meter_number: string | null;
+  energy_type: string;
+  unit: string;
+  data_source: string;
+  location: string | null;
+  is_active: boolean;
+  is_weather_corrected: boolean;
+  created_at: string;
+}
+
+interface MeterForm {
+  name: string;
+  meter_number: string;
+  energy_type: string;
+  unit: string;
+  data_source: string;
+  location: string;
+  is_weather_corrected: boolean;
+}
+
+const emptyForm: MeterForm = {
+  name: '',
+  meter_number: '',
+  energy_type: 'electricity',
+  unit: 'kWh',
+  data_source: 'manual',
+  location: '',
+  is_weather_corrected: false,
+};
+
+const DATA_SOURCES: Record<string, string> = {
+  manual: 'Manuell',
+  shelly: 'Shelly',
+  modbus: 'Modbus',
+  knx: 'KNX',
+  homeassistant: 'Home Assistant',
+};
+
+// ── Komponente ──
+
 export default function MetersPage() {
+  const [meters, setMeters] = useState<Meter[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  const [filterType, setFilterType] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  // Modal-State
+  const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<MeterForm>(emptyForm);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const pageSize = 25;
+
+  const loadMeters = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: page.toString(),
+        page_size: pageSize.toString(),
+      });
+      if (search) params.append('search', search);
+      if (filterType) params.append('energy_type', filterType);
+
+      const response = await apiClient.get<PaginatedResponse<Meter>>(
+        `/api/v1/meters?${params}`
+      );
+      setMeters(response.data.items);
+      setTotal(response.data.total);
+    } catch {
+      // Fehler wird vom Interceptor behandelt
+    } finally {
+      setLoading(false);
+    }
+  }, [page, search, filterType]);
+
+  useEffect(() => {
+    loadMeters();
+  }, [loadMeters]);
+
+  const handleCreate = () => {
+    setEditingId(null);
+    setForm(emptyForm);
+    setFormError(null);
+    setShowModal(true);
+  };
+
+  const handleEdit = (meter: Meter) => {
+    setEditingId(meter.id);
+    setForm({
+      name: meter.name,
+      meter_number: meter.meter_number || '',
+      energy_type: meter.energy_type,
+      unit: meter.unit,
+      data_source: meter.data_source,
+      location: meter.location || '',
+      is_weather_corrected: meter.is_weather_corrected,
+    });
+    setFormError(null);
+    setShowModal(true);
+  };
+
+  const handleDelete = async (meter: Meter) => {
+    if (!confirm(`Zähler "${meter.name}" wirklich deaktivieren?`)) return;
+    try {
+      await apiClient.delete(`/api/v1/meters/${meter.id}`);
+      loadMeters();
+    } catch {
+      // Fehler wird vom Interceptor behandelt
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
+    setSaving(true);
+
+    try {
+      if (editingId) {
+        await apiClient.put(`/api/v1/meters/${editingId}`, form);
+      } else {
+        await apiClient.post('/api/v1/meters', form);
+      }
+      setShowModal(false);
+      loadMeters();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setFormError(error.response?.data?.detail || 'Fehler beim Speichern');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const totalPages = Math.ceil(total / pageSize);
+
   return (
     <div>
-      <h1 className="page-title">Zähler</h1>
-      <p className="mt-2 text-gray-500">Energiezähler verwalten und konfigurieren.</p>
-      {/* TODO: Implementierung */}
-      <div className="card mt-6">
-        <p className="text-gray-400">Noch nicht implementiert.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="page-title">Zähler</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            {total} Zähler insgesamt
+          </p>
+        </div>
+        <button onClick={handleCreate} className="btn-primary">
+          + Neuer Zähler
+        </button>
       </div>
+
+      {/* Filter */}
+      <div className="card mt-4 flex gap-4">
+        <input
+          type="text"
+          className="input flex-1"
+          placeholder="Suche nach Name, Nummer, Standort..."
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+        />
+        <select
+          className="input w-48"
+          value={filterType}
+          onChange={(e) => { setFilterType(e.target.value); setPage(1); }}
+        >
+          <option value="">Alle Energiearten</option>
+          {Object.entries(ENERGY_TYPE_LABELS).map(([key, label]) => (
+            <option key={key} value={key}>{label}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Tabelle */}
+      <div className="card mt-4 overflow-hidden p-0">
+        {loading ? (
+          <div className="p-8 text-center text-gray-400">Laden...</div>
+        ) : meters.length === 0 ? (
+          <div className="p-8 text-center text-gray-400">
+            Keine Zähler gefunden. Legen Sie den ersten Zähler an.
+          </div>
+        ) : (
+          <table className="w-full text-left text-sm">
+            <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
+              <tr>
+                <th className="px-4 py-3">Name</th>
+                <th className="px-4 py-3">Nummer</th>
+                <th className="px-4 py-3">Energieart</th>
+                <th className="px-4 py-3">Quelle</th>
+                <th className="px-4 py-3">Standort</th>
+                <th className="px-4 py-3 text-right">Aktionen</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {meters.map((meter) => (
+                <tr key={meter.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 font-medium">{meter.name}</td>
+                  <td className="px-4 py-3 text-gray-500">
+                    {meter.meter_number || '–'}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
+                      {ENERGY_TYPE_LABELS[meter.energy_type as EnergyType] || meter.energy_type}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-500">
+                    {DATA_SOURCES[meter.data_source] || meter.data_source}
+                  </td>
+                  <td className="px-4 py-3 text-gray-500">
+                    {meter.location || '–'}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={() => handleEdit(meter)}
+                      className="mr-2 text-primary-600 hover:text-primary-800"
+                    >
+                      Bearbeiten
+                    </button>
+                    <button
+                      onClick={() => handleDelete(meter)}
+                      className="text-red-500 hover:text-red-700"
+                    >
+                      Löschen
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="mt-4 flex items-center justify-between">
+          <p className="text-sm text-gray-500">
+            Seite {page} von {totalPages}
+          </p>
+          <div className="flex gap-2">
+            <button
+              className="btn-secondary"
+              disabled={page <= 1}
+              onClick={() => setPage(page - 1)}
+            >
+              Zurück
+            </button>
+            <button
+              className="btn-secondary"
+              disabled={page >= totalPages}
+              onClick={() => setPage(page + 1)}
+            >
+              Weiter
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Zähler erstellen/bearbeiten */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+            <h2 className="mb-4 text-lg font-bold">
+              {editingId ? 'Zähler bearbeiten' : 'Neuer Zähler'}
+            </h2>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {formError && (
+                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+                  {formError}
+                </div>
+              )}
+
+              <div>
+                <label className="label">Name *</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Zählernummer</label>
+                  <input
+                    type="text"
+                    className="input"
+                    value={form.meter_number}
+                    onChange={(e) => setForm({ ...form, meter_number: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Standort</label>
+                  <input
+                    type="text"
+                    className="input"
+                    value={form.location}
+                    onChange={(e) => setForm({ ...form, location: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="label">Energieart *</label>
+                  <select
+                    className="input"
+                    value={form.energy_type}
+                    onChange={(e) => setForm({ ...form, energy_type: e.target.value })}
+                  >
+                    {Object.entries(ENERGY_TYPE_LABELS).map(([key, label]) => (
+                      <option key={key} value={key}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Einheit</label>
+                  <select
+                    className="input"
+                    value={form.unit}
+                    onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                  >
+                    <option value="kWh">kWh</option>
+                    <option value="MWh">MWh</option>
+                    <option value="m³">m³</option>
+                    <option value="l">Liter</option>
+                    <option value="kg">kg</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Datenquelle</label>
+                  <select
+                    className="input"
+                    value={form.data_source}
+                    onChange={(e) => setForm({ ...form, data_source: e.target.value })}
+                  >
+                    {Object.entries(DATA_SOURCES).map(([key, label]) => (
+                      <option key={key} value={key}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="is_weather_corrected"
+                  checked={form.is_weather_corrected}
+                  onChange={(e) => setForm({ ...form, is_weather_corrected: e.target.checked })}
+                />
+                <label htmlFor="is_weather_corrected" className="text-sm">
+                  Witterungskorrektur aktivieren
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="btn-secondary"
+                >
+                  Abbrechen
+                </button>
+                <button type="submit" className="btn-primary" disabled={saving}>
+                  {saving ? 'Speichern...' : editingId ? 'Speichern' : 'Anlegen'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -8,12 +8,14 @@ entsprechenden Prefix registriert wird.
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    audit,
     auth,
     climate,
     consumers,
     dashboard,
     emissions,
     imports,
+    integrations,
     iso,
     meters,
     readings,
@@ -49,3 +51,9 @@ api_router.include_router(reports.router, prefix="/reports", tags=["Berichte"])
 
 # ISO 50001 Management
 api_router.include_router(iso.router, prefix="/iso", tags=["ISO 50001"])
+
+# Integrationen (HA, Shelly, Modbus, KNX, Polling)
+api_router.include_router(integrations.router, prefix="/integrations", tags=["Integrationen"])
+
+# Audit-Log
+api_router.include_router(audit.router, prefix="/audit", tags=["Audit-Log"])

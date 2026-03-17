@@ -1,12 +1,630 @@
+import { useEffect, useState, useCallback } from 'react';
+import { apiClient } from '@/utils/api';
+import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
+
+// ── Typen ──
+
+interface Meter {
+  id: string;
+  name: string;
+  meter_number: string | null;
+  energy_type: string;
+  unit: string;
+  data_source: string;
+  is_active: boolean;
+}
+
+interface Reading {
+  id: string;
+  meter_id: string;
+  timestamp: string;
+  value: number;
+  consumption: number | null;
+  source: string;
+  quality: string;
+  notes: string | null;
+  import_batch_id: string | null;
+}
+
+interface ReadingForm {
+  meter_id: string;
+  timestamp: string;
+  value: string;
+  notes: string;
+}
+
+interface BulkRow {
+  timestamp: string;
+  value: string;
+}
+
+const QUALITY_LABELS: Record<string, string> = {
+  measured: 'Gemessen',
+  estimated: 'Geschätzt',
+  calculated: 'Berechnet',
+  imported: 'Importiert',
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  manual: 'Manuell',
+  csv_import: 'CSV-Import',
+  shelly: 'Shelly',
+  modbus: 'Modbus',
+  knx: 'KNX',
+  homeassistant: 'Home Assistant',
+};
+
+// ── Komponente ──
+
 export default function ReadingsPage() {
+  // Zähler-Liste
+  const [meters, setMeters] = useState<Meter[]>([]);
+  const [selectedMeterId, setSelectedMeterId] = useState('');
+
+  // Readings-Liste
+  const [readings, setReadings] = useState<Reading[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const pageSize = 25;
+
+  // Einzelerfassung
+  const [showSingleModal, setShowSingleModal] = useState(false);
+  const [singleForm, setSingleForm] = useState<ReadingForm>({
+    meter_id: '',
+    timestamp: new Date().toISOString().slice(0, 16),
+    value: '',
+    notes: '',
+  });
+  const [singleError, setSingleError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Monatserfassung (Bulk)
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkMeterId, setBulkMeterId] = useState('');
+  const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkSaving, setBulkSaving] = useState(false);
+
+  // Bearbeiten
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ value: '', notes: '' });
+
+  // Zähler laden
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await apiClient.get<PaginatedResponse<Meter>>(
+          '/api/v1/meters?page_size=100'
+        );
+        setMeters(res.data.items.filter((m) => m.is_active));
+      } catch {
+        // Interceptor handled
+      }
+    })();
+  }, []);
+
+  // Readings laden
+  const loadReadings = useCallback(async () => {
+    if (!selectedMeterId) {
+      setReadings([]);
+      setTotal(0);
+      return;
+    }
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({
+        meter_id: selectedMeterId,
+        page: page.toString(),
+        page_size: pageSize.toString(),
+      });
+      const res = await apiClient.get<PaginatedResponse<Reading>>(
+        `/api/v1/readings?${params}`
+      );
+      setReadings(res.data.items);
+      setTotal(res.data.total);
+    } catch {
+      // Interceptor handled
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedMeterId, page]);
+
+  useEffect(() => {
+    loadReadings();
+  }, [loadReadings]);
+
+  // Einzelerfassung
+  const handleOpenSingle = () => {
+    setSingleForm({
+      meter_id: selectedMeterId || '',
+      timestamp: new Date().toISOString().slice(0, 16),
+      value: '',
+      notes: '',
+    });
+    setSingleError(null);
+    setShowSingleModal(true);
+  };
+
+  const handleSingleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSingleError(null);
+    setSaving(true);
+    try {
+      await apiClient.post('/api/v1/readings', {
+        meter_id: singleForm.meter_id,
+        timestamp: new Date(singleForm.timestamp).toISOString(),
+        value: parseFloat(singleForm.value.replace(',', '.')),
+        source: 'manual',
+        quality: 'measured',
+        notes: singleForm.notes || null,
+      });
+      setShowSingleModal(false);
+      if (singleForm.meter_id === selectedMeterId) loadReadings();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setSingleError(error.response?.data?.detail || 'Fehler beim Speichern');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Monatserfassung (Bulk)
+  const handleOpenBulk = () => {
+    setBulkMeterId(selectedMeterId || '');
+    setBulkError(null);
+    // 12 leere Zeilen fuer Monatsablesung generieren
+    const now = new Date();
+    const rows: BulkRow[] = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      rows.push({
+        timestamp: d.toISOString().slice(0, 10),
+        value: '',
+      });
+    }
+    setBulkRows(rows);
+    setShowBulkModal(true);
+  };
+
+  const handleBulkRowChange = (idx: number, field: keyof BulkRow, val: string) => {
+    setBulkRows((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: val } : r)));
+  };
+
+  const handleBulkSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBulkError(null);
+    const filled = bulkRows.filter((r) => r.value.trim() !== '');
+    if (filled.length === 0) {
+      setBulkError('Bitte mindestens einen Wert eingeben');
+      return;
+    }
+    setBulkSaving(true);
+    try {
+      const readings = filled.map((r) => ({
+        meter_id: bulkMeterId,
+        timestamp: new Date(r.timestamp + 'T00:00:00').toISOString(),
+        value: parseFloat(r.value.replace(',', '.')),
+        source: 'manual',
+        quality: 'measured',
+      }));
+      await apiClient.post('/api/v1/readings/bulk', { readings });
+      setShowBulkModal(false);
+      if (bulkMeterId === selectedMeterId) loadReadings();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setBulkError(error.response?.data?.detail || 'Fehler beim Speichern');
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+
+  // Bearbeiten
+  const handleEdit = (reading: Reading) => {
+    setEditingId(reading.id);
+    setEditForm({
+      value: reading.value.toString(),
+      notes: reading.notes || '',
+    });
+  };
+
+  const handleEditSave = async (readingId: string) => {
+    try {
+      await apiClient.put(`/api/v1/readings/${readingId}`, {
+        value: parseFloat(editForm.value.replace(',', '.')),
+        notes: editForm.notes || null,
+      });
+      setEditingId(null);
+      loadReadings();
+    } catch {
+      // Interceptor handled
+    }
+  };
+
+  const handleDelete = async (reading: Reading) => {
+    if (!confirm(`Zählerstand vom ${formatDate(reading.timestamp)} wirklich löschen?`)) return;
+    try {
+      await apiClient.delete(`/api/v1/readings/${reading.id}`);
+      loadReadings();
+    } catch {
+      // Interceptor handled
+    }
+  };
+
+  const selectedMeter = meters.find((m) => m.id === selectedMeterId);
+  const totalPages = Math.ceil(total / pageSize);
+
   return (
     <div>
-      <h1 className="page-title">Zählerstände</h1>
-      <p className="mt-2 text-gray-500">Zählerstände erfassen und Verbrauch analysieren.</p>
-      {/* TODO: Implementierung */}
-      <div className="card mt-6">
-        <p className="text-gray-400">Noch nicht implementiert.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="page-title">Zählerstände</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Zählerstände erfassen und Verbrauch analysieren
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={handleOpenBulk} className="btn-secondary">
+            Monatsablesung
+          </button>
+          <button onClick={handleOpenSingle} className="btn-primary">
+            + Neuer Zählerstand
+          </button>
+        </div>
       </div>
+
+      {/* Zähler-Auswahl */}
+      <div className="card mt-4">
+        <label className="label">Zähler auswählen</label>
+        <select
+          className="input max-w-md"
+          value={selectedMeterId}
+          onChange={(e) => { setSelectedMeterId(e.target.value); setPage(1); }}
+        >
+          <option value="">– Zähler wählen –</option>
+          {meters.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name} ({ENERGY_TYPE_LABELS[m.energy_type as EnergyType] || m.energy_type}
+              {m.meter_number ? ` – ${m.meter_number}` : ''})
+            </option>
+          ))}
+        </select>
+
+        {selectedMeter && (
+          <div className="mt-2 flex gap-4 text-sm text-gray-500">
+            <span>Einheit: <b>{selectedMeter.unit}</b></span>
+            <span>
+              Energieart:{' '}
+              <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
+                {ENERGY_TYPE_LABELS[selectedMeter.energy_type as EnergyType] || selectedMeter.energy_type}
+              </span>
+            </span>
+            <span>Stände gesamt: <b>{total}</b></span>
+          </div>
+        )}
+      </div>
+
+      {/* Tabelle */}
+      {selectedMeterId && (
+        <div className="card mt-4 overflow-hidden p-0">
+          {loading ? (
+            <div className="p-8 text-center text-gray-400">Laden...</div>
+          ) : readings.length === 0 ? (
+            <div className="p-8 text-center text-gray-400">
+              Keine Zählerstände vorhanden. Erfassen Sie den ersten Stand.
+            </div>
+          ) : (
+            <table className="w-full text-left text-sm">
+              <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
+                <tr>
+                  <th className="px-4 py-3">Zeitpunkt</th>
+                  <th className="px-4 py-3 text-right">Zählerstand</th>
+                  <th className="px-4 py-3 text-right">Verbrauch</th>
+                  <th className="px-4 py-3">Quelle</th>
+                  <th className="px-4 py-3">Qualität</th>
+                  <th className="px-4 py-3">Notizen</th>
+                  <th className="px-4 py-3 text-right">Aktionen</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {readings.map((r) => (
+                  <tr key={r.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 whitespace-nowrap">{formatDate(r.timestamp)}</td>
+                    <td className="px-4 py-3 text-right font-mono">
+                      {editingId === r.id ? (
+                        <input
+                          type="text"
+                          className="input w-28 text-right"
+                          value={editForm.value}
+                          onChange={(e) => setEditForm({ ...editForm, value: e.target.value })}
+                        />
+                      ) : (
+                        <>
+                          {formatNumber(r.value)} {selectedMeter?.unit}
+                        </>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono">
+                      {r.consumption != null ? (
+                        <span className={r.consumption >= 0 ? 'text-green-600' : 'text-red-500'}>
+                          {r.consumption >= 0 ? '+' : ''}{formatNumber(r.consumption)} {selectedMeter?.unit}
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">–</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">
+                      {SOURCE_LABELS[r.source] || r.source}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                        {QUALITY_LABELS[r.quality] || r.quality}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-500 max-w-[200px] truncate">
+                      {editingId === r.id ? (
+                        <input
+                          type="text"
+                          className="input w-full"
+                          value={editForm.notes}
+                          onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                          placeholder="Notizen..."
+                        />
+                      ) : (
+                        r.notes || '–'
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      {editingId === r.id ? (
+                        <>
+                          <button
+                            onClick={() => handleEditSave(r.id)}
+                            className="mr-2 text-green-600 hover:text-green-800"
+                          >
+                            Speichern
+                          </button>
+                          <button
+                            onClick={() => setEditingId(null)}
+                            className="text-gray-500 hover:text-gray-700"
+                          >
+                            Abbrechen
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleEdit(r)}
+                            className="mr-2 text-primary-600 hover:text-primary-800"
+                          >
+                            Bearbeiten
+                          </button>
+                          <button
+                            onClick={() => handleDelete(r)}
+                            className="text-red-500 hover:text-red-700"
+                          >
+                            Löschen
+                          </button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="mt-4 flex items-center justify-between">
+          <p className="text-sm text-gray-500">
+            Seite {page} von {totalPages}
+          </p>
+          <div className="flex gap-2">
+            <button className="btn-secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+              Zurück
+            </button>
+            <button className="btn-secondary" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
+              Weiter
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Kein Zähler ausgewählt */}
+      {!selectedMeterId && (
+        <div className="card mt-4">
+          <div className="py-12 text-center text-gray-400">
+            Bitte wählen Sie einen Zähler aus, um dessen Stände anzuzeigen.
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Einzelerfassung ── */}
+      {showSingleModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+            <h2 className="mb-4 text-lg font-bold">Neuer Zählerstand</h2>
+
+            <form onSubmit={handleSingleSubmit} className="space-y-4">
+              {singleError && (
+                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{singleError}</div>
+              )}
+
+              <div>
+                <label className="label">Zähler *</label>
+                <select
+                  className="input"
+                  value={singleForm.meter_id}
+                  onChange={(e) => setSingleForm({ ...singleForm, meter_id: e.target.value })}
+                  required
+                >
+                  <option value="">– Zähler wählen –</option>
+                  {meters.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name} ({m.unit})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Zeitpunkt *</label>
+                  <input
+                    type="datetime-local"
+                    className="input"
+                    value={singleForm.timestamp}
+                    onChange={(e) => setSingleForm({ ...singleForm, timestamp: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="label">
+                    Zählerstand *{' '}
+                    {singleForm.meter_id && (
+                      <span className="font-normal text-gray-400">
+                        ({meters.find((m) => m.id === singleForm.meter_id)?.unit})
+                      </span>
+                    )}
+                  </label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="z.B. 12345,67"
+                    value={singleForm.value}
+                    onChange={(e) => setSingleForm({ ...singleForm, value: e.target.value })}
+                    required
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="label">Notizen</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Optionale Anmerkung..."
+                  value={singleForm.notes}
+                  onChange={(e) => setSingleForm({ ...singleForm, notes: e.target.value })}
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowSingleModal(false)} className="btn-secondary">
+                  Abbrechen
+                </button>
+                <button type="submit" className="btn-primary" disabled={saving}>
+                  {saving ? 'Speichern...' : 'Speichern'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Monatsablesung (Bulk) ── */}
+      {showBulkModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+            <h2 className="mb-4 text-lg font-bold">Monatsablesung</h2>
+            <p className="mb-4 text-sm text-gray-500">
+              Tragen Sie die monatlichen Zählerstände ein. Leere Zeilen werden übersprungen.
+            </p>
+
+            <form onSubmit={handleBulkSubmit} className="space-y-4">
+              {bulkError && (
+                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{bulkError}</div>
+              )}
+
+              <div>
+                <label className="label">Zähler *</label>
+                <select
+                  className="input"
+                  value={bulkMeterId}
+                  onChange={(e) => setBulkMeterId(e.target.value)}
+                  required
+                >
+                  <option value="">– Zähler wählen –</option>
+                  {meters.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name} ({m.unit})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="overflow-hidden rounded-lg border">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                    <tr>
+                      <th className="px-4 py-2 text-left">Datum</th>
+                      <th className="px-4 py-2 text-left">
+                        Zählerstand{' '}
+                        {bulkMeterId && (
+                          <span className="normal-case font-normal text-gray-400">
+                            ({meters.find((m) => m.id === bulkMeterId)?.unit})
+                          </span>
+                        )}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {bulkRows.map((row, idx) => (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="px-4 py-1.5">
+                          <input
+                            type="date"
+                            className="input"
+                            value={row.timestamp}
+                            onChange={(e) => handleBulkRowChange(idx, 'timestamp', e.target.value)}
+                          />
+                        </td>
+                        <td className="px-4 py-1.5">
+                          <input
+                            type="text"
+                            className="input"
+                            placeholder="z.B. 12345,67"
+                            value={row.value}
+                            onChange={(e) => handleBulkRowChange(idx, 'value', e.target.value)}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowBulkModal(false)} className="btn-secondary">
+                  Abbrechen
+                </button>
+                <button type="submit" className="btn-primary" disabled={bulkSaving}>
+                  {bulkSaving ? 'Speichern...' : `${bulkRows.filter((r) => r.value.trim()).length} Stände speichern`}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+// ── Hilfs-Funktionen ──
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('de-DE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatNumber(val: number): string {
+  return val.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }

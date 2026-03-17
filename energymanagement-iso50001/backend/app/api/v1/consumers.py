@@ -8,10 +8,12 @@ Lüftungsanlage), die einem oder mehreren Zählern zugeordnet werden.
 import uuid
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_permission
+from app.models.consumer import Consumer
 from app.models.user import User
 from app.schemas.common import DeleteResponse, PaginatedResponse
 from app.schemas.meter import ConsumerCreate, ConsumerResponse, ConsumerUpdate
@@ -30,17 +32,83 @@ async def list_consumers(
     db: AsyncSession = Depends(get_db),
 ):
     """Alle Verbraucher auflisten."""
-    raise NotImplementedError("ConsumerService noch nicht implementiert")
+    query = select(Consumer).where(Consumer.is_active == True)  # noqa: E712
+
+    if category:
+        query = query.where(Consumer.category == category)
+    if usage_unit_id:
+        query = query.where(Consumer.usage_unit_id == usage_unit_id)
+    if search:
+        pattern = f"%{search}%"
+        query = query.where(
+            or_(
+                Consumer.name.ilike(pattern),
+                Consumer.notes.ilike(pattern),
+            )
+        )
+
+    count_query = select(func.count()).select_from(query.subquery())
+    total = (await db.execute(count_query)).scalar() or 0
+
+    offset = (page - 1) * page_size
+    query = query.offset(offset).limit(page_size).order_by(Consumer.name)
+    result = await db.execute(query)
+    consumers = result.scalars().all()
+
+    items = [
+        ConsumerResponse(
+            id=c.id,
+            name=c.name,
+            category=c.category,
+            rated_power_kw=c.rated_power,
+            operating_hours_per_year=int(c.operating_hours) if c.operating_hours else None,
+            priority=str(c.priority),
+            usage_unit_id=c.usage_unit_id,
+            description=c.notes,
+            created_at=c.created_at,
+        )
+        for c in consumers
+    ]
+
+    return PaginatedResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=(total + page_size - 1) // page_size if total > 0 else 0,
+    )
 
 
 @router.post("", response_model=ConsumerResponse, status_code=201)
 async def create_consumer(
     request: ConsumerCreate,
-    current_user: User = Depends(require_permission("consumers", "create")),
+    current_user: User = require_permission("consumers", "create"),
     db: AsyncSession = Depends(get_db),
 ):
     """Neuen Verbraucher anlegen."""
-    raise NotImplementedError("ConsumerService noch nicht implementiert")
+    consumer = Consumer(
+        name=request.name,
+        category=request.category,
+        rated_power=request.rated_power_kw,
+        operating_hours=request.operating_hours_per_year,
+        priority=int(request.priority) if request.priority else 0,
+        usage_unit_id=request.usage_unit_id,
+        notes=request.description,
+    )
+    db.add(consumer)
+    await db.commit()
+
+    return ConsumerResponse(
+        id=consumer.id,
+        name=consumer.name,
+        category=consumer.category,
+        rated_power_kw=consumer.rated_power,
+        operating_hours_per_year=int(consumer.operating_hours) if consumer.operating_hours else None,
+        priority=str(consumer.priority),
+        usage_unit_id=consumer.usage_unit_id,
+        description=consumer.notes,
+        created_at=consumer.created_at,
+    )
 
 
 @router.get("/{consumer_id}", response_model=ConsumerResponse)
@@ -50,25 +118,90 @@ async def get_consumer(
     db: AsyncSession = Depends(get_db),
 ):
     """Einzelnen Verbraucher abrufen."""
-    raise NotImplementedError("ConsumerService noch nicht implementiert")
+    consumer = await db.get(Consumer, consumer_id)
+    if not consumer:
+        from app.core.exceptions import EnergyManagementError
+        raise EnergyManagementError(
+            "Verbraucher nicht gefunden",
+            error_code="CONSUMER_NOT_FOUND",
+            status_code=404,
+        )
+
+    return ConsumerResponse(
+        id=consumer.id,
+        name=consumer.name,
+        category=consumer.category,
+        rated_power_kw=consumer.rated_power,
+        operating_hours_per_year=int(consumer.operating_hours) if consumer.operating_hours else None,
+        priority=str(consumer.priority),
+        usage_unit_id=consumer.usage_unit_id,
+        description=consumer.notes,
+        created_at=consumer.created_at,
+    )
 
 
 @router.put("/{consumer_id}", response_model=ConsumerResponse)
 async def update_consumer(
     consumer_id: uuid.UUID,
     request: ConsumerUpdate,
-    current_user: User = Depends(require_permission("consumers", "update")),
+    current_user: User = require_permission("consumers", "update"),
     db: AsyncSession = Depends(get_db),
 ):
     """Verbraucher aktualisieren."""
-    raise NotImplementedError("ConsumerService noch nicht implementiert")
+    consumer = await db.get(Consumer, consumer_id)
+    if not consumer:
+        from app.core.exceptions import EnergyManagementError
+        raise EnergyManagementError(
+            "Verbraucher nicht gefunden",
+            error_code="CONSUMER_NOT_FOUND",
+            status_code=404,
+        )
+
+    data = request.model_dump(exclude_unset=True)
+    field_map = {
+        "name": "name",
+        "category": "category",
+        "rated_power_kw": "rated_power",
+        "operating_hours_per_year": "operating_hours",
+        "priority": "priority",
+        "usage_unit_id": "usage_unit_id",
+        "description": "notes",
+    }
+    for schema_field, model_field in field_map.items():
+        if schema_field in data:
+            setattr(consumer, model_field, data[schema_field])
+
+    await db.commit()
+
+    return ConsumerResponse(
+        id=consumer.id,
+        name=consumer.name,
+        category=consumer.category,
+        rated_power_kw=consumer.rated_power,
+        operating_hours_per_year=int(consumer.operating_hours) if consumer.operating_hours else None,
+        priority=str(consumer.priority),
+        usage_unit_id=consumer.usage_unit_id,
+        description=consumer.notes,
+        created_at=consumer.created_at,
+    )
 
 
 @router.delete("/{consumer_id}", response_model=DeleteResponse)
 async def delete_consumer(
     consumer_id: uuid.UUID,
-    current_user: User = Depends(require_permission("consumers", "delete")),
+    current_user: User = require_permission("consumers", "delete"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Verbraucher löschen."""
-    raise NotImplementedError("ConsumerService noch nicht implementiert")
+    """Verbraucher deaktivieren (Soft-Delete)."""
+    consumer = await db.get(Consumer, consumer_id)
+    if not consumer:
+        from app.core.exceptions import EnergyManagementError
+        raise EnergyManagementError(
+            "Verbraucher nicht gefunden",
+            error_code="CONSUMER_NOT_FOUND",
+            status_code=404,
+        )
+
+    consumer.is_active = False
+    await db.commit()
+    return DeleteResponse(id=consumer_id)

@@ -9,6 +9,9 @@ Celery wird für zeitgesteuerte und rechenintensive Aufgaben verwendet:
 - Witterungskorrektur-Berechnung
 """
 
+import asyncio
+from datetime import date, timedelta
+
 from celery import Celery
 
 from app.config import get_settings
@@ -45,36 +48,89 @@ celery_app.conf.update(
 )
 
 
+def _run_async(coro):
+    """Hilfsfunktion: Async-Code in synchronem Celery-Task ausführen."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+async def _get_db_session():
+    """Neue DB-Session für Celery-Tasks erstellen."""
+    from app.core.database import async_session_factory
+    async with async_session_factory() as session:
+        yield session
+
+
 @celery_app.task(name="app.tasks.poll_all_meters")
 def poll_all_meters():
     """Alle konfigurierten Zähler automatisch abfragen."""
-    # TODO: PollingManager aufrufen
-    pass
+    async def _run():
+        from app.core.database import async_session_factory
+        from app.integrations.polling_manager import PollingManager
+
+        async with async_session_factory() as db:
+            manager = PollingManager(db)
+            return await manager.poll_all_meters()
+
+    return _run_async(_run())
 
 
 @celery_app.task(name="app.tasks.fetch_weather_data")
 def fetch_weather_data():
     """Wetterdaten vom DWD abrufen und Gradtagszahlen berechnen."""
-    # TODO: WeatherService.fetch_from_dwd() aufrufen
-    pass
+    async def _run():
+        from app.core.database import async_session_factory
+        from app.services.weather_service import WeatherService
+
+        async with async_session_factory() as db:
+            service = WeatherService(db)
+            return await service.fetch_all_active_stations()
+
+    return _run_async(_run())
 
 
 @celery_app.task(name="app.tasks.recalculate_co2")
 def recalculate_co2():
     """CO₂-Emissionen für den aktuellen Monat neu berechnen."""
-    # TODO: EmissionService.calculate_emissions() aufrufen
-    pass
+    async def _run():
+        from app.core.database import async_session_factory
+        from app.services.co2_service import CO2Service
+
+        today = date.today()
+        start = date(today.year, today.month, 1)
+
+        async with async_session_factory() as db:
+            service = CO2Service(db)
+            return await service.calculate_all_meters(start, today)
+
+    return _run_async(_run())
 
 
 @celery_app.task(name="app.tasks.generate_report_pdf")
 def generate_report_pdf(report_id: str):
     """PDF-Bericht im Hintergrund generieren."""
-    # TODO: ReportService.generate_pdf() aufrufen
+    # Wird in Phase 4 (Berichte) implementiert
     pass
 
 
 @celery_app.task(name="app.tasks.calculate_weather_correction")
 def calculate_weather_correction(meter_id: str, start_date: str, end_date: str):
     """Witterungskorrektur im Hintergrund berechnen."""
-    # TODO: WeatherCorrectionService.calculate_correction() aufrufen
-    pass
+    import uuid
+
+    async def _run():
+        from app.core.database import async_session_factory
+        from app.services.weather_service import WeatherCorrectionService
+
+        async with async_session_factory() as db:
+            service = WeatherCorrectionService(db)
+            return await service.calculate_correction(
+                uuid.UUID(meter_id),
+                date.fromisoformat(start_date),
+                date.fromisoformat(end_date),
+            )
+
+    return _run_async(_run())
