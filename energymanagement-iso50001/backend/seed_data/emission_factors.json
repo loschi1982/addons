@@ -1,0 +1,125 @@
+{
+  "sources": [
+    {
+      "name": "BAFA",
+      "source_type": "government",
+      "description": "Bundesamt für Wirtschaft und Ausfuhrkontrolle – offizielle Emissionsfaktoren für die Energieberatung",
+      "url": "https://www.bafa.de",
+      "is_default": true
+    },
+    {
+      "name": "UBA",
+      "source_type": "government",
+      "description": "Umweltbundesamt – CO₂-Emissionsfaktoren für den deutschen Strommix",
+      "url": "https://www.umweltbundesamt.de",
+      "is_default": false
+    },
+    {
+      "name": "Electricity Maps",
+      "source_type": "api",
+      "description": "Echtzeit-CO₂-Intensität des Stromnetzes nach Region",
+      "url": "https://electricitymaps.com",
+      "is_default": false
+    }
+  ],
+  "factors": [
+    {
+      "source": "BAFA",
+      "energy_type": "electricity",
+      "year": 2023,
+      "co2_g_per_kwh": 434,
+      "scope": "scope_2"
+    },
+    {
+      "source": "BAFA",
+      "energy_type": "electricity",
+      "year": 2024,
+      "co2_g_per_kwh": 380,
+      "scope": "scope_2"
+    },
+    {
+      "source": "BAFA",
+      "energy_type": "natural_gas",
+      "year": 2023,
+      "co2_g_per_kwh": 201,
+      "scope": "scope_1"
+    },
+    {
+      "source": "BAFA",
+      "energy_type": "natural_gas",
+      "year": 2024,
+      "co2_g_per_kwh": 201,
+      "scope": "scope_1"
+    },
+    {
+      "source": "BAFA",
+      "energy_type": "heating_oil",
+      "year": 2023,
+      "co2_g_per_kwh": 266,
+      "scope": "scope_1"
+    },
+    {
+      "source": "BAFA",
+      "energy_type": "heating_oil",
+      "year": 2024,
+      "co2_g_per_kwh": 266,
+      "scope": "scope_1"
+    },
+    {
+      "source": "BAFA",
+      "energy_type": "district_heating",
+      "year": 2023,
+      "co2_g_per_kwh": 183,
+      "scope": "scope_2"
+    },
+    {
+      "source": "BAFA",
+      "energy_type": "district_heating",
+      "year": 2024,
+      "co2_g_per_kwh": 175,
+      "scope": "scope_2"
+    },
+    {
+      "source": "BAFA",
+      "energy_type": "lpg",
+      "year": 2024,
+      "co2_g_per_kwh": 227,
+      "scope": "scope_1"
+    },
+    {
+      "source": "BAFA",
+      "energy_type": "wood_pellets",
+      "year": 2024,
+      "co2_g_per_kwh": 22,
+      "scope": "scope_1"
+    },
+    {
+      "source": "BAFA",
+      "energy_type": "solar",
+      "year": 2024,
+      "co2_g_per_kwh": 0,
+      "scope": "scope_1"
+    },
+    {
+      "source": "UBA",
+      "energy_type": "electricity",
+      "year": 2022,
+      "co2_g_per_kwh": 434,
+      "scope": "scope_2"
+    },
+    {
+      "source": "UBA",
+      "energy_type": "electricity",
+      "year": 2023,
+      "co2_g_per_kwh": 380,
+      "scope": "scope_2"
+    },
+    {
+      "source": "UBA",
+      "energy_type": "electricity",
+      "year": 2024,
+      "co2_g_per_kwh": 350,
+      "scope": "scope_2"
+    }
+  ]
+}

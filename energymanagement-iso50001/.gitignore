@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+venv/
+.venv/
+
+# Node.js
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Umgebung
+.env
+.env.*
+!.env.example
+
+# Datenbanken
+*.db
+*.sqlite3
+
+# Tests
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Temporär
+*.log
+tmp/
+temp/
+
+# Generierte PDFs (nicht einchecken)
+backend/reports/*.pdf
+
+# Uploads
+backend/uploads/

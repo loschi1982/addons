@@ -1,0 +1,128 @@
+# ===========================================================================
+# Docker Compose für lokale Entwicklung
+# ===========================================================================
+# Startet alle benötigten Dienste für die Entwicklung:
+# - TimescaleDB (PostgreSQL + Zeitreihen-Erweiterung)
+# - Redis (für Celery Task Queue und Caching)
+# - Backend (FastAPI mit Auto-Reload)
+# - Celery Worker (Hintergrund-Tasks)
+# - Celery Beat (Geplante Tasks)
+#
+# Starten mit: docker-compose -f docker-compose.dev.yml up
+# ===========================================================================
+
+services:
+  # ── TimescaleDB: Datenbank für alle Daten ──
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_DB: energy_management
+      POSTGRES_USER: energy
+      POSTGRES_PASSWORD: energy_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U energy -d energy_management"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis: Message Broker für Celery ──
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend: FastAPI mit Auto-Reload ──
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      uvicorn backend.app.main:create_app
+      --host 0.0.0.0
+      --port 8099
+      --reload
+      --factory
+      --log-level debug
+    ports:
+      - "8099:8099"
+    volumes:
+      - ./backend:/app/backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://energy:energy_dev_password@timescaledb:5432/energy_management
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-secret-key-nicht-fuer-produktion-verwenden
+      LOG_LEVEL: debug
+      LANGUAGE: de
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Celery Worker: Hintergrund-Tasks ──
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      celery -A backend.app.celery_app worker
+      --loglevel=debug
+      --concurrency=1
+      --pool=prefork
+    volumes:
+      - ./backend:/app/backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://energy:energy_dev_password@timescaledb:5432/energy_management
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-secret-key-nicht-fuer-produktion-verwenden
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Celery Beat: Geplante Tasks ──
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: >
+      celery -A backend.app.celery_app beat
+      --loglevel=debug
+      --schedule=/tmp/celerybeat-schedule
+    volumes:
+      - ./backend:/app/backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://energy:energy_dev_password@timescaledb:5432/energy_management
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-secret-key-nicht-fuer-produktion-verwenden
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  timescaledb_data:
+  redis_data:

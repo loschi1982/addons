@@ -1,0 +1,110 @@
+{
+  "roles": [
+    {
+      "name": "admin",
+      "display_name": "Administrator",
+      "is_system_role": true,
+      "permissions": ["*"]
+    },
+    {
+      "name": "energy_manager",
+      "display_name": "Energiemanager",
+      "is_system_role": true,
+      "permissions": [
+        "sites.*", "meters.*", "readings.*", "consumers.*",
+        "schemas.*", "emissions.*", "weather.*", "climate.*",
+        "reports.*", "iso.*", "dashboard.view", "imports.*"
+      ]
+    },
+    {
+      "name": "technician",
+      "display_name": "Techniker",
+      "is_system_role": true,
+      "permissions": [
+        "sites.view", "meters.view", "meters.create", "meters.update",
+        "readings.view", "readings.create", "readings.update", "readings.import",
+        "consumers.view", "consumers.create", "consumers.update",
+        "schemas.view", "climate.view", "climate.create",
+        "dashboard.view", "imports.upload"
+      ]
+    },
+    {
+      "name": "viewer",
+      "display_name": "Betrachter",
+      "is_system_role": true,
+      "permissions": [
+        "sites.view", "meters.view", "readings.view",
+        "consumers.view", "schemas.view", "emissions.view",
+        "weather.view", "climate.view", "reports.view",
+        "iso.view", "dashboard.view"
+      ]
+    },
+    {
+      "name": "tenant",
+      "display_name": "Mieter",
+      "is_system_role": true,
+      "permissions": [
+        "meters.view_own", "readings.view_own", "dashboard.view_own"
+      ]
+    }
+  ],
+  "permissions": [
+    {"module": "sites", "action": "view", "category": "Standorte"},
+    {"module": "sites", "action": "create", "category": "Standorte"},
+    {"module": "sites", "action": "update", "category": "Standorte"},
+    {"module": "sites", "action": "delete", "category": "Standorte"},
+    {"module": "meters", "action": "view", "category": "Zähler"},
+    {"module": "meters", "action": "view_own", "category": "Zähler"},
+    {"module": "meters", "action": "create", "category": "Zähler"},
+    {"module": "meters", "action": "update", "category": "Zähler"},
+    {"module": "meters", "action": "delete", "category": "Zähler"},
+    {"module": "readings", "action": "view", "category": "Zählerstände"},
+    {"module": "readings", "action": "view_own", "category": "Zählerstände"},
+    {"module": "readings", "action": "create", "category": "Zählerstände"},
+    {"module": "readings", "action": "update", "category": "Zählerstände"},
+    {"module": "readings", "action": "delete", "category": "Zählerstände"},
+    {"module": "readings", "action": "import", "category": "Zählerstände"},
+    {"module": "consumers", "action": "view", "category": "Verbraucher"},
+    {"module": "consumers", "action": "create", "category": "Verbraucher"},
+    {"module": "consumers", "action": "update", "category": "Verbraucher"},
+    {"module": "consumers", "action": "delete", "category": "Verbraucher"},
+    {"module": "schemas", "action": "view", "category": "Energieschema"},
+    {"module": "schemas", "action": "create", "category": "Energieschema"},
+    {"module": "schemas", "action": "update", "category": "Energieschema"},
+    {"module": "schemas", "action": "delete", "category": "Energieschema"},
+    {"module": "emissions", "action": "view", "category": "CO₂-Emissionen"},
+    {"module": "emissions", "action": "create", "category": "CO₂-Emissionen"},
+    {"module": "emissions", "action": "calculate", "category": "CO₂-Emissionen"},
+    {"module": "weather", "action": "view", "category": "Wetterdaten"},
+    {"module": "weather", "action": "fetch", "category": "Wetterdaten"},
+    {"module": "weather", "action": "configure", "category": "Wetterdaten"},
+    {"module": "weather", "action": "calculate", "category": "Wetterdaten"},
+    {"module": "climate", "action": "view", "category": "Klimasensoren"},
+    {"module": "climate", "action": "create", "category": "Klimasensoren"},
+    {"module": "climate", "action": "update", "category": "Klimasensoren"},
+    {"module": "climate", "action": "delete", "category": "Klimasensoren"},
+    {"module": "reports", "action": "view", "category": "Berichte"},
+    {"module": "reports", "action": "create", "category": "Berichte"},
+    {"module": "reports", "action": "update", "category": "Berichte"},
+    {"module": "reports", "action": "delete", "category": "Berichte"},
+    {"module": "reports", "action": "generate", "category": "Berichte"},
+    {"module": "iso", "action": "view", "category": "ISO 50001"},
+    {"module": "iso", "action": "manage_context", "category": "ISO 50001"},
+    {"module": "iso", "action": "manage_policy", "category": "ISO 50001"},
+    {"module": "iso", "action": "manage_roles", "category": "ISO 50001"},
+    {"module": "iso", "action": "manage_objectives", "category": "ISO 50001"},
+    {"module": "iso", "action": "manage_risks", "category": "ISO 50001"},
+    {"module": "iso", "action": "manage_documents", "category": "ISO 50001"},
+    {"module": "iso", "action": "manage_legal", "category": "ISO 50001"},
+    {"module": "iso", "action": "manage_audits", "category": "ISO 50001"},
+    {"module": "iso", "action": "manage_reviews", "category": "ISO 50001"},
+    {"module": "iso", "action": "manage_nonconformities", "category": "ISO 50001"},
+    {"module": "dashboard", "action": "view", "category": "Dashboard"},
+    {"module": "dashboard", "action": "view_own", "category": "Dashboard"},
+    {"module": "users", "action": "view", "category": "Benutzer"},
+    {"module": "users", "action": "create", "category": "Benutzer"},
+    {"module": "users", "action": "update", "category": "Benutzer"},
+    {"module": "users", "action": "delete", "category": "Benutzer"},
+    {"module": "users", "action": "manage_roles", "category": "Benutzer"}
+  ]
+}

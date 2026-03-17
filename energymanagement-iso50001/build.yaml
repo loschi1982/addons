@@ -1,0 +1,14 @@
+# ===========================================================================
+# Build-Konfiguration für das Home Assistant Add-on
+# ===========================================================================
+# Definiert die Basis-Images für verschiedene CPU-Architekturen.
+# HA baut das Docker-Image automatisch basierend auf dieser Datei.
+# ===========================================================================
+
+build_from:
+  amd64: "ghcr.io/home-assistant/amd64-base-python:3.12-alpine3.19"
+  aarch64: "ghcr.io/home-assistant/aarch64-base-python:3.12-alpine3.19"
+  armv7: "ghcr.io/home-assistant/armv7-base-python:3.12-alpine3.19"
+
+args:
+  BUILD_ARCH: "${BUILD_ARCH}"

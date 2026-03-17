@@ -1,0 +1,25 @@
+{
+  "description": "Ausgewählte DWD-Wetterstationen für die Witterungskorrektur. Quelle: Deutscher Wetterdienst (CDC Open Data).",
+  "stations": [
+    {"dwd_station_id": "00433", "name": "Berlin-Tempelhof", "latitude": 52.4675, "longitude": 13.4021, "altitude": 48},
+    {"dwd_station_id": "01443", "name": "Dresden-Klotzsche", "latitude": 51.1280, "longitude": 13.7543, "altitude": 227},
+    {"dwd_station_id": "02564", "name": "Hamburg-Fuhlsbüttel", "latitude": 53.6332, "longitude": 9.9881, "altitude": 11},
+    {"dwd_station_id": "01975", "name": "Frankfurt/Main", "latitude": 50.0259, "longitude": 8.5213, "altitude": 100},
+    {"dwd_station_id": "03379", "name": "München-Flughafen", "latitude": 48.3477, "longitude": 11.8134, "altitude": 446},
+    {"dwd_station_id": "02667", "name": "Hannover-Langenhagen", "latitude": 52.4611, "longitude": 9.6850, "altitude": 55},
+    {"dwd_station_id": "04177", "name": "Stuttgart-Echterdingen", "latitude": 48.6883, "longitude": 9.2261, "altitude": 371},
+    {"dwd_station_id": "01078", "name": "Bremen", "latitude": 53.0447, "longitude": 8.7985, "altitude": 4},
+    {"dwd_station_id": "02474", "name": "Essen-Bredeney", "latitude": 51.4058, "longitude": 6.9699, "altitude": 150},
+    {"dwd_station_id": "01503", "name": "Düsseldorf", "latitude": 51.2959, "longitude": 6.7692, "altitude": 37},
+    {"dwd_station_id": "02928", "name": "Köln-Bonn", "latitude": 50.8658, "longitude": 7.1427, "altitude": 92},
+    {"dwd_station_id": "03668", "name": "Nürnberg-Flughafen", "latitude": 49.5030, "longitude": 11.0549, "altitude": 314},
+    {"dwd_station_id": "03987", "name": "Leipzig-Halle", "latitude": 51.4324, "longitude": 12.2416, "altitude": 131},
+    {"dwd_station_id": "01766", "name": "Erfurt-Weimar", "latitude": 50.9804, "longitude": 10.9611, "altitude": 316},
+    {"dwd_station_id": "04466", "name": "Würzburg", "latitude": 49.7703, "longitude": 9.9577, "altitude": 268},
+    {"dwd_station_id": "01550", "name": "Freiburg", "latitude": 48.0234, "longitude": 7.8343, "altitude": 237},
+    {"dwd_station_id": "03166", "name": "Münster/Osnabrück", "latitude": 52.1347, "longitude": 7.6847, "altitude": 47},
+    {"dwd_station_id": "04271", "name": "Trier-Petrisberg", "latitude": 49.7486, "longitude": 6.6592, "altitude": 265},
+    {"dwd_station_id": "04127", "name": "Saarbrücken-Ensheim", "latitude": 49.2135, "longitude": 7.1095, "altitude": 322},
+    {"dwd_station_id": "03631", "name": "Potsdam", "latitude": 52.3812, "longitude": 13.0622, "altitude": 81}
+  ]
+}
