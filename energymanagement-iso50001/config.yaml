@@ -21,11 +21,11 @@ arch:
   - aarch64
 
 # Netzwerk-Ports:
-# 8099 = Web-Oberfläche (direkt + Ingress)
+# 8099 = Ingress-Port (intern), 8098 = Direkter Zugriff zum Testen
 ports:
-  "8099/tcp": 8099
+  "8099/tcp": 8098
 ports_description:
-  "8099/tcp": "Web-Oberfläche"
+  "8099/tcp": "Web-Oberfläche (direkt)"
 
 # Ingress: Einbettung in die HA-Oberfläche (Seitenleiste)
 ingress: true
