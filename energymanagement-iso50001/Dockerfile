@@ -1,50 +1,48 @@
 # ===========================================================================
-# Multi-Stage Dockerfile für das Energy Management Add-on
+# Dockerfile für das Energy Management ISO 50001 Add-on
 # ===========================================================================
-# Stage 1: React-Frontend wird mit Node.js gebaut (nur zum Bauen nötig)
-# Stage 2: Python-Backend + fertige Frontend-Dateien = fertiges Image
-#
-# Warum Multi-Stage? Das finale Image enthält kein Node.js, nur Python.
-# Das spart ~500 MB Speicherplatz im fertigen Container.
+# Stage 1: React-Frontend mit Node.js bauen
+# Stage 2: HA-Base-Image (Alpine) + Python-Backend + Frontend-Build
 # ===========================================================================
 
 # ── Stage 1: Frontend bauen ──
-# Node.js wird nur benötigt, um React/TypeScript in statische HTML/JS/CSS
-# Dateien zu kompilieren. Diese Dateien werden dann ins Python-Image kopiert.
 FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
-# Zuerst nur package.json kopieren → Docker-Cache-Optimierung:
-# Wenn sich nur Code ändert, aber nicht die Abhängigkeiten,
-# muss npm ci nicht erneut laufen (spart Build-Zeit)
+# package.json zuerst → Docker-Cache-Optimierung
 COPY frontend/package*.json ./
 RUN npm ci --no-audit --no-fund
 
-# Jetzt den Rest des Frontend-Codes kopieren und bauen
+# Frontend-Code kopieren und bauen
 COPY frontend/ ./
 RUN npm run build
 
 
-# ── Stage 2: Python-Backend + Frontend-Dateien ──
-FROM python:3.12-slim AS production
+# ── Stage 2: HA-Base-Image + Backend ──
+ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.12-alpine3.19
+FROM $BUILD_FROM
 
-# System-Abhängigkeiten für WeasyPrint (PDF-Generierung)
-# und PostgreSQL-Client (Datenbank-Verbindung)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    # WeasyPrint benötigt diese Bibliotheken für HTML→PDF:
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libcairo2 \
-    libgdk-pixbuf-2.0-0 \
-    libffi-dev \
-    shared-mime-info \
-    # PostgreSQL-Client für DB-Verbindung und Migrationen:
-    libpq-dev \
+# System-Abhängigkeiten (Alpine: apk statt apt-get)
+RUN apk add --no-cache \
+    # Build-Tools für Python-Pakete mit C-Extensions:
     gcc \
-    # Für Gesundheitschecks und Netzwerk-Debugging:
+    g++ \
+    musl-dev \
+    libffi-dev \
+    # PostgreSQL-Client:
+    postgresql-dev \
+    # WeasyPrint-Abhängigkeiten:
+    pango \
+    cairo \
+    gdk-pixbuf \
+    shared-mime-info \
+    fontconfig \
+    ttf-freefont \
+    # Für Gesundheitschecks:
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    # bash für run.sh und bashio:
+    bash
 
 WORKDIR /app
 
@@ -56,20 +54,19 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ ./backend/
 
 # Frontend-Build aus Stage 1 kopieren
-# Nur die fertigen statischen Dateien (HTML, JS, CSS), kein Node.js
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# Arbeitsverzeichnis für Backend-Imports (from app.xxx)
+# Seed-Daten und Alembic
 WORKDIR /app/backend
 
-# Startskript kopieren und ausführbar machen
+# Startskript kopieren
 COPY run.sh /app/run.sh
 RUN chmod +x /app/run.sh
 
 # Port für die Web-Oberfläche
 EXPOSE 8099
 
-# Gesundheitscheck: Prüft ob der Server antwortet
+# Gesundheitscheck
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl -f http://localhost:8099/api/v1/health || exit 1
 
