@@ -1,10 +1,27 @@
 import axios from 'axios';
 
 /**
+ * HA Ingress-Basispfad erkennen.
+ * Unter Ingress ist der Pfad z.B. /api/hassio_ingress/<token>/
+ * Direkt ist er einfach /
+ */
+function getIngressBasePath(): string {
+  const path = window.location.pathname;
+  // HA Ingress-Pfad erkennen
+  const match = path.match(/^(\/api\/hassio_ingress\/[^/]+)/);
+  if (match) {
+    return match[1];
+  }
+  return '';
+}
+
+const ingressBase = getIngressBasePath();
+
+/**
  * Zentraler API-Client mit Interceptors für Auth-Token und Error-Handling.
  */
 export const apiClient = axios.create({
-  baseURL: '',
+  baseURL: ingressBase,
   headers: {
     'Content-Type': 'application/json',
   },
