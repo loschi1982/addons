@@ -87,12 +87,25 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # ── Middleware: Request-Logging + Iframe-Headers ──
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    class IngressMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            print(f"→ Request: {request.method} {request.url.path} "
+                  f"(X-Ingress-Path: {request.headers.get('x-ingress-path', '-')})")
+            response = await call_next(request)
+            # Iframe-Einbettung durch HA erlauben
+            response.headers["X-Frame-Options"] = "SAMEORIGIN"
+            response.headers["Content-Security-Policy"] = "frame-ancestors *"
+            return response
+
+    app.add_middleware(IngressMiddleware)
+
     # ── CORS-Middleware ──
-    # Erlaubt dem Frontend (z.B. auf Port 5173 in der Entwicklung)
-    # auf die API zuzugreifen, ohne vom Browser blockiert zu werden.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # In Produktion einschränken
+        allow_origins=["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
