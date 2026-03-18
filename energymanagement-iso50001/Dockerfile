@@ -33,9 +33,10 @@ RUN apk add --no-cache \
     musl-dev \
     python3-dev \
     libffi-dev \
-    # PostgreSQL:
-    postgresql-dev \
-    postgresql-client \
+    # PostgreSQL (Server + TimescaleDB):
+    postgresql16 \
+    postgresql16-dev \
+    postgresql16-client \
     # WeasyPrint (PDF):
     pango \
     cairo \
@@ -48,7 +49,12 @@ RUN apk add --no-cache \
     # Sonstiges:
     curl \
     bash \
-    redis
+    redis \
+    su-exec
+
+# PostgreSQL-Datenverzeichnis vorbereiten
+RUN mkdir -p /data/postgresql /run/postgresql \
+    && chown -R postgres:postgres /data/postgresql /run/postgresql
 
 WORKDIR /app
 

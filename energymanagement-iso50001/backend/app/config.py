@@ -27,9 +27,9 @@ class Settings(BaseSettings):
     )
 
     # ── Datenbank ──
-    # Verbindungs-URL zur TimescaleDB/PostgreSQL-Datenbank.
-    # Format: postgresql+asyncpg://benutzer:passwort@host:port/datenbankname
-    database_url: str = "postgresql+asyncpg://energy:energy@timescaledb:5432/energy_management"
+    # TimescaleDB (PostgreSQL) – läuft im Container.
+    # Daten werden in /data/postgresql/ persistiert.
+    database_url: str = "postgresql+asyncpg://energy:energy@localhost:5432/energy_management"
 
     # ── Redis ──
     # Wird für Celery (Hintergrund-Tasks) und optionales Caching verwendet.

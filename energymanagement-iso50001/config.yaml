@@ -39,7 +39,6 @@ panel_title: "Energiemanagement"
 
 # Benutzer-konfigurierbare Optionen
 options:
-  db_password: ""
   ha_auth_enabled: false
   ha_default_role: "viewer"
   electricity_maps_api_key: ""
@@ -49,7 +48,6 @@ options:
 
 # Schema: Validierung der Optionen (welche Werte sind erlaubt)
 schema:
-  db_password: "str"
   ha_auth_enabled: "bool"
   ha_default_role: "list(administrator|energy_manager|auditor|technician|viewer)"
   electricity_maps_api_key: "str?"
