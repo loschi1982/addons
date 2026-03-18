@@ -1,0 +1,23 @@
+{
+  "weather": [
+    {"timestamp": "2024-01-15T12:00:00+00:00", "temperature": 2.5, "humidity": 78, "wind_speed": 12.3},
+    {"timestamp": "2024-02-15T12:00:00+00:00", "temperature": 4.1, "humidity": 72, "wind_speed": 8.5},
+    {"timestamp": "2024-03-15T12:00:00+00:00", "temperature": 8.3, "humidity": 65, "wind_speed": 15.1},
+    {"timestamp": "2024-04-15T12:00:00+00:00", "temperature": 13.7, "humidity": 55, "wind_speed": 10.2},
+    {"timestamp": "2024-05-15T12:00:00+00:00", "temperature": 18.2, "humidity": 60, "wind_speed": 7.8},
+    {"timestamp": "2024-06-15T12:00:00+00:00", "temperature": 22.1, "humidity": 58, "wind_speed": 6.4},
+    {"timestamp": "2024-07-15T12:00:00+00:00", "temperature": 25.8, "humidity": 52, "wind_speed": 5.1},
+    {"timestamp": "2024-08-15T12:00:00+00:00", "temperature": 24.3, "humidity": 56, "wind_speed": 6.8},
+    {"timestamp": "2024-09-15T12:00:00+00:00", "temperature": 18.9, "humidity": 62, "wind_speed": 9.3},
+    {"timestamp": "2024-10-15T12:00:00+00:00", "temperature": 11.5, "humidity": 70, "wind_speed": 11.7},
+    {"timestamp": "2024-11-15T12:00:00+00:00", "temperature": 5.8, "humidity": 80, "wind_speed": 14.2},
+    {"timestamp": "2024-12-15T12:00:00+00:00", "temperature": 1.2, "humidity": 85, "wind_speed": 10.9}
+  ],
+  "sources": ["Bright Sky API"],
+  "station": {
+    "id": "01766",
+    "name": "Münster/Osnabrück",
+    "latitude": 52.13,
+    "longitude": 7.69
+  }
+}

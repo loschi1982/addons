@@ -94,7 +94,7 @@ async def check_ha_connection(
 @router.post("/shelly/test")
 async def test_shelly_connection(
     host: str = Query(..., description="IP-Adresse des Shelly-Geräts"),
-    current_user: User = require_permission("meters", "create"),
+    current_user: User = Depends(require_permission("meters", "create")),
 ):
     """Verbindung zu einem Shelly-Gerät testen."""
     from app.integrations.shelly import ShellyClient
@@ -122,7 +122,7 @@ async def test_modbus_connection(
     port: int = Query(502),
     unit_id: int = Query(1),
     register: int = Query(0, description="Test-Register-Adresse"),
-    current_user: User = require_permission("meters", "create"),
+    current_user: User = Depends(require_permission("meters", "create")),
 ):
     """Verbindung zu einem Modbus-Gerät testen."""
     from app.integrations.modbus import ModbusClient
@@ -143,7 +143,7 @@ async def test_modbus_connection(
 async def test_knx_connection(
     gateway_ip: str = Query(...),
     gateway_port: int = Query(3671),
-    current_user: User = require_permission("meters", "create"),
+    current_user: User = Depends(require_permission("meters", "create")),
 ):
     """Verbindung zu einem KNX/IP-Gateway testen."""
     from app.integrations.knx import KNXClient
@@ -163,7 +163,7 @@ async def test_knx_connection(
 @router.post("/poll/{meter_id}")
 async def poll_single_meter(
     meter_id: uuid.UUID,
-    current_user: User = require_permission("readings", "create"),
+    current_user: User = Depends(require_permission("readings", "create")),
     db: AsyncSession = Depends(get_db),
 ):
     """Einzelnen Zähler manuell abfragen."""
@@ -176,7 +176,7 @@ async def poll_single_meter(
 
 @router.post("/poll")
 async def poll_all_meters(
-    current_user: User = require_permission("readings", "create"),
+    current_user: User = Depends(require_permission("readings", "create")),
     db: AsyncSession = Depends(get_db),
 ):
     """Alle automatischen Zähler sofort abfragen."""

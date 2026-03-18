@@ -109,11 +109,20 @@ def recalculate_co2():
     return _run_async(_run())
 
 
-@celery_app.task(name="app.tasks.generate_report_pdf")
-def generate_report_pdf(report_id: str):
+@celery_app.task(name="app.tasks.generate_report_pdf", bind=True)
+def generate_report_pdf(self, report_id: str):
     """PDF-Bericht im Hintergrund generieren."""
-    # Wird in Phase 4 (Berichte) implementiert
-    pass
+    import uuid
+
+    async def _run():
+        from app.core.database import async_session_factory
+        from app.services.report_service import ReportService
+
+        async with async_session_factory() as db:
+            service = ReportService(db)
+            return await service.generate_pdf(uuid.UUID(report_id))
+
+    return _run_async(_run())
 
 
 @celery_app.task(name="app.tasks.calculate_weather_correction")

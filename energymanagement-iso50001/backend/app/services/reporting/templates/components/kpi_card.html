@@ -1,0 +1,12 @@
+{# KPI-Kachel: {% include "components/kpi_card.html" with context %} #}
+{# Erwartet: kpi_value, kpi_unit, kpi_label, kpi_trend (optional) #}
+<div class="kpi-card">
+    <div class="value">{{ kpi_value }}</div>
+    <div class="unit">{{ kpi_unit }}</div>
+    <div class="label">{{ kpi_label }}</div>
+    {% if kpi_trend is defined and kpi_trend is not none %}
+    <div class="trend {{ 'positive' if kpi_trend < 0 else 'negative' }}">
+        {{ "↓" if kpi_trend < 0 else "↑" }} {{ kpi_trend|abs }}%
+    </div>
+    {% endif %}
+</div>

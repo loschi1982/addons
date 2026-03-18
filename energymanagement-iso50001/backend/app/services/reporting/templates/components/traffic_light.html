@@ -1,0 +1,6 @@
+{# Ampel-Indikator: {% include "components/traffic_light.html" with context %} #}
+{# Erwartet: light_color (green|yellow|red), light_text #}
+<span>
+    <span class="traffic-light {{ light_color }}"></span>
+    {{ light_text }}
+</span>

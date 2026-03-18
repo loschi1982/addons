@@ -11,7 +11,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY, JSON, UUID
+from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -28,7 +28,7 @@ class MeterReading(Base, UUIDMixin):
     __tablename__ = "meter_readings"
 
     meter_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("meters.id"), index=True
+        ForeignKey("meters.id"), index=True
     )
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     value: Mapped[Decimal] = mapped_column(Numeric(16, 4))
@@ -36,7 +36,7 @@ class MeterReading(Base, UUIDMixin):
     source: Mapped[str] = mapped_column(String(50))
     quality: Mapped[str] = mapped_column(String(50), default="measured")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    import_batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    import_batch_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -72,7 +72,7 @@ class ImportBatch(Base, UUIDMixin):
     affected_meter_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="pending")
     error_details: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    imported_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    imported_by: Mapped[uuid.UUID] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -95,7 +95,7 @@ class ImportMappingProfile(Base, UUIDMixin):
     column_mapping: Mapped[dict] = mapped_column(JSON)
     import_settings: Mapped[dict] = mapped_column(JSON)
     meter_mapping: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    created_by: Mapped[uuid.UUID] = mapped_column()
     last_used: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     use_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
@@ -113,7 +113,7 @@ class MeterChange(Base, UUIDMixin):
     """
     __tablename__ = "meter_changes"
 
-    meter_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("meters.id"))
+    meter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("meters.id"))
     change_date: Mapped[date] = mapped_column(Date)
     old_meter_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
     new_meter_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -121,7 +121,7 @@ class MeterChange(Base, UUIDMixin):
     initial_reading_new: Mapped[Decimal | None] = mapped_column(Numeric(16, 4), nullable=True)
     reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     detected_by: Mapped[str] = mapped_column(String(50))
-    import_batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    import_batch_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

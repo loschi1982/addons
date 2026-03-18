@@ -33,7 +33,12 @@ class ReportCreate(ReportBase):
     include_co2: bool = True
     include_weather_correction: bool = False
     include_benchmarks: bool = False
-    template: str | None = None
+    include_seu: bool = True
+    include_enpi: bool = True
+    include_anomalies: bool = True
+    sections: list[str] | None = None
+    template: str = "default"
+    language: str = "de"
 
 
 class ReportUpdate(BaseModel):
@@ -51,6 +56,7 @@ class ReportResponse(ReportBase, BaseSchema):
     weather_correction_applied: bool
     pdf_path: str | None
     generated_at: datetime | None
+    error_message: str | None = None
     created_at: datetime
 
 
@@ -58,12 +64,20 @@ class ReportDetailResponse(ReportResponse):
     """Bericht mit vollständigem Daten-Snapshot."""
     data_snapshot: dict[str, Any] | None
     co2_summary: dict[str, Any] | None
+    summary: str | None = None
     findings: list[dict[str, Any]] | None
     recommendations: list[dict[str, Any]] | None
 
 
 class ReportGenerateRequest(BaseModel):
     """Anfrage zur PDF-Generierung eines bestehenden Berichts."""
-    report_id: uuid.UUID
     template: str = "default"
     language: str = "de"
+
+
+class ReportStatusResponse(BaseModel):
+    """Status der PDF-Generierung."""
+    report_id: uuid.UUID
+    status: str
+    error_message: str | None = None
+    pdf_path: str | None = None

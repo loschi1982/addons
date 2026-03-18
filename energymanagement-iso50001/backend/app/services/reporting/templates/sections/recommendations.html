@@ -1,0 +1,21 @@
+<h1>6. Maßnahmen und Empfehlungen</h1>
+<div class="section">
+    {% if recommendations %}
+    {% for r in recommendations %}
+    <div class="recommendation">
+        <strong>{{ r.title }}</strong>
+        {% if r.priority %}
+        <span class="trend-badge {{ 'up' if r.priority == 'hoch' else 'stable' }}">
+            Priorität: {{ r.priority|capitalize }}
+        </span>
+        {% endif %}
+        <p>{{ r.description }}</p>
+        {% if r.savings_kwh %}
+        <p class="savings">Einsparpotenzial: {{ "{:,.0f}".format(r.savings_kwh) }} kWh/a</p>
+        {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="text-secondary">Keine automatischen Empfehlungen generiert.</p>
+    {% endif %}
+</div>

@@ -13,6 +13,7 @@ from app.models.user import User, UserSession, AuditLog  # noqa: F401
 from app.models.role import Role, Permission, RolePermission, UserPermissionOverride  # noqa: F401
 from app.models.site import Site, Building, UsageUnit  # noqa: F401
 from app.models.meter import Meter  # noqa: F401
+from app.models.allocation import MeterUnitAllocation  # noqa: F401
 from app.models.reading import MeterReading, ImportBatch, ImportMappingProfile, MeterChange  # noqa: F401
 from app.models.consumer import Consumer, meter_consumer  # noqa: F401
 from app.models.schema import EnergySchema, SchemaPosition  # noqa: F401
@@ -21,6 +22,7 @@ from app.models.emission import EmissionFactorSource, EmissionFactor, CO2Calcula
 from app.models.correction import WeatherCorrectionConfig, WeatherCorrectedConsumption  # noqa: F401
 from app.models.climate import ClimateSensor, ClimateReading, ClimateZoneSummary  # noqa: F401
 from app.models.report import AuditReport  # noqa: F401
+from app.models.settings import AppSetting  # noqa: F401
 from app.models.iso import (  # noqa: F401
     OrganizationContext, EnergyPolicy, EnMSRole,
     EnergyObjective, ActionPlan, RiskOpportunity,

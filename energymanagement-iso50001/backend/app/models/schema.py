@@ -10,7 +10,7 @@ import uuid
 from decimal import Decimal
 
 from sqlalchemy import Boolean, Float, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -44,8 +44,8 @@ class SchemaPosition(Base, UUIDMixin):
     """
     __tablename__ = "schema_positions"
 
-    schema_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("energy_schemas.id"))
-    meter_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("meters.id"))
+    schema_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("energy_schemas.id"))
+    meter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("meters.id"))
     x: Mapped[float] = mapped_column(Float)
     y: Mapped[float] = mapped_column(Float)
     width: Mapped[float] = mapped_column(Float, default=200)

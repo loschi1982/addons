@@ -84,7 +84,7 @@ async def list_meters(
 @router.post("", response_model=MeterResponse, status_code=201)
 async def create_meter(
     request: MeterCreate,
-    current_user: User = require_permission("meters", "create"),
+    current_user: User = Depends(require_permission("meters", "create")),
     db: AsyncSession = Depends(get_db),
 ):
     """Neuen Zähler anlegen."""
@@ -128,7 +128,7 @@ async def get_meter(
 async def update_meter(
     meter_id: uuid.UUID,
     request: MeterUpdate,
-    current_user: User = require_permission("meters", "update"),
+    current_user: User = Depends(require_permission("meters", "update")),
     db: AsyncSession = Depends(get_db),
 ):
     """Zähler aktualisieren."""
@@ -142,7 +142,7 @@ async def update_meter(
 @router.delete("/{meter_id}", response_model=DeleteResponse)
 async def delete_meter(
     meter_id: uuid.UUID,
-    current_user: User = require_permission("meters", "delete"),
+    current_user: User = Depends(require_permission("meters", "delete")),
     db: AsyncSession = Depends(get_db),
 ):
     """Zähler deaktivieren (Soft-Delete)."""

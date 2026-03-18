@@ -107,6 +107,13 @@ def create_app() -> FastAPI:
     except ImportError as e:
         print(f"⚠ API-Router konnten nicht geladen werden: {e}")
 
+    # ── WebSocket-Router einbinden ──
+    try:
+        from app.api.v1.websocket import router as ws_router
+        app.include_router(ws_router, prefix="/api/v1/ws", tags=["WebSocket"])
+    except ImportError as e:
+        print(f"⚠ WebSocket-Router konnte nicht geladen werden: {e}")
+
     # ── React-Frontend als statische Dateien ausliefern ──
     # In der Produktion liegen die gebauten Frontend-Dateien in frontend/dist/
     # FastAPI liefert sie direkt aus – kein separater Webserver nötig.

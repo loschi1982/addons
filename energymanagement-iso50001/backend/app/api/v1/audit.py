@@ -39,7 +39,7 @@ async def list_audit_logs(
     user_id: uuid.UUID | None = None,
     action: str | None = None,
     resource_type: str | None = None,
-    current_user: User = require_permission("audit", "view"),
+    current_user: User = Depends(require_permission("audit", "view")),
     db: AsyncSession = Depends(get_db),
 ):
     """

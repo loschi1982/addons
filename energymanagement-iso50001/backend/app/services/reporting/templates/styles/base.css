@@ -1,0 +1,194 @@
+/* === Energiebericht PDF – Design-System === */
+
+:root {
+    --color-primary: #1B5E7B;
+    --color-primary-light: #2A8CB5;
+    --color-primary-bg: #E8F4F8;
+    --color-electricity: #F59E0B;
+    --color-gas: #EF6C00;
+    --color-water: #2196F3;
+    --color-heat: #E53935;
+    --color-cooling: #00BCD4;
+    --color-positive: #16A34A;
+    --color-warning: #D97706;
+    --color-negative: #DC2626;
+    --color-text: #1F2937;
+    --color-text-secondary: #6B7280;
+    --color-border: #D1D5DB;
+    --color-bg-light: #F9FAFB;
+}
+
+@page {
+    size: A4;
+    margin: 25mm 20mm 30mm 25mm;
+    @bottom-right {
+        content: "Seite " counter(page) " von " counter(pages);
+        font-size: 7pt;
+        color: var(--color-text-secondary);
+    }
+    @bottom-center {
+        font-size: 7pt;
+        color: var(--color-text-secondary);
+    }
+}
+
+@page cover {
+    margin: 0;
+}
+
+@page landscape {
+    size: A4 landscape;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+    font-size: 10pt;
+    color: var(--color-text);
+    line-height: 1.5;
+}
+
+/* === Deckblatt === */
+.cover {
+    page: cover;
+    height: 297mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: linear-gradient(135deg, #1B5E7B 0%, #2A8CB5 100%);
+    color: white;
+    text-align: center;
+}
+.cover h1 { font-size: 28pt; margin-bottom: 12pt; }
+.cover .subtitle { font-size: 16pt; opacity: 0.9; }
+.cover .period { font-size: 12pt; margin-top: 24pt; opacity: 0.7; }
+.cover .meta { margin-top: 48pt; font-size: 9pt; opacity: 0.6; }
+
+/* === Überschriften === */
+h1 {
+    font-size: 18pt;
+    color: var(--color-primary);
+    border-bottom: 2px solid var(--color-primary);
+    padding-bottom: 6pt;
+    margin: 24pt 0 12pt 0;
+    page-break-before: always;
+}
+h1:first-of-type { page-break-before: auto; }
+h2 { font-size: 14pt; color: var(--color-primary); margin: 18pt 0 8pt 0; page-break-after: avoid; }
+h3 { font-size: 12pt; color: #374151; margin: 12pt 0 6pt 0; page-break-after: avoid; }
+
+/* === KPI-Karten === */
+.kpi-row {
+    display: flex;
+    gap: 12pt;
+    margin: 12pt 0;
+    page-break-inside: avoid;
+}
+.kpi-card {
+    flex: 1;
+    border: 1px solid var(--color-border);
+    border-radius: 6pt;
+    padding: 12pt;
+    text-align: center;
+}
+.kpi-card .value { font-size: 24pt; font-weight: 700; color: var(--color-primary); }
+.kpi-card .label { font-size: 9pt; color: var(--color-text-secondary); margin-top: 4pt; }
+.kpi-card .unit { font-size: 9pt; color: #9CA3AF; }
+.kpi-card .trend { font-size: 8pt; margin-top: 4pt; }
+.kpi-card .trend.positive { color: var(--color-positive); }
+.kpi-card .trend.negative { color: var(--color-negative); }
+
+/* === Tabellen === */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8pt 0;
+    font-size: 9pt;
+}
+thead th {
+    background: var(--color-primary);
+    color: white;
+    padding: 6pt 8pt;
+    text-align: left;
+    font-weight: 600;
+}
+tbody td {
+    padding: 5pt 8pt;
+    border-bottom: 1px solid #E5E7EB;
+}
+tbody tr:nth-child(even) { background: var(--color-bg-light); }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+tfoot td {
+    font-weight: 700;
+    border-top: 2px solid var(--color-primary);
+    padding: 6pt 8pt;
+}
+thead { display: table-header-group; }
+
+/* === Befunde & Empfehlungen === */
+.finding, .recommendation, .info-box {
+    border-left: 4px solid var(--color-border);
+    padding: 8pt 12pt;
+    margin: 8pt 0;
+    background: var(--color-bg-light);
+    border-radius: 0 4pt 4pt 0;
+    page-break-inside: avoid;
+}
+.finding.hoch, .info-box.critical { border-left-color: var(--color-negative); }
+.finding.mittel, .info-box.warning { border-left-color: var(--color-warning); }
+.finding.niedrig, .info-box.success { border-left-color: var(--color-positive); }
+.info-box.info { border-left-color: var(--color-primary); }
+.recommendation { border-left-color: var(--color-primary); }
+.savings { color: var(--color-positive); font-weight: 600; font-size: 9pt; margin-top: 4pt; }
+
+/* === Ampel === */
+.traffic-light {
+    display: inline-block;
+    width: 10pt;
+    height: 10pt;
+    border-radius: 50%;
+    margin-right: 4pt;
+}
+.traffic-light.green { background: var(--color-positive); }
+.traffic-light.yellow { background: var(--color-warning); }
+.traffic-light.red { background: var(--color-negative); }
+
+/* === Trend-Badge === */
+.trend-badge {
+    display: inline-block;
+    padding: 2pt 6pt;
+    border-radius: 3pt;
+    font-size: 8pt;
+    font-weight: 600;
+}
+.trend-badge.up { background: #FEE2E2; color: var(--color-negative); }
+.trend-badge.down { background: #DCFCE7; color: var(--color-positive); }
+.trend-badge.stable { background: #F3F4F6; color: var(--color-text-secondary); }
+
+/* === Chart-Container === */
+.chart-container {
+    border: 1px solid var(--color-border);
+    border-radius: 6pt;
+    padding: 12pt;
+    margin: 12pt 0;
+    page-break-inside: avoid;
+}
+.chart-container figcaption {
+    font-size: 8pt;
+    color: var(--color-text-secondary);
+    text-align: center;
+    margin-top: 6pt;
+    font-style: italic;
+}
+
+/* === Druckregeln === */
+p { margin: 6pt 0; orphans: 3; widows: 3; }
+.text-secondary { color: var(--color-text-secondary); }
+.section { margin-bottom: 18pt; }
+figure { page-break-inside: avoid; }

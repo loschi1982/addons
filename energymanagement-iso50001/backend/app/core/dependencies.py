@@ -130,4 +130,4 @@ def require_permission(module: str, action: str):
 
         return current_user
 
-    return Depends(dependency)
+    return dependency

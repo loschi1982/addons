@@ -86,7 +86,7 @@ async def list_users(
 @router.post("", response_model=UserResponse, status_code=201)
 async def create_user(
     request: UserCreate,
-    current_user: User = require_permission("users", "create"),
+    current_user: User = Depends(require_permission("users", "create")),
     db: AsyncSession = Depends(get_db),
 ):
     """Neuen Benutzer anlegen."""
@@ -145,7 +145,7 @@ async def get_user(
 async def update_user(
     user_id: uuid.UUID,
     request: UserUpdate,
-    current_user: User = require_permission("users", "update"),
+    current_user: User = Depends(require_permission("users", "update")),
     db: AsyncSession = Depends(get_db),
 ):
     """Benutzer aktualisieren."""
@@ -177,7 +177,7 @@ async def update_user(
 @router.delete("/{user_id}", response_model=DeleteResponse)
 async def delete_user(
     user_id: uuid.UUID,
-    current_user: User = require_permission("users", "delete"),
+    current_user: User = Depends(require_permission("users", "delete")),
     db: AsyncSession = Depends(get_db),
 ):
     """Benutzer deaktivieren (Soft-Delete)."""
@@ -189,7 +189,7 @@ async def delete_user(
 @router.post("/{user_id}/unlock", response_model=MessageResponse)
 async def unlock_user(
     user_id: uuid.UUID,
-    current_user: User = require_permission("users", "update"),
+    current_user: User = Depends(require_permission("users", "update")),
     db: AsyncSession = Depends(get_db),
 ):
     """Gesperrten Benutzer entsperren."""
@@ -210,7 +210,7 @@ async def unlock_user(
 async def add_permission_override(
     user_id: uuid.UUID,
     request: UserPermissionOverrideCreate,
-    current_user: User = require_permission("users", "manage_roles"),
+    current_user: User = Depends(require_permission("users", "manage_roles")),
     db: AsyncSession = Depends(get_db),
 ):
     """Berechtigungs-Override für einen Benutzer hinzufügen."""
@@ -236,7 +236,7 @@ async def add_permission_override(
 async def remove_permission_override(
     user_id: uuid.UUID,
     override_id: uuid.UUID,
-    current_user: User = require_permission("users", "manage_roles"),
+    current_user: User = Depends(require_permission("users", "manage_roles")),
     db: AsyncSession = Depends(get_db),
 ):
     """Berechtigungs-Override entfernen."""
@@ -292,7 +292,7 @@ async def list_permissions(
 @router.post("/roles", response_model=RoleResponse, status_code=201)
 async def create_role(
     request: RoleCreate,
-    current_user: User = require_permission("users", "manage_roles"),
+    current_user: User = Depends(require_permission("users", "manage_roles")),
     db: AsyncSession = Depends(get_db),
 ):
     """Neue Rolle anlegen."""
@@ -311,7 +311,7 @@ async def create_role(
 async def update_role(
     role_id: uuid.UUID,
     request: RoleUpdate,
-    current_user: User = require_permission("users", "manage_roles"),
+    current_user: User = Depends(require_permission("users", "manage_roles")),
     db: AsyncSession = Depends(get_db),
 ):
     """Rolle aktualisieren."""

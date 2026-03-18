@@ -1,0 +1,37 @@
+<h1>4. Wesentliche Energieverbraucher (SEU)</h1>
+<div class="section">
+    <p>Die größten Energieverbraucher im Berichtszeitraum (Pareto-Analyse).</p>
+
+    {% if snapshot.top_consumers %}
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Zähler</th>
+                <th>Energietyp</th>
+                <th class="num">Verbrauch (kWh)</th>
+                <th class="num">Anteil</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% set total = snapshot.total_consumption_kwh|default(1) %}
+            {% for item in snapshot.top_consumers %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ item.name }}</td>
+                <td>{{ item.energy_type }}</td>
+                <td class="num">{{ "{:,.1f}".format(item.consumption_kwh) }}</td>
+                <td class="num">{{ "{:.1f}".format(item.consumption_kwh / total * 100) }}%</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="info-box info" style="margin-top: 12pt;">
+        <strong>Pareto-Hinweis:</strong> Die größten Verbraucher sollten vorrangig bei
+        Energieeffizienzmaßnahmen berücksichtigt werden (80/20-Regel).
+    </div>
+    {% else %}
+    <p class="text-secondary">Keine Verbrauchsdaten vorhanden.</p>
+    {% endif %}
+</div>

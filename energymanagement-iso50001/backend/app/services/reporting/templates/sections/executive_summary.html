@@ -1,0 +1,29 @@
+<h1>1. Management-Zusammenfassung</h1>
+<div class="section">
+    <p>{{ report.summary or 'Keine Zusammenfassung verfügbar.' }}</p>
+
+    <div class="kpi-row">
+        <div class="kpi-card">
+            <div class="value">{{ "{:,.0f}".format(snapshot.total_consumption_kwh|default(0)) }}</div>
+            <div class="unit">kWh</div>
+            <div class="label">Gesamtverbrauch</div>
+        </div>
+        {% if co2.total_co2_kg is defined %}
+        <div class="kpi-card">
+            <div class="value">{{ "{:,.0f}".format(co2.total_co2_kg|default(0)) }}</div>
+            <div class="unit">kg CO₂</div>
+            <div class="label">CO₂-Emissionen</div>
+            {% if co2.trend_vs_previous_year is not none %}
+            <div class="trend {{ 'negative' if co2.trend_vs_previous_year > 0 else 'positive' }}">
+                {{ "↑" if co2.trend_vs_previous_year > 0 else "↓" }} {{ co2.trend_vs_previous_year|abs }}% vs. Vorjahr
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+        <div class="kpi-card">
+            <div class="value">{{ snapshot.meter_count|default(0) }}</div>
+            <div class="unit">Stk.</div>
+            <div class="label">Erfasste Zähler</div>
+        </div>
+    </div>
+</div>

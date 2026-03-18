@@ -169,7 +169,7 @@ class HomeAssistantClient:
                         "timestamp": ts,
                         "value": float(value),
                     })
-            except (ValueError, TypeError, KeyError):
+            except (ValueError, TypeError, KeyError, ArithmeticError):
                 continue
 
         return data_points

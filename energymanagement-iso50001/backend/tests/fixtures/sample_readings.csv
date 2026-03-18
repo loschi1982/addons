@@ -1,0 +1,13 @@
+Zeitstempel;Zähler;Wert;Einheit
+2024-01-01 00:00;Strom Hauptzähler;10523.5;kWh
+2024-02-01 00:00;Strom Hauptzähler;11245.2;kWh
+2024-03-01 00:00;Strom Hauptzähler;11890.1;kWh
+2024-04-01 00:00;Strom Hauptzähler;12340.8;kWh
+2024-05-01 00:00;Strom Hauptzähler;12810.3;kWh
+2024-06-01 00:00;Strom Hauptzähler;13390.7;kWh
+2024-01-01 00:00;Gas Heizung;4521.0;m³
+2024-02-01 00:00;Gas Heizung;4890.5;m³
+2024-03-01 00:00;Gas Heizung;5120.3;m³
+2024-04-01 00:00;Gas Heizung;5210.1;m³
+2024-05-01 00:00;Gas Heizung;5250.0;m³
+2024-06-01 00:00;Gas Heizung;5270.2;m³

@@ -82,7 +82,7 @@ async def list_consumers(
 @router.post("", response_model=ConsumerResponse, status_code=201)
 async def create_consumer(
     request: ConsumerCreate,
-    current_user: User = require_permission("consumers", "create"),
+    current_user: User = Depends(require_permission("consumers", "create")),
     db: AsyncSession = Depends(get_db),
 ):
     """Neuen Verbraucher anlegen."""
@@ -144,7 +144,7 @@ async def get_consumer(
 async def update_consumer(
     consumer_id: uuid.UUID,
     request: ConsumerUpdate,
-    current_user: User = require_permission("consumers", "update"),
+    current_user: User = Depends(require_permission("consumers", "update")),
     db: AsyncSession = Depends(get_db),
 ):
     """Verbraucher aktualisieren."""
@@ -189,7 +189,7 @@ async def update_consumer(
 @router.delete("/{consumer_id}", response_model=DeleteResponse)
 async def delete_consumer(
     consumer_id: uuid.UUID,
-    current_user: User = require_permission("consumers", "delete"),
+    current_user: User = Depends(require_permission("consumers", "delete")),
     db: AsyncSession = Depends(get_db),
 ):
     """Verbraucher deaktivieren (Soft-Delete)."""

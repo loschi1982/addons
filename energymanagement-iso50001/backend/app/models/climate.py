@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -26,7 +26,7 @@ class ClimateSensor(Base, UUIDMixin, TimestampMixin):
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
     zone: Mapped[str | None] = mapped_column(String(100), nullable=True)
     usage_unit_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("usage_units.id"), nullable=True
+        ForeignKey("usage_units.id"), nullable=True
     )
     ha_entity_id_temp: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ha_entity_id_humidity: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -48,7 +48,7 @@ class ClimateReading(Base, UUIDMixin):
     __tablename__ = "climate_readings"
 
     sensor_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("climate_sensors.id"), index=True
+        ForeignKey("climate_sensors.id"), index=True
     )
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     temperature: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)

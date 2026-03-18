@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>{{ report.title }}</title>
+<style>
+{% include "styles/base.css" %}
+</style>
+</head>
+<body>
+
+<!-- Deckblatt -->
+{% block cover %}
+<div class="cover">
+    <h1>{{ report.title }}</h1>
+    <div class="subtitle">Energiebericht nach ISO 50001</div>
+    <div class="period">{{ report.period_start }} bis {{ report.period_end }}</div>
+    <div class="meta">
+        {% if report.generated_at %}
+        Erstellt am {{ report.generated_at.strftime('%d.%m.%Y um %H:%M') }}
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+<!-- Management-Zusammenfassung -->
+{% block executive_summary %}
+{% include "sections/executive_summary.html" %}
+{% endblock %}
+
+<!-- Energiebilanz -->
+{% block energy_balance %}
+{% include "sections/energy_balance.html" %}
+{% endblock %}
+
+<!-- CO₂-Bilanz -->
+{% block co2_balance %}
+{% include "sections/co2_balance.html" %}
+{% endblock %}
+
+<!-- Top-Verbraucher (SEU) -->
+{% block seu_analysis %}
+{% include "sections/seu_analysis.html" %}
+{% endblock %}
+
+<!-- Befunde -->
+{% block findings %}
+{% include "sections/findings.html" %}
+{% endblock %}
+
+<!-- Empfehlungen -->
+{% block recommendations %}
+{% include "sections/recommendations.html" %}
+{% endblock %}
+
+</body>
+</html>

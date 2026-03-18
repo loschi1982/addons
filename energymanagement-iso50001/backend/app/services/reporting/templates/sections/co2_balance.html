@@ -1,0 +1,64 @@
+<h1>3. CO₂-Bilanz</h1>
+<div class="section">
+    <p>CO₂-Emissionen nach Energieträger und Scope-Aufschlüsselung.</p>
+
+    {% if co2.by_energy_type %}
+    <h2>3.1 Emissionen nach Energieträger</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Energieträger</th>
+                <th class="num">CO₂ (kg)</th>
+                <th class="num">Verbrauch (kWh)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in co2.by_energy_type %}
+            <tr>
+                <td>{{ item.energy_type }}</td>
+                <td class="num">{{ "{:,.1f}".format(item.co2_kg) }}</td>
+                <td class="num">{{ "{:,.1f}".format(item.consumption_kwh) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr>
+                <td>Gesamt</td>
+                <td class="num">{{ "{:,.1f}".format(co2.total_co2_kg|default(0)) }}</td>
+                <td class="num">{{ "{:,.1f}".format(co2.total_consumption_kwh|default(0)) }}</td>
+            </tr>
+        </tfoot>
+    </table>
+    {% endif %}
+
+    {% if co2.by_scope %}
+    <h2>3.2 Scope-Aufschlüsselung</h2>
+    <table>
+        <thead>
+            <tr><th>Scope</th><th class="num">CO₂ (kg)</th></tr>
+        </thead>
+        <tbody>
+            {% for item in co2.by_scope %}
+            <tr>
+                <td>{{ item.scope }}</td>
+                <td class="num">{{ "{:,.1f}".format(item.co2_kg) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    {% if co2.trend_vs_previous_year is not none %}
+    <h2>3.3 Trend</h2>
+    <div class="info-box {{ 'success' if co2.trend_vs_previous_year < 0 else 'warning' if co2.trend_vs_previous_year > 0 else 'info' }}">
+        <strong>Veränderung zum Vorjahreszeitraum:</strong>
+        <span class="trend-badge {{ 'down' if co2.trend_vs_previous_year < 0 else 'up' }}">
+            {{ "↓" if co2.trend_vs_previous_year < 0 else "↑" }} {{ co2.trend_vs_previous_year|abs }}%
+        </span>
+    </div>
+    {% endif %}
+
+    <p class="text-secondary" style="margin-top: 12pt;">
+        Durchschnittlicher Emissionsfaktor: {{ co2.avg_co2_g_per_kwh|default(0) }} g CO₂/kWh
+    </p>
+</div>

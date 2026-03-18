@@ -59,12 +59,8 @@ COPY backend/ ./backend/
 # Nur die fertigen statischen Dateien (HTML, JS, CSS), kein Node.js
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# Alembic-Konfiguration kopieren (für Datenbank-Migrationen)
-COPY backend/alembic.ini ./backend/
-COPY backend/alembic/ ./backend/alembic/
-
-# Seed-Daten kopieren (BAFA, UBA, DWD Standardwerte)
-COPY backend/seed_data/ ./backend/seed_data/
+# Arbeitsverzeichnis für Backend-Imports (from app.xxx)
+WORKDIR /app/backend
 
 # Startskript kopieren und ausführbar machen
 COPY run.sh /app/run.sh

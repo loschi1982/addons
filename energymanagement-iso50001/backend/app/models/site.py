@@ -11,7 +11,6 @@ import uuid
 from decimal import Decimal
 
 from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -45,7 +44,7 @@ class Site(Base, UUIDMixin, TimestampMixin):
 
     # Automatische Zuordnungen
     weather_station_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("weather_stations.id"), nullable=True
+        ForeignKey("weather_stations.id"), nullable=True
     )
     co2_region: Mapped[str] = mapped_column(String(10), default="DE")
     electricity_maps_zone: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -66,7 +65,7 @@ class Building(Base, UUIDMixin, TimestampMixin):
     """
     __tablename__ = "buildings"
 
-    site_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sites.id"))
+    site_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sites.id"))
     name: Mapped[str] = mapped_column(String(255))
     code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -106,7 +105,7 @@ class UsageUnit(Base, UUIDMixin, TimestampMixin):
     """
     __tablename__ = "usage_units"
 
-    building_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("buildings.id"))
+    building_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("buildings.id"))
     name: Mapped[str] = mapped_column(String(255))
     code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -134,3 +133,4 @@ class UsageUnit(Base, UUIDMixin, TimestampMixin):
     meters = relationship("Meter", back_populates="usage_unit")
     consumers = relationship("Consumer", back_populates="usage_unit")
     climate_sensors = relationship("ClimateSensor", back_populates="usage_unit")
+    meter_allocations = relationship("MeterUnitAllocation", back_populates="usage_unit", cascade="all, delete-orphan")

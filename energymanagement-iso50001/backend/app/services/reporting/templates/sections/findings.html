@@ -1,0 +1,13 @@
+<h1>5. Erkenntnisse und Befunde</h1>
+<div class="section">
+    {% if findings %}
+    {% for f in findings %}
+    <div class="finding {{ f.severity|default('info') }}">
+        <strong>{{ f.title }}</strong>
+        <p>{{ f.description }}</p>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="text-secondary">Keine besonderen Befunde im Berichtszeitraum.</p>
+    {% endif %}
+</div>

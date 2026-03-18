@@ -21,6 +21,8 @@ import ISOPage from '@/pages/ISOPage';
 import UsersPage from '@/pages/UsersPage';
 import ImportPage from '@/pages/ImportPage';
 import IntegrationsPage from '@/pages/IntegrationsPage';
+import AnalyticsPage from '@/pages/AnalyticsPage';
+import SettingsPage from '@/pages/SettingsPage';
 
 /**
  * Geschützte Route – leitet auf /login um wenn nicht authentifiziert.
@@ -70,6 +72,7 @@ export default function App() {
         <Route path="readings" element={<ReadingsPage />} />
         <Route path="consumers" element={<ConsumersPage />} />
         <Route path="schemas/*" element={<SchemasPage />} />
+        <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="emissions" element={<EmissionsPage />} />
         <Route path="weather" element={<WeatherPage />} />
         <Route path="climate" element={<ClimatePage />} />
@@ -78,6 +81,7 @@ export default function App() {
         <Route path="users" element={<UsersPage />} />
         <Route path="import" element={<ImportPage />} />
         <Route path="integrations" element={<IntegrationsPage />} />
+        <Route path="settings" element={<SettingsPage />} />
       </Route>
     </Routes>
   );

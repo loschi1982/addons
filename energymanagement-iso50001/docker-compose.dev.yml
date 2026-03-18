@@ -57,8 +57,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    working_dir: /app/backend
     command: >
-      uvicorn backend.app.main:create_app
+      uvicorn app.main:create_app
       --host 0.0.0.0
       --port 8099
       --reload
@@ -85,8 +86,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    working_dir: /app/backend
     command: >
-      celery -A backend.app.celery_app worker
+      celery -A app.tasks worker
       --loglevel=debug
       --concurrency=1
       --pool=prefork
@@ -107,8 +109,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    working_dir: /app/backend
     command: >
-      celery -A backend.app.celery_app beat
+      celery -A app.tasks beat
       --loglevel=debug
       --schedule=/tmp/celerybeat-schedule
     volumes:

@@ -21,12 +21,13 @@ def test_verify_password_wrong():
 
 def test_create_and_verify_token():
     """JWT-Token erstellen und verifizieren."""
-    payload = {"sub": "test-user-id", "username": "testuser"}
-    token = create_access_token(payload)
+    import uuid
+    user_id = uuid.uuid4()
+    token = create_access_token(user_id, "admin")
     decoded = verify_token(token)
     assert decoded is not None
-    assert decoded["sub"] == "test-user-id"
-    assert decoded["username"] == "testuser"
+    assert decoded["sub"] == str(user_id)
+    assert decoded["role"] == "admin"
 
 
 def test_invalid_token():

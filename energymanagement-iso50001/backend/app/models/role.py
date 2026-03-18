@@ -12,7 +12,6 @@ import uuid
 from datetime import date, datetime, timezone
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -62,8 +61,8 @@ class RolePermission(Base, UUIDMixin):
     """Verknüpfung: Welche Berechtigungen hat welche Rolle?"""
     __tablename__ = "role_permissions"
 
-    role_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("roles.id"))
-    permission_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("permissions.id"))
+    role_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("roles.id"))
+    permission_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("permissions.id"))
 
     role = relationship("Role", back_populates="permissions")
     permission = relationship("Permission")
@@ -83,11 +82,11 @@ class UserPermissionOverride(Base, UUIDMixin):
     """
     __tablename__ = "user_permission_overrides"
 
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
-    permission_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("permissions.id"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    permission_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("permissions.id"))
     override_type: Mapped[str] = mapped_column(String(10))  # GRANT oder DENY
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    granted_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    granted_by: Mapped[uuid.UUID] = mapped_column()
     valid_from: Mapped[date | None] = mapped_column(Date, nullable=True)
     valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

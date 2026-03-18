@@ -63,6 +63,19 @@ class SiteNotFoundException(EnergyManagementError):
         super().__init__(detail=detail, error_code="SITE_NOT_FOUND", status_code=404)
 
 
+class AllocationNotFoundException(EnergyManagementError):
+    """Die angeforderte Zuordnung existiert nicht."""
+    def __init__(self, allocation_id: str = ""):
+        detail = f"Zuordnung nicht gefunden: {allocation_id}" if allocation_id else "Zuordnung nicht gefunden"
+        super().__init__(detail=detail, error_code="ALLOCATION_NOT_FOUND", status_code=404)
+
+
+class AllocationDuplicateError(EnergyManagementError):
+    """Diese Zähler-Einheit-Kombination existiert bereits."""
+    def __init__(self, detail: str = "Zuordnung existiert bereits"):
+        super().__init__(detail=detail, error_code="ALLOCATION_DUPLICATE", status_code=409)
+
+
 class ReportNotFoundException(EnergyManagementError):
     """Der angeforderte Bericht existiert nicht."""
     def __init__(self, report_id: str = ""):

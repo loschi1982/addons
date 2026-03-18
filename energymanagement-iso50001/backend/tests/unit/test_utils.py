@@ -15,7 +15,7 @@ def test_convert_gas_m3_to_kwh_default():
 
 def test_convert_gas_m3_to_kwh_custom():
     """Gas m³ → kWh mit benutzerdefiniertem Brennwert."""
-    result = convert_gas_m3_to_kwh(Decimal("100"), factor=Decimal("11.5"))
+    result = convert_gas_m3_to_kwh(Decimal("100"), conversion_factor=Decimal("11.5"))
     assert result == Decimal("1150.0")
 
 

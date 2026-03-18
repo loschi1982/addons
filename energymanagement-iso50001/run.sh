@@ -91,17 +91,11 @@ cd /app/backend
 python3 -m alembic upgrade head
 echo "✓ Migrationen abgeschlossen."
 
-# ── Seed-Daten laden (falls noch nicht vorhanden) ──
-echo "→ Lade Seed-Daten..."
-python3 -c "
-import asyncio
-from app.core.seed import run_all_seeds
-asyncio.run(run_all_seeds())
-" 2>/dev/null || echo "⚠ Seed-Daten konnten nicht geladen werden (wird beim nächsten Start erneut versucht)."
+# Seed-Daten werden automatisch beim Uvicorn-Start geladen (main.py lifespan)
 
 # ── Celery Worker starten (Hintergrund-Tasks) ──
 echo "→ Starte Celery Worker..."
-celery -A app.celery_app worker \
+celery -A app.tasks worker \
     --loglevel="${LOG_LEVEL}" \
     --concurrency=2 \
     --pool=prefork \
@@ -111,7 +105,7 @@ CELERY_WORKER_PID=$!
 
 # ── Celery Beat starten (Geplante Tasks) ──
 echo "→ Starte Celery Beat..."
-celery -A app.celery_app beat \
+celery -A app.tasks beat \
     --loglevel="${LOG_LEVEL}" \
     --schedule=/tmp/celerybeat-schedule \
     &
@@ -132,8 +126,9 @@ echo "  ✓ Energy Management gestartet!"
 echo "  → Web-Oberfläche: http://0.0.0.0:8099"
 echo "============================================"
 
-cd /app
-exec uvicorn backend.app.main:create_app \
+# Uvicorn muss aus /app/backend gestartet werden,
+# damit die internen Imports (from app.xxx) funktionieren.
+exec uvicorn app.main:create_app \
     --host 0.0.0.0 \
     --port 8099 \
     --factory \

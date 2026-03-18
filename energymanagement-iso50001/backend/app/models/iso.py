@@ -11,7 +11,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -87,7 +87,7 @@ class ActionPlan(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "action_plans"
 
     objective_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("energy_objectives.id")
+        ForeignKey("energy_objectives.id")
     )
     title: Mapped[str] = mapped_column(String(500))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -153,7 +153,7 @@ class DocumentRevision(Base, UUIDMixin):
     __tablename__ = "document_revisions"
 
     document_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("documents.id")
+        ForeignKey("documents.id")
     )
     version: Mapped[str] = mapped_column(String(20))
     change_description: Mapped[str] = mapped_column(Text)
@@ -206,7 +206,7 @@ class AuditFinding(Base, UUIDMixin):
     __tablename__ = "audit_findings"
 
     audit_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("internal_audits.id")
+        ForeignKey("internal_audits.id")
     )
     finding_type: Mapped[str] = mapped_column(String(50))
     iso_clause: Mapped[str] = mapped_column(String(20))
@@ -246,7 +246,7 @@ class ManagementReview(Base, UUIDMixin, TimestampMixin):
     resource_changes_needed: Mapped[str | None] = mapped_column(Text, nullable=True)
     next_review_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="planned")
-    protocol_document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    protocol_document_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
 
 
 class Nonconformity(Base, UUIDMixin, TimestampMixin):
@@ -255,7 +255,7 @@ class Nonconformity(Base, UUIDMixin, TimestampMixin):
 
     title: Mapped[str] = mapped_column(String(500))
     source: Mapped[str] = mapped_column(String(50))
-    source_reference_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    source_reference_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     description: Mapped[str] = mapped_column(Text)
     root_cause: Mapped[str | None] = mapped_column(Text, nullable=True)
     immediate_action: Mapped[str | None] = mapped_column(Text, nullable=True)

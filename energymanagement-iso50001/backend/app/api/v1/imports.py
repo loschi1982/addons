@@ -32,7 +32,7 @@ router = APIRouter()
 @router.post("/upload", response_model=ImportUploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
-    current_user: User = require_permission("readings", "import"),
+    current_user: User = Depends(require_permission("readings", "import")),
     db: AsyncSession = Depends(get_db),
 ):
     """CSV/Excel-Datei hochladen und Spalten erkennen."""
@@ -49,7 +49,7 @@ async def upload_file(
 @router.post("/process", response_model=ImportResultResponse)
 async def process_import(
     request: ImportMappingRequest,
-    current_user: User = require_permission("readings", "import"),
+    current_user: User = Depends(require_permission("readings", "import")),
     db: AsyncSession = Depends(get_db),
 ):
     """Import mit bestätigter Spaltenzuordnung starten."""
@@ -93,7 +93,7 @@ async def get_import_result(
 @router.delete("/{batch_id}", response_model=MessageResponse)
 async def undo_import(
     batch_id: uuid.UUID,
-    current_user: User = require_permission("readings", "import"),
+    current_user: User = Depends(require_permission("readings", "import")),
     db: AsyncSession = Depends(get_db),
 ):
     """Import rückgängig machen – löscht alle importierten Zählerstände."""
@@ -115,7 +115,7 @@ async def list_mapping_profiles(
 @router.delete("/profiles/{profile_id}", response_model=MessageResponse)
 async def delete_mapping_profile(
     profile_id: uuid.UUID,
-    current_user: User = require_permission("readings", "import"),
+    current_user: User = Depends(require_permission("readings", "import")),
     db: AsyncSession = Depends(get_db),
 ):
     """Import-Profil löschen."""

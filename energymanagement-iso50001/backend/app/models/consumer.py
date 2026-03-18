@@ -10,7 +10,6 @@ import uuid
 from decimal import Decimal
 
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, Numeric, String, Table, Text
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -23,8 +22,8 @@ from app.models.base import TimestampMixin, UUIDMixin
 meter_consumer = Table(
     "meter_consumer",
     Base.metadata,
-    Column("meter_id", UUID(as_uuid=True), ForeignKey("meters.id"), primary_key=True),
-    Column("consumer_id", UUID(as_uuid=True), ForeignKey("consumers.id"), primary_key=True),
+    Column("meter_id", ForeignKey("meters.id"), primary_key=True),
+    Column("consumer_id", ForeignKey("consumers.id"), primary_key=True),
 )
 
 
@@ -46,7 +45,7 @@ class Consumer(Base, UUIDMixin, TimestampMixin):
     operating_hours: Mapped[Decimal | None] = mapped_column(Numeric(8, 1), nullable=True)
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
     usage_unit_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("usage_units.id"), nullable=True
+        ForeignKey("usage_units.id"), nullable=True
     )
     priority: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

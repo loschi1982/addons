@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     # Free Tier: 1 Zone, 50 Requests/Stunde
     electricity_maps_api_key: str = ""
 
+    # ── Dateien ──
+    # Verzeichnis für hochgeladene Dokumente und generierte PDFs
+    upload_dir: str = "/data/uploads"
+
     # ── Allgemein ──
     language: str = "de"
     log_level: str = "info"

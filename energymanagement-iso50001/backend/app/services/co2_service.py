@@ -6,6 +6,8 @@ Unterstützt verschiedene Quellen (BAFA, UBA, Electricity Maps, manuell)
 mit Prioritätskaskade für die Faktor-Auflösung.
 """
 
+import csv
+import io
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -14,9 +16,12 @@ import structlog
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import cached
+
 from app.models.emission import CO2Calculation, EmissionFactor, EmissionFactorSource
 from app.models.meter import Meter
 from app.models.reading import MeterReading
+from app.models.site import Building, Site, UsageUnit
 
 logger = structlog.get_logger()
 
@@ -306,6 +311,7 @@ class CO2Service:
             "trend_vs_previous": trend,
         }
 
+    @cached("co2_dashboard", ttl=600)
     async def get_dashboard(self, year: int | None = None) -> dict:
         """CO₂-Dashboard-Daten zusammenstellen."""
         if not year:
@@ -365,3 +371,173 @@ class CO2Service:
             "by_building": [],
             "scope_breakdown": scope_breakdown,
         }
+
+    # ── Export ──
+
+    async def _get_export_data(
+        self, start_date: date, end_date: date
+    ) -> list[dict]:
+        """Detaillierte CO₂-Daten für Export zusammenstellen."""
+        query = (
+            select(
+                CO2Calculation.period_start,
+                CO2Calculation.period_end,
+                CO2Calculation.consumption_kwh,
+                CO2Calculation.co2_kg,
+                CO2Calculation.co2eq_kg,
+                CO2Calculation.calculation_method,
+                Meter.name.label("meter_name"),
+                Meter.energy_type,
+                Meter.unit,
+                EmissionFactor.co2_g_per_kwh,
+                EmissionFactor.scope,
+                EmissionFactor.region,
+                UsageUnit.name.label("unit_name"),
+                Building.name.label("building_name"),
+                Site.name.label("site_name"),
+            )
+            .join(Meter, Meter.id == CO2Calculation.meter_id)
+            .join(
+                EmissionFactor,
+                EmissionFactor.id == CO2Calculation.emission_factor_id,
+            )
+            .outerjoin(UsageUnit, UsageUnit.id == Meter.usage_unit_id)
+            .outerjoin(Building, Building.id == UsageUnit.building_id)
+            .outerjoin(Site, Site.id == Building.site_id)
+            .where(
+                CO2Calculation.period_start >= start_date,
+                CO2Calculation.period_end <= end_date,
+            )
+            .order_by(
+                EmissionFactor.scope, Meter.energy_type,
+                CO2Calculation.period_start,
+            )
+        )
+        result = await self.db.execute(query)
+        return [row._asdict() for row in result.all()]
+
+    async def export_ghg_csv(
+        self, start_date: date, end_date: date
+    ) -> str:
+        """
+        CO₂-Bilanz als GHG Protocol CSV exportieren.
+
+        Spalten nach GHG Corporate Standard:
+        Scope, Quelle, Energietyp, Verbrauch (kWh), Faktor (g/kWh),
+        CO₂ (kg), CO₂eq (kg), Standort, Zeitraum.
+        """
+        rows = await self._get_export_data(start_date, end_date)
+
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=";")
+
+        # Header
+        writer.writerow([
+            "Scope", "Energietyp", "Quelle (Zähler)", "Standort",
+            "Gebäude", "Nutzungseinheit", "Region",
+            "Zeitraum von", "Zeitraum bis",
+            "Verbrauch (kWh)", "Emissionsfaktor (g CO₂/kWh)",
+            "CO₂ (kg)", "CO₂eq (kg)", "Berechnungsmethode",
+        ])
+
+        # Daten
+        scope_totals: dict[str, float] = {}
+        for row in rows:
+            scope = row["scope"] or "scope_2"
+            co2 = float(row["co2_kg"] or 0)
+            scope_totals[scope] = scope_totals.get(scope, 0) + co2
+
+            writer.writerow([
+                scope,
+                row["energy_type"],
+                row["meter_name"],
+                row["site_name"] or "",
+                row["building_name"] or "",
+                row["unit_name"] or "",
+                row["region"],
+                str(row["period_start"]),
+                str(row["period_end"]),
+                f"{float(row['consumption_kwh'] or 0):.2f}",
+                f"{float(row['co2_g_per_kwh'] or 0):.1f}",
+                f"{co2:.4f}",
+                f"{float(row['co2eq_kg'] or 0):.4f}" if row["co2eq_kg"] else "",
+                row["calculation_method"] or "",
+            ])
+
+        # Summenzeilen
+        writer.writerow([])
+        writer.writerow(["Zusammenfassung"])
+        total_co2 = 0.0
+        for scope in sorted(scope_totals.keys()):
+            writer.writerow([scope, "", "", "", "", "", "", "", "",
+                             "", "", f"{scope_totals[scope]:.4f}", "", ""])
+            total_co2 += scope_totals[scope]
+        writer.writerow(["Gesamt", "", "", "", "", "", "", "", "",
+                         "", "", f"{total_co2:.4f}", "", ""])
+
+        return output.getvalue()
+
+    async def export_emas_csv(
+        self, start_date: date, end_date: date
+    ) -> str:
+        """
+        CO₂-Bilanz als EMAS-Kernindikatoren CSV exportieren.
+
+        EMAS (Eco-Management and Audit Scheme) erfordert:
+        - Energieeffizienz (kWh gesamt)
+        - CO₂-Emissionen gesamt (t CO₂)
+        - Aufschlüsselung nach Energieträger
+        """
+        rows = await self._get_export_data(start_date, end_date)
+
+        # Aggregation nach Energietyp
+        by_type: dict[str, dict] = {}
+        for row in rows:
+            et = row["energy_type"]
+            if et not in by_type:
+                by_type[et] = {"kwh": 0.0, "co2_kg": 0.0}
+            by_type[et]["kwh"] += float(row["consumption_kwh"] or 0)
+            by_type[et]["co2_kg"] += float(row["co2_kg"] or 0)
+
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=";")
+
+        writer.writerow(["EMAS Kernindikator: Energieeffizienz und Emissionen"])
+        writer.writerow([
+            f"Berichtszeitraum: {start_date} bis {end_date}"
+        ])
+        writer.writerow([])
+        writer.writerow([
+            "Energieträger", "Verbrauch (kWh)", "Verbrauch (MWh)",
+            "CO₂-Emissionen (kg)", "CO₂-Emissionen (t)",
+            "Anteil Verbrauch (%)", "Anteil Emissionen (%)",
+        ])
+
+        total_kwh = sum(d["kwh"] for d in by_type.values())
+        total_co2 = sum(d["co2_kg"] for d in by_type.values())
+
+        for et in sorted(by_type.keys()):
+            d = by_type[et]
+            kwh_pct = (d["kwh"] / total_kwh * 100) if total_kwh > 0 else 0
+            co2_pct = (d["co2_kg"] / total_co2 * 100) if total_co2 > 0 else 0
+            writer.writerow([
+                et,
+                f"{d['kwh']:.2f}",
+                f"{d['kwh'] / 1000:.2f}",
+                f"{d['co2_kg']:.4f}",
+                f"{d['co2_kg'] / 1000:.4f}",
+                f"{kwh_pct:.1f}",
+                f"{co2_pct:.1f}",
+            ])
+
+        writer.writerow([])
+        writer.writerow([
+            "Gesamt",
+            f"{total_kwh:.2f}",
+            f"{total_kwh / 1000:.2f}",
+            f"{total_co2:.4f}",
+            f"{total_co2 / 1000:.4f}",
+            "100.0", "100.0",
+        ])
+
+        return output.getvalue()

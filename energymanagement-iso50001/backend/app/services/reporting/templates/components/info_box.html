@@ -1,0 +1,6 @@
+{# Info-Box: {% include "components/info_box.html" with context %} #}
+{# Erwartet: box_type (info|warning|success|critical), box_title, box_text #}
+<div class="info-box {{ box_type|default('info') }}">
+    <strong>{{ box_title }}</strong>
+    <p>{{ box_text }}</p>
+</div>

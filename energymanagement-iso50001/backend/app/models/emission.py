@@ -11,7 +11,6 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -48,7 +47,7 @@ class EmissionFactor(Base, UUIDMixin):
     __tablename__ = "emission_factors"
 
     source_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("emission_factor_sources.id")
+        ForeignKey("emission_factor_sources.id")
     )
     energy_type: Mapped[str] = mapped_column(String(50), index=True)
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -74,13 +73,13 @@ class CO2Calculation(Base, UUIDMixin):
     __tablename__ = "co2_calculations"
 
     meter_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("meters.id"), index=True
+        ForeignKey("meters.id"), index=True
     )
     period_start: Mapped[date] = mapped_column(Date)
     period_end: Mapped[date] = mapped_column(Date)
     consumption_kwh: Mapped[Decimal] = mapped_column(Numeric(16, 4))
     emission_factor_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("emission_factors.id")
+        ForeignKey("emission_factors.id")
     )
     co2_kg: Mapped[Decimal] = mapped_column(Numeric(12, 4))
     co2eq_kg: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)

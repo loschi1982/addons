@@ -9,6 +9,7 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -108,6 +109,38 @@ async def create_factor(
         region=factor.region,
         co2_g_per_kwh=factor.co2_g_per_kwh,
         scope=factor.scope,
+    )
+
+
+@router.get("/export")
+async def export_co2(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    format: str = Query(
+        "ghg", pattern="^(ghg|emas)$",
+        description="Export-Format: ghg (GHG Protocol) oder emas",
+    ),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """CO₂-Bilanz als CSV exportieren (GHG Protocol oder EMAS)."""
+    service = CO2Service(db)
+
+    if format == "emas":
+        csv_data = await service.export_emas_csv(start_date, end_date)
+        filename = f"co2_emas_{start_date}_{end_date}.csv"
+    else:
+        csv_data = await service.export_ghg_csv(start_date, end_date)
+        filename = f"co2_ghg_{start_date}_{end_date}.csv"
+
+    # BOM für Excel-Kompatibilität
+    bom = "\ufeff"
+    return StreamingResponse(
+        iter([bom + csv_data]),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
     )
 
 

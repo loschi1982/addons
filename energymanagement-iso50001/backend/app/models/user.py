@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -32,7 +32,7 @@ class User(Base, UUIDMixin, TimestampMixin):
     password_hash: Mapped[str] = mapped_column(String(255))
 
     # Zuordnung zur Rolle (bestimmt Berechtigungen)
-    role_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("roles.id"))
+    role_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("roles.id"))
 
     # Account-Status
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -50,7 +50,7 @@ class User(Base, UUIDMixin, TimestampMixin):
     allowed_locations: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # Wer hat diesen Benutzer erstellt?
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
 
     # Beziehungen
     role = relationship("Role", back_populates="users")
@@ -68,7 +68,7 @@ class UserSession(Base, UUIDMixin):
     """
     __tablename__ = "user_sessions"
 
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     token_hash: Mapped[str] = mapped_column(String(255))
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -91,10 +91,10 @@ class AuditLog(Base, UUIDMixin):
     """
     __tablename__ = "audit_logs"
 
-    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     action: Mapped[str] = mapped_column(String(100))
     resource_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    resource_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    resource_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     timestamp: Mapped[datetime] = mapped_column(

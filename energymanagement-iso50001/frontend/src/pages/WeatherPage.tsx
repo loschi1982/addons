@@ -60,7 +60,6 @@ export default function WeatherPage() {
   const [activeTab, setActiveTab] = useState<Tab>('stations');
   const [stations, setStations] = useState<WeatherStation[]>([]);
   const [selectedStation, setSelectedStation] = useState('');
-  const [loading, setLoading] = useState(false);
 
   // Stationen laden
   useEffect(() => {

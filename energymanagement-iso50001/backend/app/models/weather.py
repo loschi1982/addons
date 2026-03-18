@@ -11,7 +11,6 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -49,7 +48,7 @@ class WeatherRecord(Base, UUIDMixin):
     __tablename__ = "weather_records"
 
     station_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("weather_stations.id"), index=True
+        ForeignKey("weather_stations.id"), index=True
     )
     date: Mapped[date] = mapped_column(Date, index=True)
     temp_avg: Mapped[Decimal] = mapped_column(Numeric(5, 2))
@@ -75,7 +74,7 @@ class MonthlyDegreeDays(Base, UUIDMixin):
     __tablename__ = "monthly_degree_days"
 
     station_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("weather_stations.id"), index=True
+        ForeignKey("weather_stations.id"), index=True
     )
     year: Mapped[int] = mapped_column(Integer)
     month: Mapped[int] = mapped_column(Integer)

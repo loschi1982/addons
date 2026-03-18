@@ -11,7 +11,7 @@ import uuid
 from decimal import Decimal
 
 from sqlalchemy import Boolean, ForeignKey, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -48,12 +48,12 @@ class Meter(Base, UUIDMixin, TimestampMixin):
 
     # Hierarchie: Welchem Hauptzähler ist dieser Zähler untergeordnet?
     parent_meter_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("meters.id"), nullable=True
+        ForeignKey("meters.id"), nullable=True
     )
 
     # Zuordnung zur Nutzungseinheit (Standort → Gebäude → Einheit)
     usage_unit_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("usage_units.id"), nullable=True
+        ForeignKey("usage_units.id"), nullable=True
     )
 
     # Standort (Freitext, für schnelle Filterung)
@@ -79,3 +79,4 @@ class Meter(Base, UUIDMixin, TimestampMixin):
     usage_unit = relationship("UsageUnit", back_populates="meters")
     schema_position = relationship("SchemaPosition", uselist=False, back_populates="meter")
     consumers = relationship("Consumer", secondary="meter_consumer", back_populates="meters")
+    unit_allocations = relationship("MeterUnitAllocation", back_populates="meter", cascade="all, delete-orphan")

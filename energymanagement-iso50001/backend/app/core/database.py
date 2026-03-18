@@ -87,6 +87,15 @@ async def close_db():
         _engine = None
 
 
+def async_session_factory():
+    """
+    Gibt die Session-Factory zurück (für Celery-Tasks und andere Nicht-FastAPI-Kontexte).
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Datenbank wurde noch nicht initialisiert. Bitte init_db() aufrufen.")
+    return _async_session_factory()
+
+
 async def get_db() -> AsyncSession:
     """
     FastAPI-Dependency: Stellt eine Datenbank-Session bereit.

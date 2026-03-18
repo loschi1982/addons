@@ -76,9 +76,10 @@ class MeterResponse(MeterBase, BaseSchema):
 
 
 class MeterDetailResponse(MeterResponse):
-    """Zähler mit Zusatzinfos (Sub-Zähler, Verbraucher)."""
+    """Zähler mit Zusatzinfos (Sub-Zähler, Verbraucher, Zuordnungen)."""
     sub_meters: list["MeterResponse"] = []
     consumers: list["ConsumerResponse"] = []
+    unit_allocations: list["MeterUnitAllocationResponse"] = []
 
 
 class MeterTreeNode(BaseSchema):
@@ -157,6 +158,49 @@ class MeterChangeResponse(BaseSchema):
     final_reading: Decimal | None
     initial_reading: Decimal | None
     reason: str | None
+
+
+# ---------------------------------------------------------------------------
+# Zähler-Nutzungseinheit-Zuordnung (MeterUnitAllocation)
+# ---------------------------------------------------------------------------
+
+class MeterUnitAllocationBase(BaseModel):
+    """Gemeinsame Felder für Zähler-Einheit-Zuordnungen."""
+    meter_id: uuid.UUID
+    usage_unit_id: uuid.UUID
+    allocation_type: str = Field("add", pattern=r"^(add|subtract)$")
+    factor: Decimal = Field(Decimal("1.0"), ge=Decimal("0"), le=Decimal("9999"))
+    description: str | None = None
+
+
+class MeterUnitAllocationCreate(MeterUnitAllocationBase):
+    """Neue Zuordnung anlegen."""
+    pass
+
+
+class MeterUnitAllocationUpdate(BaseModel):
+    """Zuordnung aktualisieren – alle Felder optional."""
+    allocation_type: str | None = Field(None, pattern=r"^(add|subtract)$")
+    factor: Decimal | None = Field(None, ge=Decimal("0"), le=Decimal("9999"))
+    description: str | None = None
+
+
+class MeterUnitAllocationResponse(MeterUnitAllocationBase, BaseSchema):
+    """Zuordnung in API-Responses."""
+    id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class UsageUnitConsumption(BaseSchema):
+    """Berechneter Verbrauch einer Nutzungseinheit."""
+    usage_unit_id: uuid.UUID
+    usage_unit_name: str
+    total_consumption: Decimal
+    unit: str
+    period_start: date
+    period_end: date
+    allocations: list[dict] = []
 
 
 # Zirkuläre Referenzen

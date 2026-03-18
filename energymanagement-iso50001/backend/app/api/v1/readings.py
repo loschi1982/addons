@@ -78,7 +78,7 @@ async def list_readings(
 @router.post("", response_model=ReadingResponse, status_code=201)
 async def create_reading(
     request: ReadingCreate,
-    current_user: User = require_permission("readings", "create"),
+    current_user: User = Depends(require_permission("readings", "create")),
     db: AsyncSession = Depends(get_db),
 ):
     """Einzelnen Zählerstand erfassen."""
@@ -90,7 +90,7 @@ async def create_reading(
 @router.post("/bulk", response_model=list[ReadingResponse], status_code=201)
 async def create_readings_bulk(
     request: ReadingBulkCreate,
-    current_user: User = require_permission("readings", "create"),
+    current_user: User = Depends(require_permission("readings", "create")),
     db: AsyncSession = Depends(get_db),
 ):
     """Mehrere Zählerstände auf einmal erfassen."""
@@ -117,7 +117,7 @@ async def get_reading(
 async def update_reading(
     reading_id: uuid.UUID,
     request: ReadingUpdate,
-    current_user: User = require_permission("readings", "update"),
+    current_user: User = Depends(require_permission("readings", "update")),
     db: AsyncSession = Depends(get_db),
 ):
     """Zählerstand korrigieren."""
@@ -131,7 +131,7 @@ async def update_reading(
 @router.delete("/{reading_id}", response_model=DeleteResponse)
 async def delete_reading(
     reading_id: uuid.UUID,
-    current_user: User = require_permission("readings", "delete"),
+    current_user: User = Depends(require_permission("readings", "delete")),
     db: AsyncSession = Depends(get_db),
 ):
     """Zählerstand löschen."""
