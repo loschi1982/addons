@@ -137,12 +137,11 @@ def create_app() -> FastAPI:
         print(f"⚠ WebSocket-Router konnte nicht geladen werden: {e}")
 
     # ── React-Frontend als statische Dateien ausliefern ──
-    # In der Produktion liegen die gebauten Frontend-Dateien in frontend/dist/
-    # FastAPI liefert sie direkt aus – kein separater Webserver nötig.
     frontend_dir = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
     print(f"→ Frontend-Pfad: {frontend_dir} (existiert: {frontend_dir.exists()})")
     if frontend_dir.exists():
         print(f"→ Frontend-Dateien: {list(frontend_dir.iterdir())}")
+
         # Statische Assets (JS, CSS, Bilder, Fonts)
         assets_dir = frontend_dir / "assets"
         if assets_dir.exists():
@@ -152,22 +151,20 @@ def create_app() -> FastAPI:
                 name="assets",
             )
 
+        # Explizite Root-Route für index.html
+        @app.get("/")
+        async def serve_root():
+            print("→ Request für / erhalten – liefere index.html")
+            return FileResponse(str(frontend_dir / "index.html"))
+
         # SPA-Fallback: Alle nicht-API-Routen → index.html
-        # React Router übernimmt dann das Routing im Browser.
         @app.get("/{full_path:path}")
         async def serve_spa(request: Request, full_path: str):
-            """
-            Liefert das React-Frontend aus. Wenn die angeforderte Datei
-            existiert (z.B. favicon.ico), wird sie direkt zurückgegeben.
-            Alles andere → index.html (React Router entscheidet dann).
-            """
-            # Nicht für API-Anfragen
             if full_path.startswith("api/"):
                 return JSONResponse(
                     status_code=404,
                     content={"detail": "API-Endpunkt nicht gefunden"},
                 )
-
             file_path = frontend_dir / full_path
             if file_path.exists() and file_path.is_file():
                 return FileResponse(str(file_path))

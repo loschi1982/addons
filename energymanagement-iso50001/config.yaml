@@ -21,14 +21,11 @@ arch:
   - aarch64
 
 # Netzwerk-Ports:
-# 8099 = Ingress-Port (HA-interne Einbettung)
-# 8443 = Direkter HTTPS-Zugriff (optional)
+# 8099 = Web-Oberfläche (direkt + Ingress)
 ports:
-  "8099/tcp": null
-  "8443/tcp": 8443
+  "8099/tcp": 8099
 ports_description:
-  "8099/tcp": "Web-Oberfläche (Ingress)"
-  "8443/tcp": "Direkter HTTPS-Zugriff"
+  "8099/tcp": "Web-Oberfläche"
 
 # Ingress: Einbettung in die HA-Oberfläche (Seitenleiste)
 ingress: true
