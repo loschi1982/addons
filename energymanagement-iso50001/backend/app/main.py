@@ -107,6 +107,20 @@ def create_app() -> FastAPI:
         """Einfacher Gesundheitscheck – antwortet mit OK wenn der Server läuft."""
         return {"status": "ok", "version": settings.app_version}
 
+    # ── Diagnose-Endpunkt (temporär) ──
+    from fastapi.responses import HTMLResponse
+    @app.get("/api/v1/diag", response_class=HTMLResponse)
+    async def diag():
+        """Gibt einfaches HTML zurück um Ingress-Konnektivität zu testen."""
+        fe_dir = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+        files = list(fe_dir.iterdir()) if fe_dir.exists() else []
+        return f"""<html><body style='font-family:sans-serif;padding:2em'>
+        <h1>Diagnose</h1>
+        <p>Frontend-Pfad: <code>{fe_dir}</code></p>
+        <p>Existiert: <b>{fe_dir.exists()}</b></p>
+        <p>Dateien: {[f.name for f in files]}</p>
+        </body></html>"""
+
     # ── API-Router einbinden ──
     # Alle API-Endpunkte leben unter /api/v1/
     try:
@@ -125,8 +139,10 @@ def create_app() -> FastAPI:
     # ── React-Frontend als statische Dateien ausliefern ──
     # In der Produktion liegen die gebauten Frontend-Dateien in frontend/dist/
     # FastAPI liefert sie direkt aus – kein separater Webserver nötig.
-    frontend_dir = Path(__file__).parent.parent.parent / "frontend" / "dist"
+    frontend_dir = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+    print(f"→ Frontend-Pfad: {frontend_dir} (existiert: {frontend_dir.exists()})")
     if frontend_dir.exists():
+        print(f"→ Frontend-Dateien: {list(frontend_dir.iterdir())}")
         # Statische Assets (JS, CSS, Bilder, Fonts)
         assets_dir = frontend_dir / "assets"
         if assets_dir.exists():
