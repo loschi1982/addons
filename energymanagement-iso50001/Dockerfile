@@ -5,6 +5,10 @@
 # Stage 2: Alpine + Python Backend + Frontend-Build
 # ===========================================================================
 
+# Global ARG – muss VOR dem ersten FROM stehen,
+# damit es für alle Stages sichtbar ist
+ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest
+
 # ── Stage 1: Frontend bauen ──
 FROM node:20-alpine AS frontend-builder
 
@@ -16,7 +20,6 @@ RUN npm run build
 
 
 # ── Stage 2: Alpine-Base mit Python ──
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest
 FROM ${BUILD_FROM}
 
 # System-Abhängigkeiten
