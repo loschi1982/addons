@@ -42,23 +42,31 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     print(f"→ Starte {settings.app_name} v{settings.app_version}")
 
-    # Datenbank initialisieren
-    await init_db()
-    print("✓ Datenbankverbindung hergestellt")
-
-    # Seed-Daten laden (idempotent – überspringt bereits vorhandene)
+    # Datenbank initialisieren (optional – startet auch ohne DB)
+    db_available = False
     try:
-        from app.core.seed import run_all_seeds
-        await run_all_seeds()
-        print("✓ Seed-Daten geladen")
+        await init_db()
+        db_available = True
+        print("✓ Datenbankverbindung hergestellt")
     except Exception as e:
-        print(f"⚠ Seed-Daten konnten nicht geladen werden: {e}")
+        print(f"⚠ Datenbank nicht verfügbar: {e}")
+        print("⚠ App startet ohne DB – nur Health-Check verfügbar")
+
+    # Seed-Daten laden (nur wenn DB verfügbar)
+    if db_available:
+        try:
+            from app.core.seed import run_all_seeds
+            await run_all_seeds()
+            print("✓ Seed-Daten geladen")
+        except Exception as e:
+            print(f"⚠ Seed-Daten konnten nicht geladen werden: {e}")
 
     yield  # ← Hier läuft die App
 
     # Aufräumen beim Beenden
-    await close_db()
-    print("✓ Datenbankverbindung geschlossen")
+    if db_available:
+        await close_db()
+        print("✓ Datenbankverbindung geschlossen")
 
 
 def create_app() -> FastAPI:

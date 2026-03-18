@@ -12,7 +12,7 @@ asyncpg>=0.29.0,<1.0.0
 alembic>=1.13.0,<2.0.0
 
 # ── Validierung & Konfiguration ──
-pydantic>=2.5.0,<3.0.0
+pydantic[email]>=2.5.0,<3.0.0
 pydantic-settings>=2.1.0,<3.0.0
 
 # ── Hintergrund-Tasks ──
