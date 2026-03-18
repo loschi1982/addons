@@ -284,7 +284,7 @@ class AuthService:
 
         # Administrator-Rolle suchen
         result = await self.db.execute(
-            select(Role).where(Role.name == "administrator")
+            select(Role).where(Role.name == "admin")
         )
         admin_role = result.scalar_one_or_none()
         if not admin_role:
