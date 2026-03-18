@@ -1,36 +1,24 @@
-#!/usr/bin/env bash
+#!/usr/bin/with-contenv bashio
 # ===========================================================================
 # Startskript für das Energy Management Add-on
 # ===========================================================================
-# Dieses Skript wird beim Start des Docker-Containers ausgeführt.
-# Es liest die Konfiguration aus den HA Add-on-Optionen,
-# wartet auf die Datenbank und Redis, führt Migrationen durch
-# und startet dann alle benötigten Dienste.
-# ===========================================================================
-
-set -e
 
 echo "============================================"
 echo "  Energy Management ISO 50001 - Starting"
 echo "============================================"
 
 # ── Konfiguration aus HA Add-on-Optionen lesen ──
-# Falls bashio verfügbar ist (innerhalb von HA), werden die Werte
-# aus der Add-on-Konfiguration gelesen. Ansonsten aus Umgebungsvariablen.
-if command -v bashio &> /dev/null; then
-    DB_PASSWORD=$(bashio::config 'db_password')
-    HA_AUTH_ENABLED=$(bashio::config 'ha_auth_enabled')
-    HA_DEFAULT_ROLE=$(bashio::config 'ha_default_role')
-    ELECTRICITY_MAPS_API_KEY=$(bashio::config 'electricity_maps_api_key')
-    BRIGHT_SKY_ENABLED=$(bashio::config 'bright_sky_enabled')
-    LANGUAGE=$(bashio::config 'language')
-    LOG_LEVEL=$(bashio::config 'log_level')
-    SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN}"
-fi
+DB_PASSWORD=$(bashio::config 'db_password')
+HA_AUTH_ENABLED=$(bashio::config 'ha_auth_enabled')
+HA_DEFAULT_ROLE=$(bashio::config 'ha_default_role')
+ELECTRICITY_MAPS_API_KEY=$(bashio::config 'electricity_maps_api_key')
+BRIGHT_SKY_ENABLED=$(bashio::config 'bright_sky_enabled')
+LANGUAGE=$(bashio::config 'language')
+LOG_LEVEL=$(bashio::config 'log_level')
 
 # ── Umgebungsvariablen setzen ──
 export DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://energy:${DB_PASSWORD:-energy}@timescaledb:5432/energy_management}"
-export REDIS_URL="${REDIS_URL:-redis://redis:6379/0}"
+export REDIS_URL="${REDIS_URL:-redis://localhost:6379/0}"
 export SECRET_KEY="${SECRET_KEY:-$(python3 -c 'import secrets; print(secrets.token_hex(32))')}"
 export HA_AUTH_ENABLED="${HA_AUTH_ENABLED:-false}"
 export HA_DEFAULT_ROLE="${HA_DEFAULT_ROLE:-viewer}"
@@ -41,60 +29,53 @@ export LOG_LEVEL="${LOG_LEVEL:-info}"
 export HA_SUPERVISOR_TOKEN="${SUPERVISOR_TOKEN:-}"
 export HA_BASE_URL="${HA_BASE_URL:-http://supervisor/core}"
 
-echo "→ Datenbank-URL: ${DATABASE_URL//:*@//:***@}"
-echo "→ Redis-URL: ${REDIS_URL}"
-echo "→ Sprache: ${LANGUAGE}"
-echo "→ Log-Level: ${LOG_LEVEL}"
+bashio::log.info "Datenbank-URL: ${DATABASE_URL//:*@//:***@}"
+bashio::log.info "Sprache: ${LANGUAGE}"
+bashio::log.info "Log-Level: ${LOG_LEVEL}"
 
-# ── Auf Datenbank warten ──
-echo "→ Warte auf TimescaleDB..."
-MAX_RETRIES=30
-RETRY=0
-until python3 -c "
+# ── Redis im Container starten (eingebettet) ──
+bashio::log.info "Starte Redis..."
+redis-server --daemonize yes --loglevel warning
+bashio::log.info "Redis gestartet."
+
+# ── Auf Datenbank warten (optional – nur wenn konfiguriert) ──
+if [ -n "${DB_PASSWORD}" ]; then
+    bashio::log.info "Warte auf TimescaleDB..."
+    MAX_RETRIES=30
+    RETRY=0
+    until python3 -c "
 import asyncio, asyncpg
 async def check():
-    conn = await asyncpg.connect('${DATABASE_URL}'.replace('+asyncpg', '').replace('postgresql', 'postgresql'))
+    url = '${DATABASE_URL}'.replace('postgresql+asyncpg://', 'postgresql://')
+    conn = await asyncpg.connect(url)
     await conn.close()
 asyncio.run(check())
 " 2>/dev/null; do
-    RETRY=$((RETRY + 1))
-    if [ $RETRY -ge $MAX_RETRIES ]; then
-        echo "✗ TimescaleDB nicht erreichbar nach ${MAX_RETRIES} Versuchen."
-        exit 1
+        RETRY=$((RETRY + 1))
+        if [ $RETRY -ge $MAX_RETRIES ]; then
+            bashio::log.warning "TimescaleDB nicht erreichbar – starte ohne DB."
+            break
+        fi
+        bashio::log.info "  DB-Verbindung Versuch ${RETRY}/${MAX_RETRIES}..."
+        sleep 2
+    done
+    if [ $RETRY -lt $MAX_RETRIES ]; then
+        bashio::log.info "TimescaleDB erreichbar."
+
+        # Datenbank-Migrationen ausführen
+        bashio::log.info "Führe Datenbank-Migrationen aus..."
+        cd /app/backend
+        python3 -m alembic upgrade head || bashio::log.warning "Migrationen fehlgeschlagen."
+        bashio::log.info "Migrationen abgeschlossen."
     fi
-    echo "  Versuch ${RETRY}/${MAX_RETRIES}..."
-    sleep 2
-done
-echo "✓ TimescaleDB erreichbar."
-
-# ── Auf Redis warten ──
-echo "→ Warte auf Redis..."
-RETRY=0
-until python3 -c "
-import redis
-r = redis.from_url('${REDIS_URL}')
-r.ping()
-" 2>/dev/null; do
-    RETRY=$((RETRY + 1))
-    if [ $RETRY -ge $MAX_RETRIES ]; then
-        echo "✗ Redis nicht erreichbar nach ${MAX_RETRIES} Versuchen."
-        exit 1
-    fi
-    echo "  Versuch ${RETRY}/${MAX_RETRIES}..."
-    sleep 2
-done
-echo "✓ Redis erreichbar."
-
-# ── Datenbank-Migrationen ausführen ──
-echo "→ Führe Datenbank-Migrationen aus..."
-cd /app/backend
-python3 -m alembic upgrade head
-echo "✓ Migrationen abgeschlossen."
-
-# Seed-Daten werden automatisch beim Uvicorn-Start geladen (main.py lifespan)
+else
+    bashio::log.info "Kein DB-Passwort konfiguriert – überspringe DB-Verbindung."
+    bashio::log.info "Bitte db_password in den Add-on-Optionen setzen."
+fi
 
 # ── Celery Worker starten (Hintergrund-Tasks) ──
-echo "→ Starte Celery Worker..."
+bashio::log.info "Starte Celery Worker..."
+cd /app/backend
 celery -A app.tasks worker \
     --loglevel="${LOG_LEVEL}" \
     --concurrency=2 \
@@ -104,7 +85,7 @@ celery -A app.tasks worker \
 CELERY_WORKER_PID=$!
 
 # ── Celery Beat starten (Geplante Tasks) ──
-echo "→ Starte Celery Beat..."
+bashio::log.info "Starte Celery Beat..."
 celery -A app.tasks beat \
     --loglevel="${LOG_LEVEL}" \
     --schedule=/tmp/celerybeat-schedule \
@@ -113,10 +94,11 @@ CELERY_BEAT_PID=$!
 
 # ── Aufräumen bei Beendigung ──
 cleanup() {
-    echo "→ Beende Dienste..."
+    bashio::log.info "Beende Dienste..."
     kill $CELERY_WORKER_PID 2>/dev/null || true
     kill $CELERY_BEAT_PID 2>/dev/null || true
-    echo "✓ Alle Dienste beendet."
+    redis-cli shutdown 2>/dev/null || true
+    bashio::log.info "Alle Dienste beendet."
 }
 trap cleanup EXIT SIGTERM SIGINT
 
@@ -126,8 +108,7 @@ echo "  ✓ Energy Management gestartet!"
 echo "  → Web-Oberfläche: http://0.0.0.0:8099"
 echo "============================================"
 
-# Uvicorn muss aus /app/backend gestartet werden,
-# damit die internen Imports (from app.xxx) funktionieren.
+cd /app/backend
 exec uvicorn app.main:create_app \
     --host 0.0.0.0 \
     --port 8099 \
