@@ -19,7 +19,6 @@ url: "https://github.com/loschi1982/addons"
 arch:
   - amd64
   - aarch64
-  - armv7
 
 # Netzwerk-Ports:
 # 8099 = Ingress-Port (HA-interne Einbettung)
