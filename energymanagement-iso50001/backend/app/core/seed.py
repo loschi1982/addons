@@ -228,6 +228,7 @@ async def load_dwd_stations():
                     latitude=st_data["latitude"],
                     longitude=st_data["longitude"],
                     altitude=st_data.get("altitude"),
+                    data_source=st_data.get("data_source", "bright_sky"),
                 )
                 session.add(station)
                 new_count += 1
