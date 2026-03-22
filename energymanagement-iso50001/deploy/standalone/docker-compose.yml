@@ -64,7 +64,6 @@ services:
       - "${APP_PORT:-8099}:8099"
     volumes:
       - app_data:/data
-      - app_source:/app
     environment:
       DATABASE_URL: "postgresql+asyncpg://${DB_USER:-energy}:${DB_PASSWORD:-energy}@timescaledb:5432/${DB_NAME:-energy_management}"
       REDIS_URL: "redis://redis:6379/0"
@@ -97,4 +96,3 @@ volumes:
   timescaledb_data:
   redis_data:
   app_data:
-  app_source:
