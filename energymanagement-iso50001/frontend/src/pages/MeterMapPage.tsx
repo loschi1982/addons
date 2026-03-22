@@ -180,7 +180,7 @@ function MeterMapContent() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col -m-6" style={{ height: 'calc(100vh - 4rem)' }}>
       <MeterMapToolbar
         onResetLayout={resetLayout}
         energyFilter={energyFilter}

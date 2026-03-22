@@ -3,7 +3,6 @@
  * Enthält einen "+" Button zum Anlegen neuer Zähler.
  */
 
-import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { Home, Plus } from 'lucide-react';
 
@@ -15,7 +14,7 @@ interface UsageUnitNodeData {
   [key: string]: unknown;
 }
 
-function UsageUnitNodeComponent({ data }: { data: UsageUnitNodeData }) {
+export function UsageUnitNode({ data }: { data: UsageUnitNodeData }) {
   return (
     <div className="rounded-lg border-2 border-[#1B5E7B] bg-white px-4 py-3 shadow-md min-w-[200px]">
       <Handle type="target" position={Position.Top} className="!bg-[#1B5E7B] !w-2 !h-2" />
@@ -28,9 +27,11 @@ function UsageUnitNodeComponent({ data }: { data: UsageUnitNodeData }) {
           )}
         </div>
         <button
-          className="p-1 rounded hover:bg-[#1B5E7B]/10 text-[#1B5E7B] transition-colors shrink-0"
+          className="nopan nodrag p-1 rounded hover:bg-[#1B5E7B]/10 text-[#1B5E7B] transition-colors shrink-0"
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
+            e.preventDefault();
             data.onAddMeter?.(data.unitId);
           }}
           title="Neuen Zähler anlegen"
@@ -42,5 +43,3 @@ function UsageUnitNodeComponent({ data }: { data: UsageUnitNodeData }) {
     </div>
   );
 }
-
-export const UsageUnitNode = memo(UsageUnitNodeComponent);

@@ -131,7 +131,7 @@ class MeterService:
         ]
 
         for field in updatable_fields:
-            if field in data and data[field] is not None:
+            if field in data:
                 setattr(meter, field, data[field])
 
         await self.db.commit()
