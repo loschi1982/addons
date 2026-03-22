@@ -129,7 +129,7 @@ export function useMeterMapData() {
           // Nutzungseinheiten aus der Building-Detail-Response laden
           let units: UsageUnit[] = [];
           try {
-            const bldRes = await apiClient.get(`/api/v1/sites/buildings/${building.id}`);
+            const bldRes = await apiClient.get(`/api/v1/sites/${site.id}/buildings/${building.id}`);
             units = (bldRes.data.usage_units || []).map((u: Record<string, unknown>) => ({
               id: u.id as string,
               name: u.name as string,

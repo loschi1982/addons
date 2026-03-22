@@ -90,13 +90,13 @@ export function useSiteHierarchy(initialUnitId?: string | null): SiteHierarchySt
 
   // Nutzungseinheiten laden wenn Gebäude gewählt
   useEffect(() => {
-    if (!selectedBuildingId) {
+    if (!selectedBuildingId || !selectedSiteId) {
       setUnits([]);
       return;
     }
     (async () => {
       try {
-        const res = await apiClient.get(`/api/v1/sites/buildings/${selectedBuildingId}`);
+        const res = await apiClient.get(`/api/v1/sites/${selectedSiteId}/buildings/${selectedBuildingId}`);
         const u = (res.data.usage_units || []).map((unit: Record<string, unknown>) => ({
           id: unit.id as string,
           name: unit.name as string,
@@ -108,7 +108,7 @@ export function useSiteHierarchy(initialUnitId?: string | null): SiteHierarchySt
         setUnits([]);
       }
     })();
-  }, [selectedBuildingId]);
+  }, [selectedSiteId, selectedBuildingId]);
 
   // Kaskade: Gebäude zurücksetzen wenn Standort wechselt
   const handleSiteChange = useCallback((id: string) => {
@@ -133,7 +133,7 @@ export function useSiteHierarchy(initialUnitId?: string | null): SiteHierarchySt
           const siteRes = await apiClient.get(`/api/v1/sites/${site.id}`);
           const siteBuildings = siteRes.data.buildings || [];
           for (const building of siteBuildings) {
-            const bldRes = await apiClient.get(`/api/v1/sites/buildings/${building.id}`);
+            const bldRes = await apiClient.get(`/api/v1/sites/${site.id}/buildings/${building.id}`);
             const bldUnits = bldRes.data.usage_units || [];
             const found = bldUnits.find((u: Record<string, unknown>) => u.id === initialUnitId);
             if (found) {
