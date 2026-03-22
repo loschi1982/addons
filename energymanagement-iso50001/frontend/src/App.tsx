@@ -23,6 +23,7 @@ import ImportPage from '@/pages/ImportPage';
 import IntegrationsPage from '@/pages/IntegrationsPage';
 import AnalyticsPage from '@/pages/AnalyticsPage';
 import SettingsPage from '@/pages/SettingsPage';
+import MeterMapPage from '@/pages/MeterMapPage';
 
 /**
  * Geschützte Route – leitet auf /login um wenn nicht authentifiziert.
@@ -69,6 +70,7 @@ export default function App() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="sites/*" element={<SitesPage />} />
         <Route path="meters/*" element={<MetersPage />} />
+        <Route path="meter-map" element={<MeterMapPage />} />
         <Route path="readings" element={<ReadingsPage />} />
         <Route path="consumers" element={<ConsumersPage />} />
         <Route path="schemas/*" element={<SchemasPage />} />

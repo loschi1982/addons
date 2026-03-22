@@ -20,6 +20,7 @@ import {
   TrendingUp,
   Settings,
   Globe,
+  Network,
 } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
 import { toggleSidebar } from '@/store/slices/uiSlice';
@@ -28,6 +29,7 @@ const navItems = [
   { path: '/dashboard', labelKey: 'nav.dashboard', icon: LayoutDashboard },
   { path: '/sites', labelKey: 'nav.sites', icon: Building2 },
   { path: '/meters', labelKey: 'nav.meters', icon: Gauge },
+  { path: '/meter-map', labelKey: 'nav.meterMap', icon: Network },
   { path: '/readings', labelKey: 'nav.readings', icon: ClipboardList },
   { path: '/consumers', labelKey: 'nav.consumers', icon: Zap },
   { path: '/schemas', labelKey: 'nav.schema', icon: BarChart3 },

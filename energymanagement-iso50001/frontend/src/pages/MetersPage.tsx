@@ -1,4 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
+import { Link } from 'react-router-dom';
+import { Network } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
 import { useSiteHierarchy } from '@/hooks/useSiteHierarchy';
@@ -197,9 +199,19 @@ export default function MetersPage() {
             {total} Zähler insgesamt
           </p>
         </div>
-        <button onClick={handleCreate} className="btn-primary">
-          + Neuer Zähler
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/meter-map"
+            className="flex items-center gap-1 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded border border-gray-300 transition-colors"
+            title="Baumansicht"
+          >
+            <Network className="h-4 w-4" />
+            <span className="hidden sm:inline">Karte</span>
+          </Link>
+          <button onClick={handleCreate} className="btn-primary">
+            + Neuer Zähler
+          </button>
+        </div>
       </div>
 
       {/* Filter */}
