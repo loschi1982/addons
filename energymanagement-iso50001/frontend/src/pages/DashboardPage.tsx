@@ -68,10 +68,11 @@ interface DashboardData {
 
 /* ── Hilfsfunktionen ── */
 
-function formatNumber(value: number, decimals = 1): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(decimals)} Mio.`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(decimals)} k`;
-  return value.toFixed(decimals);
+function formatNumber(value: unknown, decimals = 1): string {
+  const num = Number(value) || 0;
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(decimals)} Mio.`;
+  if (num >= 1_000) return `${(num / 1_000).toFixed(decimals)} k`;
+  return num.toFixed(decimals);
 }
 
 const KPI_ICONS: Record<string, React.ElementType> = {
@@ -111,7 +112,7 @@ function KPICardComponent({ card }: { card: KPICard }) {
         <div className="mt-3 flex items-center gap-1.5">
           <TrendIcon className={`h-4 w-4 ${trendColor}`} />
           <span className={`text-sm font-medium ${trendColor}`}>
-            {Math.abs(card.trend_percent).toFixed(1)}%
+            {(Math.abs(Number(card.trend_percent) || 0)).toFixed(1)}%
           </span>
           {card.comparison_label && (
             <span className="text-xs text-gray-400">vs. {card.comparison_label}</span>
@@ -328,7 +329,7 @@ export default function DashboardPage() {
                         {ENERGY_TYPE_LABELS[b.energy_type as keyof typeof ENERGY_TYPE_LABELS] || b.energy_type}
                       </span>
                     </div>
-                    <span className="font-medium text-gray-900">{b.share_percent.toFixed(1)}%</span>
+                    <span className="font-medium text-gray-900">{(Number(b.share_percent) || 0).toFixed(1)}%</span>
                   </div>
                 ))}
               </div>

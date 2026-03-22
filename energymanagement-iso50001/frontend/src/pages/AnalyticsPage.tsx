@@ -105,10 +105,11 @@ type TabKey = (typeof TABS)[number]['key'];
 
 /* ── Hilfsfunktionen ── */
 
-function formatNumber(val: number): string {
-  if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(1)} Mio.`;
-  if (val >= 1_000) return `${(val / 1_000).toFixed(1)} k`;
-  return val.toFixed(1);
+function formatNumber(val: unknown): string {
+  const num = Number(val) || 0;
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)} Mio.`;
+  if (num >= 1_000) return `${(num / 1_000).toFixed(1)} k`;
+  return num.toFixed(1);
 }
 
 function formatDate(iso: string): string {
