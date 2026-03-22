@@ -160,9 +160,16 @@ export function useMeterMapData() {
         }
       }
 
-      // 3. Alle aktiven Zähler laden
-      const allMetersRes = await apiClient.get('/api/v1/meters?page_size=500&is_active=true');
-      const allMeters: Meter[] = (allMetersRes.data.items || []);
+      // 3. Alle aktiven Zähler laden (paginiert, da page_size max 100)
+      const allMeters: Meter[] = [];
+      let meterPage = 1;
+      let meterTotal = 0;
+      do {
+        const res = await apiClient.get(`/api/v1/meters?page=${meterPage}&page_size=100&is_active=true`);
+        allMeters.push(...(res.data.items || []));
+        meterTotal = res.data.total || 0;
+        meterPage++;
+      } while (allMeters.length < meterTotal);
 
       // Zähler bereits verarbeiteter IDs tracken (Duplikate vermeiden)
       const addedMeterIds = new Set<string>();
