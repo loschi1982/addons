@@ -25,10 +25,12 @@ until pg_isready -h "${DB_HOST:-timescaledb}" -p "${DB_PORT:-5432}" -U "${DB_USE
 done
 echo "PostgreSQL bereit."
 
-# ── Auf Redis warten ──
+# ── Auf Redis warten (TCP-Check, kein redis-cli nötig) ──
 echo "Warte auf Redis..."
 RETRY=0
-until redis-cli -h "${REDIS_HOST:-redis}" -p "${REDIS_PORT:-6379}" ping 2>/dev/null | grep -q PONG; do
+REDIS_H="${REDIS_HOST:-redis}"
+REDIS_P="${REDIS_PORT:-6379}"
+until python3 -c "import socket; s=socket.create_connection(('${REDIS_H}', ${REDIS_P}), 2); s.send(b'PING\r\n'); assert b'PONG' in s.recv(64); s.close()" 2>/dev/null; do
     RETRY=$((RETRY + 1))
     if [ $RETRY -ge $MAX_RETRIES ]; then
         echo "FEHLER: Redis nicht erreichbar nach ${MAX_RETRIES} Versuchen!"
