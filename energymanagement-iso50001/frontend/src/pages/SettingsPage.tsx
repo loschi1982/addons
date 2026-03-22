@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell } from 'lucide-react';
+import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell, Monitor, Download, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 
 interface SettingEntry {
@@ -16,6 +16,7 @@ const TABS = [
   { id: 'report_defaults', label: 'Berichte', icon: FileText },
   { id: 'enpi_config', label: 'EnPI', icon: Activity },
   { id: 'notifications', label: 'Benachrichtigungen', icon: Bell },
+  { id: 'system', label: 'System', icon: Monitor },
 ] as const;
 
 export default function SettingsPage() {
@@ -88,10 +89,12 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="page-title">Einstellungen</h1>
-        <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2">
-          <Save className="w-4 h-4" />
-          {saving ? 'Speichern...' : saved ? 'Gespeichert!' : 'Speichern'}
-        </button>
+        {activeTab !== 'system' && (
+          <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2">
+            <Save className="w-4 h-4" />
+            {saving ? 'Speichern...' : saved ? 'Gespeichert!' : 'Speichern'}
+          </button>
+        )}
       </div>
 
       {/* Tabs */}
@@ -138,6 +141,7 @@ export default function SettingsPage() {
         {activeTab === 'notifications' && (
           <NotificationsForm values={editValues} onChange={updateField} />
         )}
+        {activeTab === 'system' && <SystemPanel />}
       </div>
     </div>
   );
@@ -447,6 +451,259 @@ function NotificationsForm({
           onChange={(e) => onChange('audit_reminder_days', parseInt(e.target.value) || 14)}
         />
       </FormField>
+    </div>
+  );
+}
+
+/* ── System-Panel (Version + Updates) ── */
+
+interface VersionInfo {
+  current_version: string;
+  deployment_mode: string;
+  app_name: string;
+}
+
+interface UpdateCheck {
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  deployment_mode: string;
+  release_notes: string;
+  checked_at: string;
+  error?: string;
+}
+
+interface UpdateResult {
+  success: boolean;
+  message: string;
+  old_version?: string;
+  new_version?: string;
+  log?: string;
+  restart_required?: boolean;
+}
+
+function SystemPanel() {
+  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [installResult, setInstallResult] = useState<UpdateResult | null>(null);
+  const [showLog, setShowLog] = useState(false);
+
+  useEffect(() => {
+    loadVersionInfo();
+  }, []);
+
+  const loadVersionInfo = async () => {
+    try {
+      const res = await apiClient.get('/api/v1/system/version');
+      setVersionInfo(res.data);
+    } catch {
+      console.error('Versionsinformationen konnten nicht geladen werden');
+    }
+  };
+
+  const checkForUpdates = async () => {
+    try {
+      setChecking(true);
+      setInstallResult(null);
+      const res = await apiClient.get('/api/v1/system/updates/check');
+      setUpdateCheck(res.data);
+    } catch {
+      console.error('Update-Prüfung fehlgeschlagen');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const installUpdate = async () => {
+    try {
+      setInstalling(true);
+      const res = await apiClient.post('/api/v1/system/updates/install');
+      setInstallResult(res.data);
+      if (res.data.success && res.data.restart_required) {
+        setTimeout(() => window.location.reload(), 5000);
+      }
+    } catch {
+      setInstallResult({
+        success: false,
+        message: 'Update-Installation fehlgeschlagen.',
+      });
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const deploymentLabel = versionInfo?.deployment_mode === 'ha-addon'
+    ? 'Home Assistant Add-on'
+    : 'Standalone';
+
+  return (
+    <div className="space-y-6">
+      {/* Versionsinformationen */}
+      <div>
+        <h3 className="text-base font-semibold text-gray-900 mb-3">Systeminformationen</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Version</p>
+            <p className="mt-1 text-lg font-semibold text-gray-900">
+              {versionInfo?.current_version || '...'}
+            </p>
+          </div>
+          <div className="rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Deployment</p>
+            <p className="mt-1 text-lg font-semibold text-gray-900">
+              {versionInfo ? deploymentLabel : '...'}
+            </p>
+          </div>
+          <div className="rounded-lg border border-gray-200 p-4">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Anwendung</p>
+            <p className="mt-1 text-lg font-semibold text-gray-900">
+              {versionInfo?.app_name || '...'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Update-Prüfung */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-base font-semibold text-gray-900">Updates</h3>
+          <button
+            onClick={checkForUpdates}
+            disabled={checking}
+            className="btn-secondary flex items-center gap-2 text-sm"
+          >
+            <RefreshCw className={`w-4 h-4 ${checking ? 'animate-spin' : ''}`} />
+            {checking ? 'Prüfe...' : 'Nach Updates suchen'}
+          </button>
+        </div>
+
+        {/* Update-Status */}
+        {updateCheck && (
+          <div className={`rounded-lg border p-4 ${
+            updateCheck.error
+              ? 'border-red-200 bg-red-50'
+              : updateCheck.update_available
+              ? 'border-primary-200 bg-primary-50'
+              : 'border-green-200 bg-green-50'
+          }`}>
+            {updateCheck.error ? (
+              <div className="flex items-start gap-3">
+                <XCircle className="w-5 h-5 text-red-500 mt-0.5 shrink-0" />
+                <div>
+                  <p className="font-medium text-red-800">Fehler bei der Update-Prüfung</p>
+                  <p className="text-sm text-red-600 mt-1">{updateCheck.error}</p>
+                </div>
+              </div>
+            ) : updateCheck.update_available ? (
+              <div>
+                <div className="flex items-start gap-3">
+                  <Download className="w-5 h-5 text-primary-600 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <p className="font-medium text-primary-800">
+                      Update verfügbar: v{updateCheck.latest_version}
+                    </p>
+                    <p className="text-sm text-primary-600 mt-1">
+                      Aktuelle Version: v{updateCheck.current_version}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Release-Notes */}
+                {updateCheck.release_notes && (
+                  <div className="mt-3 ml-8">
+                    <p className="text-sm font-medium text-gray-700 mb-1">Letzte Änderungen:</p>
+                    <pre className="text-xs text-gray-600 bg-white rounded p-3 border border-gray-200 whitespace-pre-wrap">
+                      {updateCheck.release_notes}
+                    </pre>
+                  </div>
+                )}
+
+                {/* Install-Button */}
+                {versionInfo?.deployment_mode === 'standalone' ? (
+                  <div className="mt-4 ml-8">
+                    <button
+                      onClick={installUpdate}
+                      disabled={installing}
+                      className="btn-primary flex items-center gap-2"
+                    >
+                      <Download className="w-4 h-4" />
+                      {installing ? 'Update wird installiert...' : 'Update installieren'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-3 ml-8">
+                    <p className="text-sm text-amber-700 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4" />
+                      Updates werden über den Home Assistant Supervisor verwaltet.
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <CheckCircle className="w-5 h-5 text-green-500 shrink-0" />
+                <div>
+                  <p className="font-medium text-green-800">System ist aktuell</p>
+                  <p className="text-sm text-green-600">
+                    Version v{updateCheck.current_version} ist die neueste Version.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Install-Ergebnis */}
+        {installResult && (
+          <div className={`mt-4 rounded-lg border p-4 ${
+            installResult.success
+              ? 'border-green-200 bg-green-50'
+              : 'border-red-200 bg-red-50'
+          }`}>
+            <div className="flex items-start gap-3">
+              {installResult.success ? (
+                <CheckCircle className="w-5 h-5 text-green-500 mt-0.5 shrink-0" />
+              ) : (
+                <XCircle className="w-5 h-5 text-red-500 mt-0.5 shrink-0" />
+              )}
+              <div className="flex-1">
+                <p className={`font-medium ${installResult.success ? 'text-green-800' : 'text-red-800'}`}>
+                  {installResult.message}
+                </p>
+                {installResult.success && installResult.restart_required && (
+                  <p className="text-sm text-green-600 mt-1">
+                    Seite wird in 5 Sekunden neu geladen...
+                  </p>
+                )}
+                {installResult.log && (
+                  <div className="mt-2">
+                    <button
+                      onClick={() => setShowLog(!showLog)}
+                      className="text-sm text-gray-600 hover:text-gray-900 underline"
+                    >
+                      {showLog ? 'Log verbergen' : 'Log anzeigen'}
+                    </button>
+                    {showLog && (
+                      <pre className="mt-2 text-xs text-gray-600 bg-white rounded p-3 border border-gray-200 whitespace-pre-wrap max-h-64 overflow-auto">
+                        {installResult.log}
+                      </pre>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Hinweis wenn noch nicht geprüft */}
+        {!updateCheck && !checking && (
+          <p className="text-sm text-gray-500">
+            Klicken Sie auf "Nach Updates suchen", um zu prüfen ob eine neue Version verfügbar ist.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

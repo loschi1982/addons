@@ -1,0 +1,75 @@
+# ===========================================================================
+# Home Assistant Add-on Konfiguration
+# ===========================================================================
+# Diese Datei beschreibt das Add-on für Home Assistant. Der HA Supervisor
+# liest sie beim Installieren und Starten des Add-ons. Sie definiert:
+# - Name, Version und unterstützte Architekturen
+# - Welche Ports das Add-on nutzt
+# - Welche Optionen der Benutzer konfigurieren kann
+# - Ob und wie das Add-on in die HA-Oberfläche eingebettet wird (Ingress)
+# ===========================================================================
+
+name: "Energy Management ISO 50001"
+description: "Umfassendes Energiemanagementsystem nach ISO 50001 – Erfassung, Visualisierung und Auswertung von Energieverbräuchen mit CO₂-Bilanzierung und Witterungskorrektur."
+version: "0.2.0"
+slug: "energymanagement-iso50001"
+url: "https://github.com/loschi1982/addons"
+
+# Unterstützte CPU-Architekturen
+arch:
+  - amd64
+  - aarch64
+
+# Netzwerk-Ports:
+# 8099 = Ingress-Port (intern), 8098 = Direkter Zugriff zum Testen
+ports:
+  "8099/tcp": 8098
+ports_description:
+  "8099/tcp": "Web-Oberfläche (direkt)"
+
+# Ingress: Einbettung in die HA-Oberfläche (Seitenleiste)
+ingress: true
+ingress_port: 8099
+ingress_entry: "/"
+panel_icon: "mdi:lightning-bolt"
+panel_title: "Energiemanagement"
+
+# Benutzer-konfigurierbare Optionen
+options:
+  ha_auth_enabled: false
+  ha_default_role: "viewer"
+  electricity_maps_api_key: ""
+  bright_sky_enabled: true
+  language: "de"
+  log_level: "info"
+
+# Schema: Validierung der Optionen (welche Werte sind erlaubt)
+schema:
+  ha_auth_enabled: "bool"
+  ha_default_role: "list(administrator|energy_manager|auditor|technician|viewer)"
+  electricity_maps_api_key: "str?"
+  bright_sky_enabled: "bool"
+  language: "list(de|en)"
+  log_level: "list(debug|info|warning|error)"
+
+# Zugriff auf HA-Verzeichnisse:
+# config = HA-Konfiguration (z.B. für Secrets)
+# ssl = SSL-Zertifikate (für HTTPS)
+# share = Gemeinsames Verzeichnis (für Datei-Exporte)
+map:
+  - config:rw
+  - ssl:ro
+  - share:rw
+
+# Add-on-Verhalten
+startup: application
+init: false
+watchdog: "http://[HOST]:[PORT:8099]/"
+
+# Zugriff auf HA APIs
+homeassistant_api: true
+auth_api: true
+
+# Ressourcen-Empfehlung
+resources:
+  memory: 512

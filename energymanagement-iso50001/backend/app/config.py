@@ -9,7 +9,18 @@ In der Produktion (als HA Add-on) setzt das run.sh-Skript die Variablen.
 In der Entwicklung können sie in einer .env-Datei definiert werden.
 """
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _read_version() -> str:
+    """Liest die Version aus der VERSION-Datei im Projekt-Root."""
+    version_file = Path(__file__).resolve().parent.parent.parent / "VERSION"
+    try:
+        return version_file.read_text().strip()
+    except FileNotFoundError:
+        return "0.0.0"
 
 
 class Settings(BaseSettings):
@@ -48,12 +59,21 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
 
     # ── Home Assistant ──
-    # Supervisor-Token für den Zugriff auf die HA-API.
-    # Wird automatisch von HA gesetzt, wenn das Add-on läuft.
+    # Access Token für die HA-API.
+    # Im Add-on: SUPERVISOR_TOKEN (wird automatisch gesetzt)
+    # Standalone: Long-Lived Access Token (aus HA Profil)
+    ha_access_token: str = ""
+
+    # Rückwärtskompatibilität: ha_supervisor_token wird als Alias akzeptiert
     ha_supervisor_token: str = ""
 
-    # Basis-URL der HA-API (innerhalb des Add-on-Containers)
-    ha_base_url: str = "http://supervisor/core"
+    # Basis-URL der HA-API
+    # Im Add-on: http://supervisor/core
+    # Standalone: z.B. http://192.168.1.100:8123
+    ha_base_url: str = ""
+
+    # Deployment-Modus: "standalone" oder "ha-addon"
+    deployment_mode: str = "ha-addon"
 
     # Soll HA-Authentifizierung als Alternative zum eigenen Login erlaubt sein?
     ha_auth_enabled: bool = False
@@ -80,7 +100,7 @@ class Settings(BaseSettings):
 
     # ── Anwendung ──
     app_name: str = "Energy Management ISO 50001"
-    app_version: str = "0.1.0"
+    app_version: str = _read_version()
     debug: bool = False
 
 

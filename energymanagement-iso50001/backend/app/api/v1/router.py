@@ -25,6 +25,7 @@ from app.api.v1 import (
     schemas,
     settings,
     sites,
+    system,
     users,
     weather,
 )
@@ -65,3 +66,6 @@ api_router.include_router(settings.router, prefix="/settings", tags=["Einstellun
 
 # Audit-Log
 api_router.include_router(audit.router, prefix="/audit", tags=["Audit-Log"])
+
+# System (Version, Updates)
+api_router.include_router(system.router, prefix="/system", tags=["System"])

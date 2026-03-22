@@ -105,6 +105,10 @@
     {"module": "users", "action": "create", "category": "Benutzer"},
     {"module": "users", "action": "update", "category": "Benutzer"},
     {"module": "users", "action": "delete", "category": "Benutzer"},
-    {"module": "users", "action": "manage_roles", "category": "Benutzer"}
+    {"module": "users", "action": "manage_roles", "category": "Benutzer"},
+    {"module": "system", "action": "view", "category": "System"},
+    {"module": "system", "action": "update", "category": "System"},
+    {"module": "settings", "action": "view", "category": "Einstellungen"},
+    {"module": "settings", "action": "update", "category": "Einstellungen"}
   ]
 }

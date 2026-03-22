@@ -32,8 +32,15 @@ class HomeAssistantClient:
 
     def __init__(self):
         settings = get_settings()
-        self.base_url = settings.ha_base_url
-        self.token = settings.ha_supervisor_token
+        self.base_url = settings.ha_base_url.rstrip("/") if settings.ha_base_url else ""
+        # Token-Priorität: ha_access_token > ha_supervisor_token (Rückwärtskompatibilität)
+        self.token = settings.ha_access_token or settings.ha_supervisor_token
+        if not self.token or not self.base_url:
+            logger.warning(
+                "ha_not_configured",
+                has_token=bool(self.token),
+                has_url=bool(self.base_url),
+            )
         self.headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
