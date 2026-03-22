@@ -25,22 +25,8 @@ until pg_isready -h "${DB_HOST:-timescaledb}" -p "${DB_PORT:-5432}" -U "${DB_USE
 done
 echo "PostgreSQL bereit."
 
-# ── Auf Redis warten (TCP-Check) ──
-echo "Warte auf Redis (${REDIS_HOST:-redis}:${REDIS_PORT:-6379})..."
-RETRY=0
-until python3 -c "
-import socket
-s = socket.create_connection(('${REDIS_HOST:-redis}', int('${REDIS_PORT:-6379}')), 2)
-s.close()
-" 2>/dev/null; do
-    RETRY=$((RETRY + 1))
-    if [ $RETRY -ge $MAX_RETRIES ]; then
-        echo "FEHLER: Redis nicht erreichbar nach ${MAX_RETRIES} Versuchen!"
-        exit 1
-    fi
-    sleep 1
-done
-echo "Redis bereit."
+# Redis-Check entfällt: docker-compose wartet via depends_on + healthcheck
+echo "Redis bereit (via Docker Healthcheck)."
 
 # ── Datenbank-Migrationen ──
 echo "Führe Datenbank-Migrationen aus..."
