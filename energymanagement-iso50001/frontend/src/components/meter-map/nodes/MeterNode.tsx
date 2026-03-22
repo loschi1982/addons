@@ -15,6 +15,8 @@ interface MeterNodeData {
   meterNumber?: string | null;
   energyType: string;
   dataSource?: string;
+  isVirtual?: boolean;
+  isFeedIn?: boolean;
   unitId: string;
   [key: string]: unknown;
 }
@@ -36,10 +38,14 @@ function MeterNodeComponent({ data }: { data: MeterNodeData }) {
   const label = ENERGY_TYPE_LABELS[data.energyType as EnergyType] || data.energyType;
   const Icon = ENERGY_ICONS[data.energyType] || Gauge;
 
+  // Visuell: gestrichelt für virtuelle Zähler, grüner Hintergrund für PV/Einspeisung
+  const borderStyle = data.isVirtual ? 'dashed' : 'solid';
+  const bgColor = data.isFeedIn ? '#f0fdf4' : 'white';
+
   return (
     <div
       className="rounded-lg border bg-white shadow-sm min-w-[180px] overflow-hidden"
-      style={{ borderColor: color }}
+      style={{ borderColor: color, borderStyle, backgroundColor: bgColor }}
     >
       <Handle type="target" position={Position.Top} className="!w-2 !h-2" style={{ background: color }} />
       {/* Farbiger Akzent oben */}
@@ -48,7 +54,11 @@ function MeterNodeComponent({ data }: { data: MeterNodeData }) {
         <div className="flex items-center gap-2">
           <Icon className="h-4 w-4 shrink-0" style={{ color }} />
           <div className="min-w-0 flex-1">
-            <div className="font-medium text-gray-800 text-xs truncate">{data.label}</div>
+            <div className="font-medium text-gray-800 text-xs truncate">
+              {data.isFeedIn && <span className="text-green-600 mr-1" title="Einspeisezähler">&#9652;</span>}
+              {data.isVirtual && <span className="text-indigo-500 mr-1" title="Virtueller Zähler">&#8776;</span>}
+              {data.label}
+            </div>
             <div className="text-[10px] text-gray-500 truncate">
               {label}
               {data.meterNumber ? ` · ${data.meterNumber}` : ''}

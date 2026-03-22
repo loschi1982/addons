@@ -19,8 +19,11 @@ interface Meter {
   building_id: string | null;
   usage_unit_id: string | null;
   is_active: boolean;
+  is_virtual: boolean;
+  is_feed_in: boolean;
   is_weather_corrected: boolean;
   source_config: Record<string, unknown> | null;
+  virtual_config: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -31,12 +34,18 @@ interface MeterForm {
   unit: string;
   data_source: string;
   location: string;
+  is_virtual: boolean;
+  is_feed_in: boolean;
   is_weather_corrected: boolean;
   source_config_ip: string;
   source_config_channel: string;
   source_config_mode: string;
   source_config_register: string;
   source_config_entity_id: string;
+  virtual_type: string;
+  virtual_source_meter_id: string;
+  virtual_subtract_meter_ids: string[];
+  virtual_sum_meter_ids: string[];
 }
 
 const emptyForm: MeterForm = {
@@ -46,12 +55,18 @@ const emptyForm: MeterForm = {
   unit: 'kWh',
   data_source: 'manual',
   location: '',
+  is_virtual: false,
+  is_feed_in: false,
   is_weather_corrected: false,
   source_config_ip: '',
   source_config_channel: '0',
   source_config_mode: 'single',
   source_config_register: '',
   source_config_entity_id: '',
+  virtual_type: 'difference',
+  virtual_source_meter_id: '',
+  virtual_subtract_meter_ids: [],
+  virtual_sum_meter_ids: [],
 };
 
 const DATA_SOURCES: Record<string, string> = {
@@ -60,6 +75,7 @@ const DATA_SOURCES: Record<string, string> = {
   modbus: 'Modbus',
   knx: 'KNX',
   homeassistant: 'Home Assistant',
+  virtual: 'Virtuell (berechnet)',
 };
 
 // ── Komponente ──
@@ -120,19 +136,26 @@ export default function MetersPage() {
     setEditingId(meter.id);
     setEditingMeter(meter);
     const cfg = meter.source_config || {};
+    const vcfg = meter.virtual_config || {};
     setForm({
       name: meter.name,
       meter_number: meter.meter_number || '',
       energy_type: meter.energy_type,
       unit: meter.unit,
-      data_source: meter.data_source,
+      data_source: meter.is_virtual ? 'virtual' : meter.data_source,
       location: meter.location || '',
+      is_virtual: meter.is_virtual,
+      is_feed_in: meter.is_feed_in,
       is_weather_corrected: meter.is_weather_corrected,
       source_config_ip: (cfg.ip as string) || '',
       source_config_channel: (cfg.channel?.toString()) || '0',
       source_config_mode: (cfg.mode as string) || 'single',
       source_config_register: (cfg.register?.toString()) || '',
       source_config_entity_id: (cfg.entity_id as string) || '',
+      virtual_type: (vcfg.type as string) || 'difference',
+      virtual_source_meter_id: (vcfg.source_meter_id as string) || '',
+      virtual_subtract_meter_ids: (vcfg.subtract_meter_ids as string[]) || [],
+      virtual_sum_meter_ids: (vcfg.source_meter_ids as string[]) || [],
     });
     setFormError(null);
     setShowModal(true);
@@ -153,6 +176,9 @@ export default function MetersPage() {
     setFormError(null);
     setSaving(true);
 
+    const isVirtual = form.data_source === 'virtual';
+    const actualDataSource = isVirtual ? 'manual' : form.data_source;
+
     // source_config zusammenbauen
     const source_config: Record<string, unknown> = {};
     if (form.data_source === 'shelly') {
@@ -170,19 +196,39 @@ export default function MetersPage() {
       if (form.source_config_entity_id) source_config.entity_id = form.source_config_entity_id;
     }
 
+    // virtual_config zusammenbauen
+    let virtual_config: Record<string, unknown> | null = null;
+    if (isVirtual) {
+      if (form.virtual_type === 'difference') {
+        virtual_config = {
+          type: 'difference',
+          source_meter_id: form.virtual_source_meter_id || null,
+          subtract_meter_ids: form.virtual_subtract_meter_ids.filter(Boolean),
+        };
+      } else if (form.virtual_type === 'sum') {
+        virtual_config = {
+          type: 'sum',
+          source_meter_ids: form.virtual_sum_meter_ids.filter(Boolean),
+        };
+      }
+    }
+
     // Zuordnung: nur die tiefste gewählte Ebene setzen
     const payload: Record<string, unknown> = {
       name: form.name,
       meter_number: form.meter_number || null,
       energy_type: form.energy_type,
       unit: form.unit,
-      data_source: form.data_source,
+      data_source: actualDataSource,
       location: form.location || null,
+      is_virtual: isVirtual,
+      is_feed_in: form.is_feed_in,
       is_weather_corrected: form.is_weather_corrected,
       site_id: hierarchy.siteId || null,
       building_id: hierarchy.buildingId || null,
       usage_unit_id: hierarchy.unitId || null,
       source_config: Object.keys(source_config).length > 0 ? source_config : null,
+      virtual_config,
     };
 
     try {
@@ -332,7 +378,10 @@ export default function MetersPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-gray-500">
-                    {DATA_SOURCES[meter.data_source] || meter.data_source}
+                    {meter.is_virtual ? 'Virtuell' : (DATA_SOURCES[meter.data_source] || meter.data_source)}
+                    {meter.is_feed_in && (
+                      <span className="ml-1 inline-flex items-center rounded-full bg-green-50 px-1.5 py-0.5 text-xs text-green-700">PV</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-gray-500">
                     {meter.location || '–'}
@@ -444,6 +493,16 @@ function MeterModal({
     buildingId: editingMeter.building_id,
     unitId: editingMeter.usage_unit_id,
   } : undefined);
+
+  // Alle Zähler laden für die Formelauswahl bei virtuellen Zählern
+  const [allMeters, setAllMeters] = useState<Meter[]>([]);
+  useEffect(() => {
+    if (form.data_source === 'virtual') {
+      apiClient.get('/api/v1/meters?page_size=100&is_active=true')
+        .then((res) => setAllMeters((res.data.items || []).filter((m: Meter) => m.id !== editingId)))
+        .catch(() => {});
+    }
+  }, [form.data_source, editingId]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -626,6 +685,123 @@ function MeterModal({
             </div>
           )}
 
+          {/* Virtueller Zähler: Formel-Konfiguration */}
+          {form.data_source === 'virtual' && (
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+              <p className="text-sm font-medium text-indigo-700 mb-3">Berechnungsformel</p>
+              <div className="mb-3">
+                <label className="label">Formeltyp</label>
+                <select
+                  className="input"
+                  value={form.virtual_type}
+                  onChange={(e) => setForm({ ...form, virtual_type: e.target.value })}
+                >
+                  <option value="difference">Differenz (A minus B, C, ...)</option>
+                  <option value="sum">Summe (A + B + C + ...)</option>
+                </select>
+              </div>
+
+              {form.virtual_type === 'difference' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="label">Quellzähler (A)</label>
+                    <select
+                      className="input"
+                      value={form.virtual_source_meter_id}
+                      onChange={(e) => setForm({ ...form, virtual_source_meter_id: e.target.value })}
+                    >
+                      <option value="">– Zähler wählen –</option>
+                      {allMeters.map((m) => (
+                        <option key={m.id} value={m.id}>{m.name} {m.meter_number ? `(${m.meter_number})` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Abzugszähler (B, C, ...)</label>
+                    <select
+                      className="input mb-2"
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value && !form.virtual_subtract_meter_ids.includes(e.target.value)) {
+                          setForm({ ...form, virtual_subtract_meter_ids: [...form.virtual_subtract_meter_ids, e.target.value] });
+                        }
+                      }}
+                    >
+                      <option value="">+ Abzugszähler hinzufügen</option>
+                      {allMeters
+                        .filter((m) => m.id !== form.virtual_source_meter_id && !form.virtual_subtract_meter_ids.includes(m.id))
+                        .map((m) => (
+                          <option key={m.id} value={m.id}>{m.name} {m.meter_number ? `(${m.meter_number})` : ''}</option>
+                        ))}
+                    </select>
+                    {form.virtual_subtract_meter_ids.map((id) => {
+                      const m = allMeters.find((x) => x.id === id);
+                      return (
+                        <div key={id} className="flex items-center gap-2 text-sm py-1">
+                          <span className="text-red-600">−</span>
+                          <span className="flex-1">{m?.name || id}</span>
+                          <button
+                            type="button"
+                            className="text-red-500 hover:text-red-700 text-xs"
+                            onClick={() => setForm({ ...form, virtual_subtract_meter_ids: form.virtual_subtract_meter_ids.filter((x) => x !== id) })}
+                          >
+                            Entfernen
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Ergebnis = Quellzähler − Summe der Abzugszähler
+                  </p>
+                </div>
+              )}
+
+              {form.virtual_type === 'sum' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="label">Quellzähler</label>
+                    <select
+                      className="input mb-2"
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value && !form.virtual_sum_meter_ids.includes(e.target.value)) {
+                          setForm({ ...form, virtual_sum_meter_ids: [...form.virtual_sum_meter_ids, e.target.value] });
+                        }
+                      }}
+                    >
+                      <option value="">+ Zähler hinzufügen</option>
+                      {allMeters
+                        .filter((m) => !form.virtual_sum_meter_ids.includes(m.id))
+                        .map((m) => (
+                          <option key={m.id} value={m.id}>{m.name} {m.meter_number ? `(${m.meter_number})` : ''}</option>
+                        ))}
+                    </select>
+                    {form.virtual_sum_meter_ids.map((id) => {
+                      const m = allMeters.find((x) => x.id === id);
+                      return (
+                        <div key={id} className="flex items-center gap-2 text-sm py-1">
+                          <span className="text-green-600">+</span>
+                          <span className="flex-1">{m?.name || id}</span>
+                          <button
+                            type="button"
+                            className="text-red-500 hover:text-red-700 text-xs"
+                            onClick={() => setForm({ ...form, virtual_sum_meter_ids: form.virtual_sum_meter_ids.filter((x) => x !== id) })}
+                          >
+                            Entfernen
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Ergebnis = Summe aller Quellzähler
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Zuordnung: Standort → Gebäude → Nutzungseinheit */}
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
             <p className="text-sm font-medium text-gray-700 mb-3">Zuordnung (optional)</p>
@@ -674,16 +850,29 @@ function MeterModal({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="is_weather_corrected"
-              checked={form.is_weather_corrected}
-              onChange={(e) => setForm({ ...form, is_weather_corrected: e.target.checked })}
-            />
-            <label htmlFor="is_weather_corrected" className="text-sm">
-              Witterungskorrektur aktivieren
-            </label>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="is_feed_in"
+                checked={form.is_feed_in}
+                onChange={(e) => setForm({ ...form, is_feed_in: e.target.checked })}
+              />
+              <label htmlFor="is_feed_in" className="text-sm">
+                Einspeisezähler (PV / Erzeugung)
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="is_weather_corrected"
+                checked={form.is_weather_corrected}
+                onChange={(e) => setForm({ ...form, is_weather_corrected: e.target.checked })}
+              />
+              <label htmlFor="is_weather_corrected" className="text-sm">
+                Witterungskorrektur
+              </label>
+            </div>
           </div>
 
           <div className="flex justify-end gap-3 pt-2">

@@ -80,6 +80,16 @@ class Meter(Base, UUIDMixin, TimestampMixin):
     # z.B. für Ökostrom-Tarife mit 0 g CO₂/kWh
     co2_factor_override: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
 
+    # Zählertyp-Flags
+    is_submeter: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_virtual: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_feed_in: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Konfiguration für virtuelle Zähler (Berechnungsformel)
+    # Beispiel: {"type": "difference", "source_meter_id": "uuid-A", "subtract_meter_ids": ["uuid-B"]}
+    # Beispiel: {"type": "sum", "source_meter_ids": ["uuid-A", "uuid-B"]}
+    virtual_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Beziehungen

@@ -40,6 +40,8 @@ interface Meter {
   site_id: string | null;
   building_id: string | null;
   usage_unit_id: string | null;
+  is_virtual: boolean;
+  is_feed_in: boolean;
   is_active: boolean;
 }
 
@@ -189,6 +191,8 @@ export function useMeterMapData() {
             meterNumber: m.meter_number,
             energyType: m.energy_type,
             dataSource: m.data_source,
+            isVirtual: m.is_virtual,
+            isFeedIn: m.is_feed_in,
             unitId: m.usage_unit_id,
           },
         };

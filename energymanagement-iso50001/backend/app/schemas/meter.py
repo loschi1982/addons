@@ -39,6 +39,7 @@ class MeterBase(BaseModel):
     is_weather_corrected: bool = False
     co2_factor_override: Decimal | None = None
     tariff_info: dict[str, Any] | None = None
+    virtual_config: dict[str, Any] | None = None
     notes: str | None = None
 
 
@@ -66,6 +67,7 @@ class MeterUpdate(BaseModel):
     is_weather_corrected: bool | None = None
     co2_factor_override: Decimal | None = None
     tariff_info: dict[str, Any] | None = None
+    virtual_config: dict[str, Any] | None = None
     notes: str | None = None
     is_active: bool | None = None
 

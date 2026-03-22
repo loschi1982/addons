@@ -79,6 +79,13 @@ class PollingManager:
                     error=str(e),
                 )
 
+        # Virtuelle Zähler nach den physischen berechnen
+        virtual_result = await self._calculate_virtual_meters()
+        polled += virtual_result["polled"]
+        success += virtual_result["success"]
+        errors += virtual_result["errors"]
+        details.extend(virtual_result["details"])
+
         logger.info(
             "poll_all_complete",
             polled=polled,
@@ -103,6 +110,10 @@ class PollingManager:
         meter = await self.db.get(Meter, meter_id)
         if not meter:
             return {"meter_id": str(meter_id), "success": False, "error": "Zähler nicht gefunden"}
+
+        # Virtuelle Zähler direkt berechnen
+        if meter.is_virtual:
+            return await self._calc_single_virtual(meter)
 
         if meter.data_source not in AUTO_SOURCES:
             return {"meter_id": str(meter_id), "success": False, "error": "Keine automatische Quelle"}
@@ -283,6 +294,120 @@ class PollingManager:
             "value": float(value),
             "consumption": float(consumption) if consumption else None,
         }
+
+    async def _calculate_virtual_meters(self) -> dict:
+        """
+        Alle virtuellen Zähler berechnen.
+
+        Unterstützte Formeln (virtual_config.type):
+        - "difference": source_meter_id minus subtract_meter_ids[]
+        - "sum": Summe aller source_meter_ids[]
+
+        Liest jeweils den letzten Zählerstand der Quellzähler.
+        """
+        result = await self.db.execute(
+            select(Meter).where(
+                Meter.is_active == True,  # noqa: E712
+                Meter.is_virtual == True,  # noqa: E712
+            )
+        )
+        virtual_meters = result.scalars().all()
+
+        polled = 0
+        success = 0
+        errors = 0
+        details = []
+
+        for meter in virtual_meters:
+            polled += 1
+            try:
+                calc_result = await self._calc_single_virtual(meter)
+                if calc_result.get("success"):
+                    success += 1
+                else:
+                    errors += 1
+                details.append(calc_result)
+            except Exception as e:
+                errors += 1
+                details.append(self._error_result(meter, str(e)))
+                logger.error(
+                    "virtual_meter_calc_failed",
+                    meter_id=str(meter.id),
+                    error=str(e),
+                )
+
+        return {"polled": polled, "success": success, "errors": errors, "details": details}
+
+    async def _calc_single_virtual(self, meter: Meter) -> dict:
+        """Einen virtuellen Zähler berechnen."""
+        config = meter.virtual_config or {}
+        calc_type = config.get("type", "difference")
+
+        if calc_type == "difference":
+            return await self._calc_difference(meter, config)
+        elif calc_type == "sum":
+            return await self._calc_sum(meter, config)
+        else:
+            return self._error_result(meter, f"Unbekannter Formeltyp: {calc_type}")
+
+    async def _get_latest_value(self, meter_id: uuid.UUID) -> Decimal | None:
+        """Letzten Zählerstand eines Zählers laden."""
+        result = await self.db.execute(
+            select(MeterReading)
+            .where(MeterReading.meter_id == meter_id)
+            .order_by(MeterReading.timestamp.desc())
+            .limit(1)
+        )
+        reading = result.scalar_one_or_none()
+        return reading.value if reading else None
+
+    async def _calc_difference(self, meter: Meter, config: dict) -> dict:
+        """
+        Differenzmessung: Quellzähler minus Abzugszähler.
+
+        Beispiel: Standort-Zähler minus Einlieger-Zähler = Haupthaus-Verbrauch
+        """
+        source_id = config.get("source_meter_id")
+        subtract_ids = config.get("subtract_meter_ids", [])
+
+        if not source_id:
+            return self._error_result(meter, "Kein Quellzähler konfiguriert")
+
+        source_value = await self._get_latest_value(uuid.UUID(source_id))
+        if source_value is None:
+            return self._error_result(meter, "Kein Messwert vom Quellzähler")
+
+        total_subtract = Decimal("0")
+        for sub_id in subtract_ids:
+            sub_value = await self._get_latest_value(uuid.UUID(sub_id))
+            if sub_value is not None:
+                total_subtract += sub_value
+
+        calculated = source_value - total_subtract
+        return await self._save_reading(meter, calculated, "virtual")
+
+    async def _calc_sum(self, meter: Meter, config: dict) -> dict:
+        """
+        Summenmessung: Alle Quellzähler aufsummieren.
+
+        Beispiel: PV-Haupthaus + Balkonkraftwerk = PV-Gesamt
+        """
+        source_ids = config.get("source_meter_ids", [])
+        if not source_ids:
+            return self._error_result(meter, "Keine Quellzähler konfiguriert")
+
+        total = Decimal("0")
+        found_any = False
+        for src_id in source_ids:
+            value = await self._get_latest_value(uuid.UUID(src_id))
+            if value is not None:
+                total += value
+                found_any = True
+
+        if not found_any:
+            return self._error_result(meter, "Keine Messwerte von Quellzählern")
+
+        return await self._save_reading(meter, total, "virtual")
 
     @staticmethod
     def _error_result(meter: Meter, error: str) -> dict:

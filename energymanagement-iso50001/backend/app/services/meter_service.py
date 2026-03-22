@@ -104,6 +104,10 @@ class MeterService:
             tariff_info=data.get("tariff_info"),
             is_weather_corrected=data.get("is_weather_corrected", False),
             co2_factor_override=data.get("co2_factor_override"),
+            is_submeter=data.get("is_submeter", False),
+            is_virtual=data.get("is_virtual", False),
+            is_feed_in=data.get("is_feed_in", False),
+            virtual_config=data.get("virtual_config"),
         )
         self.db.add(meter)
         await self.db.commit()
@@ -137,6 +141,7 @@ class MeterService:
             "site_id", "building_id", "usage_unit_id",
             "location", "cost_center", "tariff_info", "is_weather_corrected",
             "co2_factor_override", "is_active",
+            "is_submeter", "is_virtual", "is_feed_in", "virtual_config",
         ]
 
         for field in updatable_fields:
