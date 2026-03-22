@@ -31,6 +31,8 @@ class MeterService:
         page_size: int = 25,
         energy_type: str | None = None,
         data_source: str | None = None,
+        site_id: uuid.UUID | None = None,
+        building_id: uuid.UUID | None = None,
         usage_unit_id: uuid.UUID | None = None,
         is_active: bool | None = True,
         search: str | None = None,
@@ -47,6 +49,10 @@ class MeterService:
             query = query.where(Meter.energy_type == energy_type)
         if data_source:
             query = query.where(Meter.data_source == data_source)
+        if site_id:
+            query = query.where(Meter.site_id == site_id)
+        if building_id:
+            query = query.where(Meter.building_id == building_id)
         if usage_unit_id:
             query = query.where(Meter.usage_unit_id == usage_unit_id)
         if is_active is not None:
@@ -90,6 +96,8 @@ class MeterService:
             data_source=data.get("data_source", "manual"),
             source_config=data.get("source_config"),
             parent_meter_id=data.get("parent_meter_id"),
+            site_id=data.get("site_id"),
+            building_id=data.get("building_id"),
             usage_unit_id=data.get("usage_unit_id"),
             location=data.get("location"),
             cost_center=data.get("cost_center"),
@@ -125,7 +133,8 @@ class MeterService:
 
         updatable_fields = [
             "name", "description", "meter_number", "energy_type", "unit",
-            "data_source", "source_config", "parent_meter_id", "usage_unit_id",
+            "data_source", "source_config", "parent_meter_id",
+            "site_id", "building_id", "usage_unit_id",
             "location", "cost_center", "tariff_info", "is_weather_corrected",
             "co2_factor_override", "is_active",
         ]

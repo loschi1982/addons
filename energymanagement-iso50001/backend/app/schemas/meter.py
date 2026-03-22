@@ -29,6 +29,8 @@ class MeterBase(BaseModel):
     data_source: str = Field("manual", max_length=50)
     source_config: dict[str, Any] | None = None
     location: str | None = Field(None, max_length=255)
+    site_id: uuid.UUID | None = None
+    building_id: uuid.UUID | None = None
     usage_unit_id: uuid.UUID | None = None
     parent_meter_id: uuid.UUID | None = None
     is_submeter: bool = False
@@ -54,6 +56,8 @@ class MeterUpdate(BaseModel):
     data_source: str | None = None
     source_config: dict[str, Any] | None = None
     location: str | None = None
+    site_id: uuid.UUID | None = None
+    building_id: uuid.UUID | None = None
     usage_unit_id: uuid.UUID | None = None
     parent_meter_id: uuid.UUID | None = None
     is_submeter: bool | None = None

@@ -15,6 +15,8 @@ interface Meter {
   unit: string;
   data_source: string;
   location: string | null;
+  site_id: string | null;
+  building_id: string | null;
   usage_unit_id: string | null;
   is_active: boolean;
   is_weather_corrected: boolean;
@@ -146,7 +148,7 @@ export default function MetersPage() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent, unitId: string) => {
+  const handleSubmit = async (e: React.FormEvent, hierarchy: { siteId: string; buildingId: string; unitId: string }) => {
     e.preventDefault();
     setFormError(null);
     setSaving(true);
@@ -168,6 +170,7 @@ export default function MetersPage() {
       if (form.source_config_entity_id) source_config.entity_id = form.source_config_entity_id;
     }
 
+    // Zuordnung: nur die tiefste gewählte Ebene setzen
     const payload: Record<string, unknown> = {
       name: form.name,
       meter_number: form.meter_number || null,
@@ -176,7 +179,9 @@ export default function MetersPage() {
       data_source: form.data_source,
       location: form.location || null,
       is_weather_corrected: form.is_weather_corrected,
-      usage_unit_id: unitId || null,
+      site_id: hierarchy.siteId || null,
+      building_id: hierarchy.buildingId || null,
+      usage_unit_id: hierarchy.unitId || null,
       source_config: Object.keys(source_config).length > 0 ? source_config : null,
     };
 
@@ -362,10 +367,14 @@ function MeterModal({
   setForm: (f: MeterForm) => void;
   formError: string | null;
   saving: boolean;
-  onSubmit: (e: React.FormEvent, unitId: string) => void;
+  onSubmit: (e: React.FormEvent, hierarchy: { siteId: string; buildingId: string; unitId: string }) => void;
   onClose: () => void;
 }) {
-  const hierarchy = useSiteHierarchy(editingMeter?.usage_unit_id);
+  const hierarchy = useSiteHierarchy(editingMeter ? {
+    siteId: editingMeter.site_id,
+    buildingId: editingMeter.building_id,
+    unitId: editingMeter.usage_unit_id,
+  } : undefined);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -374,7 +383,7 @@ function MeterModal({
           {editingId ? 'Zähler bearbeiten' : 'Neuer Zähler'}
         </h2>
 
-        <form onSubmit={(e) => onSubmit(e, hierarchy.selectedUnitId)} className="space-y-4">
+        <form onSubmit={(e) => onSubmit(e, { siteId: hierarchy.selectedSiteId, buildingId: hierarchy.selectedBuildingId, unitId: hierarchy.selectedUnitId })} className="space-y-4">
           {formError && (
             <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
               {formError}

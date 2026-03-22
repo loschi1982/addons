@@ -37,6 +37,8 @@ interface Meter {
   meter_number: string | null;
   energy_type: string;
   data_source: string;
+  site_id: string | null;
+  building_id: string | null;
   usage_unit_id: string | null;
   is_active: boolean;
 }
@@ -86,8 +88,6 @@ export function useMeterMapData() {
       const siteDetails = await Promise.all(
         sites.map((site) => apiClient.get(`/api/v1/sites/${site.id}`))
       );
-
-      const allUnitIds: string[] = [];
 
       for (let i = 0; i < sites.length; i++) {
         const site = sites[i];
@@ -141,8 +141,6 @@ export function useMeterMapData() {
           }
 
           for (const unit of units) {
-            allUnitIds.push(unit.id);
-
             // Unit-Node
             allNodes.push({
               id: `unit-${unit.id}`,
@@ -162,41 +160,59 @@ export function useMeterMapData() {
         }
       }
 
-      // 3. Zähler für alle Nutzungseinheiten laden (parallel)
-      const meterResults = await Promise.all(
-        allUnitIds.map((unitId) =>
-          apiClient
-            .get(`/api/v1/meters?usage_unit_id=${unitId}&page_size=100&is_active=true`)
-            .then((res) => ({ unitId, meters: res.data.items || [] }))
-            .catch(() => ({ unitId, meters: [] }))
-        )
-      );
+      // 3. Alle aktiven Zähler laden
+      const allMetersRes = await apiClient.get('/api/v1/meters?page_size=500&is_active=true');
+      const allMeters: Meter[] = (allMetersRes.data.items || []);
 
-      for (const { unitId, meters } of meterResults) {
-        for (const m of meters as Meter[]) {
-          // Meter-Node
-          allNodes.push({
-            id: `meter-${m.id}`,
-            type: 'meterNode',
-            position: { x: 0, y: 0 },
-            data: {
-              label: m.name,
-              meterId: m.id,
-              meterNumber: m.meter_number,
-              energyType: m.energy_type,
-              dataSource: m.data_source,
-              unitId,
-            },
-          });
+      // Zähler bereits verarbeiteter IDs tracken (Duplikate vermeiden)
+      const addedMeterIds = new Set<string>();
 
-          // Edge: Unit → Meter
+      for (const m of allMeters) {
+        if (addedMeterIds.has(m.id)) continue;
+        addedMeterIds.add(m.id);
+
+        const meterNodeId = `meter-${m.id}`;
+        const meterNode: Node = {
+          id: meterNodeId,
+          type: 'meterNode',
+          position: { x: 0, y: 0 },
+          data: {
+            label: m.name,
+            meterId: m.id,
+            meterNumber: m.meter_number,
+            energyType: m.energy_type,
+            dataSource: m.data_source,
+            unitId: m.usage_unit_id,
+          },
+        };
+
+        // Zähler an die tiefste zugeordnete Ebene anhängen
+        if (m.usage_unit_id && allNodes.some((n) => n.id === `unit-${m.usage_unit_id}`)) {
+          allNodes.push(meterNode);
           allEdges.push({
-            id: `e-unit-${unitId}-meter-${m.id}`,
-            source: `unit-${unitId}`,
-            target: `meter-${m.id}`,
+            id: `e-unit-${m.usage_unit_id}-meter-${m.id}`,
+            source: `unit-${m.usage_unit_id}`,
+            target: meterNodeId,
+            type: 'smoothstep',
+          });
+        } else if (m.building_id && allNodes.some((n) => n.id === `building-${m.building_id}`)) {
+          allNodes.push(meterNode);
+          allEdges.push({
+            id: `e-building-${m.building_id}-meter-${m.id}`,
+            source: `building-${m.building_id}`,
+            target: meterNodeId,
+            type: 'smoothstep',
+          });
+        } else if (m.site_id && allNodes.some((n) => n.id === `site-${m.site_id}`)) {
+          allNodes.push(meterNode);
+          allEdges.push({
+            id: `e-site-${m.site_id}-meter-${m.id}`,
+            source: `site-${m.site_id}`,
+            target: meterNodeId,
             type: 'smoothstep',
           });
         }
+        // Zähler ohne Zuordnung werden nicht in der Map angezeigt
       }
 
       // 4. Layout berechnen

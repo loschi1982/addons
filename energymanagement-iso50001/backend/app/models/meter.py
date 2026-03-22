@@ -51,7 +51,16 @@ class Meter(Base, UUIDMixin, TimestampMixin):
         ForeignKey("meters.id"), nullable=True
     )
 
-    # Zuordnung zur Nutzungseinheit (Standort → Gebäude → Einheit)
+    # Zuordnung zur Standort-Hierarchie (auf beliebiger Ebene)
+    # Ein Zähler kann einem Standort, Gebäude ODER einer Nutzungseinheit zugeordnet sein.
+    # Standort-Zähler messen den Gesamtverbrauch, Gebäude-Zähler einen Teilbereich.
+    # Differenzmessung: Standort minus Gebäude = Restverbrauch der übrigen Gebäude.
+    site_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("sites.id"), nullable=True
+    )
+    building_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("buildings.id"), nullable=True
+    )
     usage_unit_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("usage_units.id"), nullable=True
     )
@@ -76,6 +85,8 @@ class Meter(Base, UUIDMixin, TimestampMixin):
     # Beziehungen
     readings = relationship("MeterReading", back_populates="meter", cascade="all, delete-orphan")
     parent_meter = relationship("Meter", remote_side="Meter.id", backref="sub_meters")
+    site = relationship("Site", backref="meters")
+    building = relationship("Building", backref="meters")
     usage_unit = relationship("UsageUnit", back_populates="meters")
     schema_position = relationship("SchemaPosition", uselist=False, back_populates="meter")
     consumers = relationship("Consumer", secondary="meter_consumer", back_populates="meters")
