@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
+import { useSiteHierarchy } from '@/hooks/useSiteHierarchy';
 
 // ── Typen ──
 
@@ -12,8 +13,10 @@ interface Meter {
   unit: string;
   data_source: string;
   location: string | null;
+  usage_unit_id: string | null;
   is_active: boolean;
   is_weather_corrected: boolean;
+  source_config: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -25,6 +28,10 @@ interface MeterForm {
   data_source: string;
   location: string;
   is_weather_corrected: boolean;
+  source_config_ip: string;
+  source_config_channel: string;
+  source_config_register: string;
+  source_config_entity_id: string;
 }
 
 const emptyForm: MeterForm = {
@@ -35,6 +42,10 @@ const emptyForm: MeterForm = {
   data_source: 'manual',
   location: '',
   is_weather_corrected: false,
+  source_config_ip: '',
+  source_config_channel: '0',
+  source_config_register: '',
+  source_config_entity_id: '',
 };
 
 const DATA_SOURCES: Record<string, string> = {
@@ -58,6 +69,7 @@ export default function MetersPage() {
   // Modal-State
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingMeter, setEditingMeter] = useState<Meter | null>(null);
   const [form, setForm] = useState<MeterForm>(emptyForm);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -92,6 +104,7 @@ export default function MetersPage() {
 
   const handleCreate = () => {
     setEditingId(null);
+    setEditingMeter(null);
     setForm(emptyForm);
     setFormError(null);
     setShowModal(true);
@@ -99,6 +112,8 @@ export default function MetersPage() {
 
   const handleEdit = (meter: Meter) => {
     setEditingId(meter.id);
+    setEditingMeter(meter);
+    const cfg = meter.source_config || {};
     setForm({
       name: meter.name,
       meter_number: meter.meter_number || '',
@@ -107,6 +122,10 @@ export default function MetersPage() {
       data_source: meter.data_source,
       location: meter.location || '',
       is_weather_corrected: meter.is_weather_corrected,
+      source_config_ip: (cfg.ip as string) || '',
+      source_config_channel: (cfg.channel?.toString()) || '0',
+      source_config_register: (cfg.register?.toString()) || '',
+      source_config_entity_id: (cfg.entity_id as string) || '',
     });
     setFormError(null);
     setShowModal(true);
@@ -122,16 +141,40 @@ export default function MetersPage() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent, unitId: string) => {
     e.preventDefault();
     setFormError(null);
     setSaving(true);
 
+    // source_config zusammenbauen
+    const source_config: Record<string, unknown> = {};
+    if (form.data_source === 'shelly') {
+      if (form.source_config_ip) source_config.ip = form.source_config_ip;
+      source_config.channel = parseInt(form.source_config_channel) || 0;
+    } else if (form.data_source === 'modbus') {
+      if (form.source_config_ip) source_config.ip = form.source_config_ip;
+      if (form.source_config_register) source_config.register = parseInt(form.source_config_register);
+    } else if (form.data_source === 'homeassistant') {
+      if (form.source_config_entity_id) source_config.entity_id = form.source_config_entity_id;
+    }
+
+    const payload: Record<string, unknown> = {
+      name: form.name,
+      meter_number: form.meter_number || null,
+      energy_type: form.energy_type,
+      unit: form.unit,
+      data_source: form.data_source,
+      location: form.location || null,
+      is_weather_corrected: form.is_weather_corrected,
+      usage_unit_id: unitId || null,
+      source_config: Object.keys(source_config).length > 0 ? source_config : null,
+    };
+
     try {
       if (editingId) {
-        await apiClient.put(`/api/v1/meters/${editingId}`, form);
+        await apiClient.put(`/api/v1/meters/${editingId}`, payload);
       } else {
-        await apiClient.post('/api/v1/meters', form);
+        await apiClient.post('/api/v1/meters', payload);
       }
       setShowModal(false);
       loadMeters();
@@ -266,121 +309,281 @@ export default function MetersPage() {
 
       {/* Modal: Zähler erstellen/bearbeiten */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
-            <h2 className="mb-4 text-lg font-bold">
-              {editingId ? 'Zähler bearbeiten' : 'Neuer Zähler'}
-            </h2>
+        <MeterModal
+          editingId={editingId}
+          editingMeter={editingMeter}
+          form={form}
+          setForm={setForm}
+          formError={formError}
+          saving={saving}
+          onSubmit={handleSubmit}
+          onClose={() => setShowModal(false)}
+        />
+      )}
+    </div>
+  );
+}
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {formError && (
-                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
-                  {formError}
+/* ── Zähler-Modal mit Standort-Kaskade + Datenquellen-Konfig ── */
+
+function MeterModal({
+  editingId,
+  editingMeter,
+  form,
+  setForm,
+  formError,
+  saving,
+  onSubmit,
+  onClose,
+}: {
+  editingId: string | null;
+  editingMeter: Meter | null;
+  form: MeterForm;
+  setForm: (f: MeterForm) => void;
+  formError: string | null;
+  saving: boolean;
+  onSubmit: (e: React.FormEvent, unitId: string) => void;
+  onClose: () => void;
+}) {
+  const hierarchy = useSiteHierarchy(editingMeter?.usage_unit_id);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
+        <h2 className="mb-4 text-lg font-bold">
+          {editingId ? 'Zähler bearbeiten' : 'Neuer Zähler'}
+        </h2>
+
+        <form onSubmit={(e) => onSubmit(e, hierarchy.selectedUnitId)} className="space-y-4">
+          {formError && (
+            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+              {formError}
+            </div>
+          )}
+
+          <div>
+            <label className="label">Name *</label>
+            <input
+              type="text"
+              className="input"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              required
+              autoFocus
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Zählernummer</label>
+              <input
+                type="text"
+                className="input"
+                value={form.meter_number}
+                onChange={(e) => setForm({ ...form, meter_number: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="label">Standort (Freitext)</label>
+              <input
+                type="text"
+                className="input"
+                value={form.location}
+                onChange={(e) => setForm({ ...form, location: e.target.value })}
+                placeholder="z.B. Keller, Technikraum"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="label">Energieart *</label>
+              <select
+                className="input"
+                value={form.energy_type}
+                onChange={(e) => setForm({ ...form, energy_type: e.target.value })}
+              >
+                {Object.entries(ENERGY_TYPE_LABELS).map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Einheit</label>
+              <select
+                className="input"
+                value={form.unit}
+                onChange={(e) => setForm({ ...form, unit: e.target.value })}
+              >
+                <option value="kWh">kWh</option>
+                <option value="MWh">MWh</option>
+                <option value="m³">m³</option>
+                <option value="l">Liter</option>
+                <option value="kg">kg</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Datenquelle</label>
+              <select
+                className="input"
+                value={form.data_source}
+                onChange={(e) => setForm({ ...form, data_source: e.target.value })}
+              >
+                {Object.entries(DATA_SOURCES).map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Datenquellen-Konfiguration */}
+          {form.data_source === 'shelly' && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+              <p className="text-sm font-medium text-gray-700 mb-3">Shelly-Konfiguration</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">IP-Adresse *</label>
+                  <input
+                    type="text"
+                    className="input"
+                    value={form.source_config_ip}
+                    onChange={(e) => setForm({ ...form, source_config_ip: e.target.value })}
+                    placeholder="192.168.1.42"
+                  />
                 </div>
-              )}
+                <div>
+                  <label className="label">Kanal</label>
+                  <input
+                    type="number"
+                    className="input"
+                    min={0}
+                    max={3}
+                    value={form.source_config_channel}
+                    onChange={(e) => setForm({ ...form, source_config_channel: e.target.value })}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
+          {form.data_source === 'modbus' && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+              <p className="text-sm font-medium text-gray-700 mb-3">Modbus-Konfiguration</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">IP-Adresse *</label>
+                  <input
+                    type="text"
+                    className="input"
+                    value={form.source_config_ip}
+                    onChange={(e) => setForm({ ...form, source_config_ip: e.target.value })}
+                    placeholder="192.168.1.100"
+                  />
+                </div>
+                <div>
+                  <label className="label">Register</label>
+                  <input
+                    type="number"
+                    className="input"
+                    value={form.source_config_register}
+                    onChange={(e) => setForm({ ...form, source_config_register: e.target.value })}
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {form.data_source === 'homeassistant' && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+              <p className="text-sm font-medium text-gray-700 mb-3">Home Assistant-Konfiguration</p>
               <div>
-                <label className="label">Name *</label>
+                <label className="label">Entity-ID *</label>
                 <input
                   type="text"
                   className="input"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  required
-                  autoFocus
+                  value={form.source_config_entity_id}
+                  onChange={(e) => setForm({ ...form, source_config_entity_id: e.target.value })}
+                  placeholder="sensor.stromzaehler_total"
                 />
               </div>
+            </div>
+          )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Zählernummer</label>
-                  <input
-                    type="text"
-                    className="input"
-                    value={form.meter_number}
-                    onChange={(e) => setForm({ ...form, meter_number: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="label">Standort</label>
-                  <input
-                    type="text"
-                    className="input"
-                    value={form.location}
-                    onChange={(e) => setForm({ ...form, location: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="label">Energieart *</label>
-                  <select
-                    className="input"
-                    value={form.energy_type}
-                    onChange={(e) => setForm({ ...form, energy_type: e.target.value })}
-                  >
-                    {Object.entries(ENERGY_TYPE_LABELS).map(([key, label]) => (
-                      <option key={key} value={key}>{label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Einheit</label>
-                  <select
-                    className="input"
-                    value={form.unit}
-                    onChange={(e) => setForm({ ...form, unit: e.target.value })}
-                  >
-                    <option value="kWh">kWh</option>
-                    <option value="MWh">MWh</option>
-                    <option value="m³">m³</option>
-                    <option value="l">Liter</option>
-                    <option value="kg">kg</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Datenquelle</label>
-                  <select
-                    className="input"
-                    value={form.data_source}
-                    onChange={(e) => setForm({ ...form, data_source: e.target.value })}
-                  >
-                    {Object.entries(DATA_SOURCES).map(([key, label]) => (
-                      <option key={key} value={key}>{label}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="is_weather_corrected"
-                  checked={form.is_weather_corrected}
-                  onChange={(e) => setForm({ ...form, is_weather_corrected: e.target.checked })}
-                />
-                <label htmlFor="is_weather_corrected" className="text-sm">
-                  Witterungskorrektur aktivieren
-                </label>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="btn-secondary"
+          {/* Zuordnung: Standort → Gebäude → Nutzungseinheit */}
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <p className="text-sm font-medium text-gray-700 mb-3">Zuordnung (optional)</p>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="label">Standort</label>
+                <select
+                  className="input"
+                  value={hierarchy.selectedSiteId}
+                  onChange={(e) => hierarchy.setSelectedSiteId(e.target.value)}
                 >
-                  Abbrechen
-                </button>
-                <button type="submit" className="btn-primary" disabled={saving}>
-                  {saving ? 'Speichern...' : editingId ? 'Speichern' : 'Anlegen'}
-                </button>
+                  <option value="">– Kein Standort –</option>
+                  {hierarchy.sites.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
               </div>
-            </form>
+              <div>
+                <label className="label">Gebäude</label>
+                <select
+                  className="input"
+                  value={hierarchy.selectedBuildingId}
+                  onChange={(e) => hierarchy.setSelectedBuildingId(e.target.value)}
+                  disabled={!hierarchy.selectedSiteId}
+                >
+                  <option value="">– Kein Gebäude –</option>
+                  {hierarchy.buildings.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Nutzungseinheit</label>
+                <select
+                  className="input"
+                  value={hierarchy.selectedUnitId}
+                  onChange={(e) => hierarchy.setSelectedUnitId(e.target.value)}
+                  disabled={!hierarchy.selectedBuildingId}
+                >
+                  <option value="">– Keine Einheit –</option>
+                  {hierarchy.units.map((u) => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="is_weather_corrected"
+              checked={form.is_weather_corrected}
+              onChange={(e) => setForm({ ...form, is_weather_corrected: e.target.checked })}
+            />
+            <label htmlFor="is_weather_corrected" className="text-sm">
+              Witterungskorrektur aktivieren
+            </label>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="btn-secondary"
+            >
+              Abbrechen
+            </button>
+            <button type="submit" className="btn-primary" disabled={saving}>
+              {saving ? 'Speichern...' : editingId ? 'Speichern' : 'Anlegen'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

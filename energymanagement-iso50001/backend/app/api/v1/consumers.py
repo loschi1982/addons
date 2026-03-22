@@ -10,10 +10,12 @@ import uuid
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_permission
-from app.models.consumer import Consumer
+from app.models.consumer import Consumer, meter_consumer
+from app.models.meter import Meter
 from app.models.user import User
 from app.schemas.common import DeleteResponse, PaginatedResponse
 from app.schemas.meter import ConsumerCreate, ConsumerResponse, ConsumerUpdate
@@ -96,6 +98,17 @@ async def create_consumer(
         notes=request.description,
     )
     db.add(consumer)
+    await db.flush()
+
+    # Zähler-Zuordnungen speichern
+    meter_ids_list: list[uuid.UUID] = []
+    if request.meter_ids:
+        for mid in request.meter_ids:
+            meter = await db.get(Meter, mid)
+            if meter:
+                consumer.meters.append(meter)
+                meter_ids_list.append(mid)
+
     await db.commit()
 
     return ConsumerResponse(
@@ -107,6 +120,7 @@ async def create_consumer(
         priority=str(consumer.priority),
         usage_unit_id=consumer.usage_unit_id,
         description=consumer.notes,
+        meter_ids=meter_ids_list,
         created_at=consumer.created_at,
     )
 
@@ -171,6 +185,22 @@ async def update_consumer(
         if schema_field in data:
             setattr(consumer, model_field, data[schema_field])
 
+    # Zähler-Zuordnungen aktualisieren
+    meter_ids_list: list[uuid.UUID] = []
+    if "meter_ids" in data:
+        # Alte Zuordnungen laden und ersetzen
+        await db.execute(
+            meter_consumer.delete().where(meter_consumer.c.consumer_id == consumer_id)
+        )
+        if data["meter_ids"]:
+            for mid in data["meter_ids"]:
+                meter = await db.get(Meter, mid)
+                if meter:
+                    await db.execute(
+                        meter_consumer.insert().values(meter_id=mid, consumer_id=consumer_id)
+                    )
+                    meter_ids_list.append(mid)
+
     await db.commit()
 
     return ConsumerResponse(
@@ -182,6 +212,7 @@ async def update_consumer(
         priority=str(consumer.priority),
         usage_unit_id=consumer.usage_unit_id,
         description=consumer.notes,
+        meter_ids=meter_ids_list,
         created_at=consumer.created_at,
     )
 

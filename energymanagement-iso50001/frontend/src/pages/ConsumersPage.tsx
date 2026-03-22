@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '@/utils/api';
 import type { PaginatedResponse } from '@/types';
+import { useSiteHierarchy } from '@/hooks/useSiteHierarchy';
 
 // ── Typen ──
 
@@ -17,6 +18,12 @@ interface Consumer {
   created_at: string;
 }
 
+interface MeterOption {
+  id: string;
+  name: string;
+  energy_type: string;
+}
+
 interface ConsumerForm {
   name: string;
   category: string;
@@ -24,6 +31,7 @@ interface ConsumerForm {
   operating_hours_per_year: string;
   priority: string;
   description: string;
+  meter_ids: string[];
 }
 
 const emptyForm: ConsumerForm = {
@@ -33,6 +41,7 @@ const emptyForm: ConsumerForm = {
   operating_hours_per_year: '',
   priority: 'normal',
   description: '',
+  meter_ids: [],
 };
 
 const CATEGORIES: Record<string, string> = {
@@ -72,6 +81,7 @@ export default function ConsumersPage() {
   // Modal-State
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingConsumer, setEditingConsumer] = useState<Consumer | null>(null);
   const [form, setForm] = useState<ConsumerForm>(emptyForm);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -106,6 +116,7 @@ export default function ConsumersPage() {
 
   const handleCreate = () => {
     setEditingId(null);
+    setEditingConsumer(null);
     setForm(emptyForm);
     setFormError(null);
     setShowModal(true);
@@ -113,6 +124,7 @@ export default function ConsumersPage() {
 
   const handleEdit = (consumer: Consumer) => {
     setEditingId(consumer.id);
+    setEditingConsumer(consumer);
     setForm({
       name: consumer.name,
       category: consumer.category,
@@ -120,6 +132,7 @@ export default function ConsumersPage() {
       operating_hours_per_year: consumer.operating_hours_per_year?.toString() || '',
       priority: consumer.priority || 'normal',
       description: consumer.description || '',
+      meter_ids: [],
     });
     setFormError(null);
     setShowModal(true);
@@ -135,7 +148,7 @@ export default function ConsumersPage() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent, unitId: string, meterIds: string[]) => {
     e.preventDefault();
     setFormError(null);
     setSaving(true);
@@ -144,6 +157,8 @@ export default function ConsumersPage() {
       name: form.name,
       category: form.category,
       priority: form.priority,
+      usage_unit_id: unitId || null,
+      meter_ids: meterIds,
     };
     if (form.rated_power_kw) payload.rated_power_kw = parseFloat(form.rated_power_kw);
     if (form.operating_hours_per_year) payload.operating_hours_per_year = parseInt(form.operating_hours_per_year, 10);
@@ -301,109 +316,245 @@ export default function ConsumersPage() {
 
       {/* Modal: Verbraucher erstellen/bearbeiten */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
-            <h2 className="mb-4 text-lg font-bold">
-              {editingId ? 'Verbraucher bearbeiten' : 'Neuer Verbraucher'}
-            </h2>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {formError && (
-                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
-                  {formError}
-                </div>
-              )}
-
-              <div>
-                <label className="label">Name *</label>
-                <input
-                  type="text"
-                  className="input"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  required
-                  autoFocus
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Kategorie *</label>
-                  <select
-                    className="input"
-                    value={form.category}
-                    onChange={(e) => setForm({ ...form, category: e.target.value })}
-                  >
-                    {Object.entries(CATEGORIES).map(([key, label]) => (
-                      <option key={key} value={key}>{label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Priorität</label>
-                  <select
-                    className="input"
-                    value={form.priority}
-                    onChange={(e) => setForm({ ...form, priority: e.target.value })}
-                  >
-                    {Object.entries(PRIORITIES).map(([key, label]) => (
-                      <option key={key} value={key}>{label}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Nennleistung (kW)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    className="input"
-                    value={form.rated_power_kw}
-                    onChange={(e) => setForm({ ...form, rated_power_kw: e.target.value })}
-                    placeholder="z.B. 15.5"
-                  />
-                </div>
-                <div>
-                  <label className="label">Betriebsstunden / Jahr</label>
-                  <input
-                    type="number"
-                    className="input"
-                    value={form.operating_hours_per_year}
-                    onChange={(e) => setForm({ ...form, operating_hours_per_year: e.target.value })}
-                    placeholder="z.B. 2500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="label">Beschreibung</label>
-                <textarea
-                  className="input"
-                  rows={3}
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="Optionale Beschreibung der Anlage..."
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="btn-secondary"
-                >
-                  Abbrechen
-                </button>
-                <button type="submit" className="btn-primary" disabled={saving}>
-                  {saving ? 'Speichern...' : editingId ? 'Speichern' : 'Anlegen'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <ConsumerModal
+          editingId={editingId}
+          editingConsumer={editingConsumer}
+          form={form}
+          setForm={setForm}
+          formError={formError}
+          saving={saving}
+          onSubmit={handleSubmit}
+          onClose={() => setShowModal(false)}
+        />
       )}
+    </div>
+  );
+}
+
+/* ── Verbraucher-Modal mit Standort-Kaskade + Zähler-Zuordnung ── */
+
+function ConsumerModal({
+  editingId,
+  editingConsumer,
+  form,
+  setForm,
+  formError,
+  saving,
+  onSubmit,
+  onClose,
+}: {
+  editingId: string | null;
+  editingConsumer: Consumer | null;
+  form: ConsumerForm;
+  setForm: (f: ConsumerForm) => void;
+  formError: string | null;
+  saving: boolean;
+  onSubmit: (e: React.FormEvent, unitId: string, meterIds: string[]) => void;
+  onClose: () => void;
+}) {
+  const hierarchy = useSiteHierarchy(editingConsumer?.usage_unit_id);
+  const [meters, setMeters] = useState<MeterOption[]>([]);
+  const [selectedMeterIds, setSelectedMeterIds] = useState<string[]>([]);
+
+  // Zähler-Liste laden
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await apiClient.get('/api/v1/meters?page_size=100');
+        setMeters(
+          (res.data.items || []).map((m: Record<string, unknown>) => ({
+            id: m.id as string,
+            name: m.name as string,
+            energy_type: m.energy_type as string,
+          }))
+        );
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
+
+  const toggleMeter = (id: string) => {
+    setSelectedMeterIds((prev) =>
+      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
+        <h2 className="mb-4 text-lg font-bold">
+          {editingId ? 'Verbraucher bearbeiten' : 'Neuer Verbraucher'}
+        </h2>
+
+        <form onSubmit={(e) => onSubmit(e, hierarchy.selectedUnitId, selectedMeterIds)} className="space-y-4">
+          {formError && (
+            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+              {formError}
+            </div>
+          )}
+
+          <div>
+            <label className="label">Name *</label>
+            <input
+              type="text"
+              className="input"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              required
+              autoFocus
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Kategorie *</label>
+              <select
+                className="input"
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+              >
+                {Object.entries(CATEGORIES).map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Priorität</label>
+              <select
+                className="input"
+                value={form.priority}
+                onChange={(e) => setForm({ ...form, priority: e.target.value })}
+              >
+                {Object.entries(PRIORITIES).map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Nennleistung (kW)</label>
+              <input
+                type="number"
+                step="0.1"
+                className="input"
+                value={form.rated_power_kw}
+                onChange={(e) => setForm({ ...form, rated_power_kw: e.target.value })}
+                placeholder="z.B. 15.5"
+              />
+            </div>
+            <div>
+              <label className="label">Betriebsstunden / Jahr</label>
+              <input
+                type="number"
+                className="input"
+                value={form.operating_hours_per_year}
+                onChange={(e) => setForm({ ...form, operating_hours_per_year: e.target.value })}
+                placeholder="z.B. 2500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="label">Beschreibung</label>
+            <textarea
+              className="input"
+              rows={2}
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              placeholder="Optionale Beschreibung der Anlage..."
+            />
+          </div>
+
+          {/* Zuordnung: Standort → Gebäude → Nutzungseinheit */}
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <p className="text-sm font-medium text-gray-700 mb-3">Standort-Zuordnung (optional)</p>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="label">Standort</label>
+                <select
+                  className="input"
+                  value={hierarchy.selectedSiteId}
+                  onChange={(e) => hierarchy.setSelectedSiteId(e.target.value)}
+                >
+                  <option value="">– Kein Standort –</option>
+                  {hierarchy.sites.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Gebäude</label>
+                <select
+                  className="input"
+                  value={hierarchy.selectedBuildingId}
+                  onChange={(e) => hierarchy.setSelectedBuildingId(e.target.value)}
+                  disabled={!hierarchy.selectedSiteId}
+                >
+                  <option value="">– Kein Gebäude –</option>
+                  {hierarchy.buildings.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Nutzungseinheit</label>
+                <select
+                  className="input"
+                  value={hierarchy.selectedUnitId}
+                  onChange={(e) => hierarchy.setSelectedUnitId(e.target.value)}
+                  disabled={!hierarchy.selectedBuildingId}
+                >
+                  <option value="">– Keine Einheit –</option>
+                  {hierarchy.units.map((u) => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Zähler-Zuordnung */}
+          {meters.length > 0 && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+              <p className="text-sm font-medium text-gray-700 mb-3">
+                Zähler-Zuordnung (optional)
+              </p>
+              <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
+                {meters.map((m) => (
+                  <label
+                    key={m.id}
+                    className="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-white"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedMeterIds.includes(m.id)}
+                      onChange={() => toggleMeter(m.id)}
+                      className="rounded border-gray-300 text-primary-500"
+                    />
+                    <span className="text-sm">{m.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="btn-secondary"
+            >
+              Abbrechen
+            </button>
+            <button type="submit" className="btn-primary" disabled={saving}>
+              {saving ? 'Speichern...' : editingId ? 'Speichern' : 'Anlegen'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
