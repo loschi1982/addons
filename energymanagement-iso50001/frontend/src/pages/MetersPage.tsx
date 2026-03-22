@@ -32,6 +32,7 @@ interface MeterForm {
   is_weather_corrected: boolean;
   source_config_ip: string;
   source_config_channel: string;
+  source_config_mode: string;
   source_config_register: string;
   source_config_entity_id: string;
 }
@@ -46,6 +47,7 @@ const emptyForm: MeterForm = {
   is_weather_corrected: false,
   source_config_ip: '',
   source_config_channel: '0',
+  source_config_mode: 'single',
   source_config_register: '',
   source_config_entity_id: '',
 };
@@ -126,6 +128,7 @@ export default function MetersPage() {
       is_weather_corrected: meter.is_weather_corrected,
       source_config_ip: (cfg.ip as string) || '',
       source_config_channel: (cfg.channel?.toString()) || '0',
+      source_config_mode: (cfg.mode as string) || 'single',
       source_config_register: (cfg.register?.toString()) || '',
       source_config_entity_id: (cfg.entity_id as string) || '',
     });
@@ -152,7 +155,12 @@ export default function MetersPage() {
     const source_config: Record<string, unknown> = {};
     if (form.data_source === 'shelly') {
       if (form.source_config_ip) source_config.ip = form.source_config_ip;
-      source_config.channel = parseInt(form.source_config_channel) || 0;
+      source_config.mode = form.source_config_mode;
+      if (form.source_config_mode === 'balanced') {
+        source_config.channels = [0, 1, 2];
+      } else {
+        source_config.channel = parseInt(form.source_config_channel) || 0;
+      }
     } else if (form.data_source === 'modbus') {
       if (form.source_config_ip) source_config.ip = form.source_config_ip;
       if (form.source_config_register) source_config.register = parseInt(form.source_config_register);
@@ -464,17 +472,35 @@ function MeterModal({
                   />
                 </div>
                 <div>
+                  <label className="label">Messmodus</label>
+                  <select
+                    className="input"
+                    value={form.source_config_mode}
+                    onChange={(e) => setForm({ ...form, source_config_mode: e.target.value })}
+                  >
+                    <option value="single">Einzelkanal</option>
+                    <option value="balanced">Saldierend (3 Phasen)</option>
+                  </select>
+                </div>
+              </div>
+              {form.source_config_mode === 'single' && (
+                <div className="mt-3">
                   <label className="label">Kanal</label>
                   <input
                     type="number"
-                    className="input"
+                    className="input w-24"
                     min={0}
                     max={3}
                     value={form.source_config_channel}
                     onChange={(e) => setForm({ ...form, source_config_channel: e.target.value })}
                   />
                 </div>
-              </div>
+              )}
+              {form.source_config_mode === 'balanced' && (
+                <p className="mt-3 text-xs text-gray-500">
+                  Summiert Kanal 0 + 1 + 2. Bei PV-Einspeisung wird der Gesamtwert negativ.
+                </p>
+              )}
             </div>
           )}
 

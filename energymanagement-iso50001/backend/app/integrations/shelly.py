@@ -116,6 +116,54 @@ class ShellyClient:
         wh = Decimal(str(energy.get("energy_wh", 0)))
         return wh / 1000
 
+    async def get_balanced_power(self, channels: list[int] | None = None) -> dict:
+        """
+        Saldierende Messung: Summiert Leistung und Energie über alle Kanäle.
+
+        Positive Werte = Verbrauch (Bezug), negative Werte = Einspeisung.
+        Typisch für 3-Phasen-Zähler (Shelly 3EM, Pro 3EM) mit PV-Anlage.
+
+        Args:
+            channels: Kanalliste, Default [0, 1, 2] für 3-Phasen-Messung
+
+        Returns:
+            Dict mit: power (W), energy_wh (Wh) – saldiert über alle Kanäle
+        """
+        if channels is None:
+            channels = [0, 1, 2]
+
+        total_power = Decimal("0")
+        total_energy_wh = Decimal("0")
+
+        for ch in channels:
+            try:
+                data = await self.get_energy(ch)
+                total_power += Decimal(str(data.get("power", 0)))
+                total_energy_wh += Decimal(str(data.get("energy_wh", 0)))
+            except Exception as e:
+                logger.warning(
+                    "shelly_channel_read_failed",
+                    host=self.host,
+                    channel=ch,
+                    error=str(e),
+                )
+
+        return {
+            "power": float(total_power),
+            "energy_wh": float(total_energy_wh),
+        }
+
+    async def get_balanced_energy_kwh(self, channels: list[int] | None = None) -> Decimal:
+        """
+        Saldierte Gesamtenergie in kWh über alle Kanäle.
+
+        Summiert die Energie aller angegebenen Kanäle (Default: 0, 1, 2).
+        Bei PV-Einspeisung wird der Gesamtwert entsprechend reduziert.
+        """
+        data = await self.get_balanced_power(channels)
+        wh = Decimal(str(data.get("energy_wh", 0)))
+        return wh / 1000
+
     async def get_device_info(self) -> dict:
         """
         Geräteinformationen abrufen.

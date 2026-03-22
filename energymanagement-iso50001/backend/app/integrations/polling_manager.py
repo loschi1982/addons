@@ -127,12 +127,20 @@ class PollingManager:
         config = meter.source_config or {}
         host = config.get("shelly_host", config.get("ip", ""))
         channel = config.get("channel", 0)
+        mode = config.get("mode", "single")  # "single" oder "balanced"
 
         if not host:
             return self._error_result(meter, "Keine Shelly-IP konfiguriert")
 
         client = ShellyClient(host)
-        value = await client.get_total_energy_kwh(channel)
+
+        if mode == "balanced":
+            # Saldierende Messung: alle Kanäle summieren
+            channels = config.get("channels", [0, 1, 2])
+            value = await client.get_balanced_energy_kwh(channels)
+        else:
+            # Einzelkanal-Messung (Standard)
+            value = await client.get_total_energy_kwh(channel)
 
         return await self._save_reading(meter, value, "shelly")
 
@@ -217,6 +225,8 @@ class PollingManager:
         Neuen Zählerstand speichern und Verbrauch berechnen.
 
         Prüft zuerst ob sich der Wert seit dem letzten Reading geändert hat.
+        Bei saldierender Messung (mode=balanced) sind negative Werte erlaubt
+        (Einspeisung, z.B. durch PV-Anlage).
         """
         now = datetime.now(timezone.utc)
 
@@ -243,7 +253,10 @@ class PollingManager:
         consumption = None
         if last_reading:
             diff = value - last_reading.value
-            consumption = diff if diff >= 0 else None
+            # Bei saldierender Messung negative Werte erlauben (Einspeisung)
+            config = meter.source_config or {}
+            is_balanced = config.get("mode") == "balanced"
+            consumption = diff if (diff >= 0 or is_balanced) else None
 
         reading = MeterReading(
             meter_id=meter.id,
