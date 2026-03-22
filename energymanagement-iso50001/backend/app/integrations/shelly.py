@@ -79,25 +79,24 @@ class ShellyClient:
         gen = await self.detect_generation()
         async with httpx.AsyncClient(timeout=10) as client:
             if gen == 2:
-                # Gen2: Switch oder EM-Komponente
+                # Gen2: Zuerst Switch probieren (Shelly Plus 1PM, 2PM etc.)
                 resp = await client.get(
                     f"{self.base_url}/rpc/Switch.GetStatus",
                     params={"id": channel},
                 )
-                if resp.status_code != 200:
-                    # Fallback: EM-Komponente (Shelly Pro 3EM)
-                    resp = await client.get(
-                        f"{self.base_url}/rpc/EM.GetStatus",
-                        params={"id": channel},
-                    )
-                resp.raise_for_status()
-                data = resp.json()
-                return {
-                    "power": data.get("apower", data.get("act_power", 0)),
-                    "energy_wh": data.get("aenergy", {}).get("total", 0),
-                    "voltage": data.get("voltage", 0),
-                    "current": data.get("current", 0),
-                }
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return {
+                        "power": data.get("apower", 0),
+                        "energy_wh": data.get("aenergy", {}).get("total", 0),
+                        "voltage": data.get("voltage", 0),
+                        "current": data.get("current", 0),
+                    }
+
+                # Fallback: EM-Komponente (Shelly Pro 3EM, EM)
+                # Leistung aus EM.GetStatus, Energie aus EMData.GetStatus
+                phase = ["a", "b", "c"][channel] if channel < 3 else "a"
+                return await self._get_em_energy(client, phase)
             else:
                 # Gen1: /meter/<channel>
                 resp = await client.get(f"{self.base_url}/meter/{channel}")
@@ -110,6 +109,60 @@ class ShellyClient:
                     "current": data.get("current", 0),
                 }
 
+    async def _get_em_energy(self, client: httpx.AsyncClient, phase: str = "a") -> dict:
+        """
+        Energiedaten einer Phase vom EM/EMData-Komponenten lesen (Shelly Pro 3EM).
+
+        EM.GetStatus liefert Echtzeit-Werte (Leistung, Spannung, Strom).
+        EMData.GetStatus liefert kumulierte Energie (Wh).
+
+        Args:
+            phase: "a", "b" oder "c"
+        """
+        em_resp = await client.get(
+            f"{self.base_url}/rpc/EM.GetStatus", params={"id": 0}
+        )
+        em_resp.raise_for_status()
+        em = em_resp.json()
+
+        emd_resp = await client.get(
+            f"{self.base_url}/rpc/EMData.GetStatus", params={"id": 0}
+        )
+        emd = emd_resp.json() if emd_resp.status_code == 200 else {}
+
+        return {
+            "power": em.get(f"{phase}_act_power", 0),
+            "energy_wh": emd.get(f"{phase}_total_act_energy", 0),
+            "voltage": em.get(f"{phase}_voltage", 0),
+            "current": em.get(f"{phase}_current", 0),
+        }
+
+    async def _get_em_totals(self, client: httpx.AsyncClient) -> dict:
+        """
+        Summierte Werte aller Phasen vom EM/EMData lesen (Shelly Pro 3EM).
+
+        Nutzt die totalen Felder direkt statt einzelne Phasen zu summieren.
+        Gibt auch die Rückspeisung zurück (total_act_ret) für PV-Erkennung.
+        """
+        em_resp = await client.get(
+            f"{self.base_url}/rpc/EM.GetStatus", params={"id": 0}
+        )
+        em_resp.raise_for_status()
+        em = em_resp.json()
+
+        emd_resp = await client.get(
+            f"{self.base_url}/rpc/EMData.GetStatus", params={"id": 0}
+        )
+        emd = emd_resp.json() if emd_resp.status_code == 200 else {}
+
+        return {
+            "power": em.get("total_act_power", 0),
+            "energy_wh": emd.get("total_act", 0),
+            "energy_ret_wh": emd.get("total_act_ret", 0),
+            "voltage": em.get("a_voltage", 0),
+            "current": em.get("total_current", 0),
+        }
+
     async def get_total_energy_kwh(self, channel: int = 0) -> Decimal:
         """Gesamtenergie in kWh abrufen."""
         energy = await self.get_energy(channel)
@@ -118,17 +171,34 @@ class ShellyClient:
 
     async def get_balanced_power(self, channels: list[int] | None = None) -> dict:
         """
-        Saldierende Messung: Summiert Leistung und Energie über alle Kanäle.
+        Saldierende Messung: Gesamtleistung und -energie über alle Phasen.
 
         Positive Werte = Verbrauch (Bezug), negative Werte = Einspeisung.
         Typisch für 3-Phasen-Zähler (Shelly 3EM, Pro 3EM) mit PV-Anlage.
 
-        Args:
-            channels: Kanalliste, Default [0, 1, 2] für 3-Phasen-Messung
+        Bei Gen2-EM-Geräten werden die totalen Felder direkt gelesen
+        (effizienter als pro Kanal). Netto-Energie = Bezug - Rückspeisung.
 
         Returns:
-            Dict mit: power (W), energy_wh (Wh) – saldiert über alle Kanäle
+            Dict mit: power (W), energy_wh (Wh) – saldiert
         """
+        gen = await self.detect_generation()
+
+        if gen == 2:
+            async with httpx.AsyncClient(timeout=10) as client:
+                # Prüfen ob EM-Komponente vorhanden ist (Pro 3EM)
+                try:
+                    totals = await self._get_em_totals(client)
+                    # Netto-Energie: Bezug minus Rückspeisung
+                    net_energy = totals["energy_wh"] - totals.get("energy_ret_wh", 0)
+                    return {
+                        "power": totals["power"],
+                        "energy_wh": net_energy,
+                    }
+                except httpx.HTTPStatusError:
+                    pass  # Kein EM-Gerät, Fallback auf Kanal-Summierung
+
+        # Fallback: Gen1 oder Gen2 ohne EM – pro Kanal summieren
         if channels is None:
             channels = [0, 1, 2]
 
@@ -155,10 +225,9 @@ class ShellyClient:
 
     async def get_balanced_energy_kwh(self, channels: list[int] | None = None) -> Decimal:
         """
-        Saldierte Gesamtenergie in kWh über alle Kanäle.
+        Saldierte Gesamtenergie in kWh über alle Phasen.
 
-        Summiert die Energie aller angegebenen Kanäle (Default: 0, 1, 2).
-        Bei PV-Einspeisung wird der Gesamtwert entsprechend reduziert.
+        Bei PV-Einspeisung wird die Rückspeisung abgezogen (Netto-Verbrauch).
         """
         data = await self.get_balanced_power(channels)
         wh = Decimal(str(data.get("energy_wh", 0)))

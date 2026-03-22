@@ -110,6 +110,18 @@ async def get_meter_tree(
     return await service.get_meter_tree(energy_type)
 
 
+@router.post("/poll-all")
+async def poll_all_meters(
+    current_user: User = Depends(require_permission("meters", "update")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Alle automatischen Zähler manuell abfragen."""
+    from app.integrations.polling_manager import PollingManager
+
+    manager = PollingManager(db)
+    return await manager.poll_all_meters()
+
+
 @router.get("/{meter_id}", response_model=MeterDetailResponse)
 async def get_meter(
     meter_id: uuid.UUID,
@@ -155,3 +167,62 @@ async def delete_meter(
     service = MeterService(db)
     await service.delete_meter(meter_id)
     return DeleteResponse(id=meter_id)
+
+
+@router.post("/{meter_id}/poll")
+async def poll_meter(
+    meter_id: uuid.UUID,
+    current_user: User = Depends(require_permission("meters", "update")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Zähler manuell abfragen und Reading speichern."""
+    from app.integrations.polling_manager import PollingManager
+
+    manager = PollingManager(db)
+    return await manager.poll_single_meter(meter_id)
+
+
+@router.get("/{meter_id}/test-connection")
+async def test_meter_connection(
+    meter_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Verbindung zum Zähler-Gerät testen und aktuelle Werte abrufen."""
+    service = MeterService(db)
+    meter = await service.get_meter(meter_id)
+
+    if meter.data_source != "shelly":
+        return {"success": False, "error": f"Verbindungstest nur für Shelly unterstützt (ist: {meter.data_source})"}
+
+    from app.integrations.shelly import ShellyClient
+
+    config = meter.source_config or {}
+    host = config.get("shelly_host", config.get("ip", ""))
+    if not host:
+        return {"success": False, "error": "Keine IP-Adresse konfiguriert"}
+
+    client = ShellyClient(host)
+    try:
+        info = await client.get_device_info()
+        mode = config.get("mode", "single")
+        if mode == "balanced":
+            channels = config.get("channels", [0, 1, 2])
+            energy = await client.get_balanced_power(channels)
+            energy_kwh = float(energy["energy_wh"]) / 1000
+        else:
+            channel = config.get("channel", 0)
+            data = await client.get_energy(channel)
+            energy = data
+            energy_kwh = float(data["energy_wh"]) / 1000
+
+        return {
+            "success": True,
+            "device": info,
+            "mode": mode,
+            "current_power_w": energy.get("power", 0),
+            "total_energy_kwh": energy_kwh,
+            "raw": energy,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}

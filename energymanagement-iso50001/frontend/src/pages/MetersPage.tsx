@@ -201,6 +201,54 @@ export default function MetersPage() {
     }
   };
 
+  const handlePoll = async (meter: Meter) => {
+    try {
+      const res = await apiClient.post(`/api/v1/meters/${meter.id}/poll`);
+      const data = res.data;
+      if (data.success) {
+        if (data.skipped) {
+          alert(`${meter.name}: Wert unverändert (${data.reason})`);
+        } else {
+          alert(`${meter.name}: Wert ${data.value} erfasst` + (data.consumption != null ? ` (Verbrauch: ${data.consumption})` : ''));
+        }
+      } else {
+        alert(`${meter.name}: Fehler – ${data.error}`);
+      }
+    } catch {
+      alert(`Polling fehlgeschlagen für ${meter.name}`);
+    }
+  };
+
+  const handleTestConnection = async (meter: Meter) => {
+    try {
+      const res = await apiClient.get(`/api/v1/meters/${meter.id}/test-connection`);
+      const data = res.data;
+      if (data.success) {
+        alert(
+          `Verbindung OK!\n` +
+          `Gerät: ${data.device?.model || 'unbekannt'} (Gen${data.device?.gen})\n` +
+          `Modus: ${data.mode}\n` +
+          `Aktuelle Leistung: ${data.current_power_w} W\n` +
+          `Gesamtenergie: ${data.total_energy_kwh?.toFixed(2)} kWh`
+        );
+      } else {
+        alert(`Verbindung fehlgeschlagen: ${data.error}`);
+      }
+    } catch {
+      alert(`Verbindungstest fehlgeschlagen für ${meter.name}`);
+    }
+  };
+
+  const handlePollAll = async () => {
+    try {
+      const res = await apiClient.post('/api/v1/meters/poll-all');
+      const data = res.data;
+      alert(`Polling abgeschlossen: ${data.success}/${data.polled} erfolgreich, ${data.errors} Fehler`);
+    } catch {
+      alert('Polling aller Zähler fehlgeschlagen');
+    }
+  };
+
   const totalPages = Math.ceil(total / pageSize);
 
   return (
@@ -221,6 +269,9 @@ export default function MetersPage() {
             <Network className="h-4 w-4" />
             <span className="hidden sm:inline">Karte</span>
           </Link>
+          <button onClick={handlePollAll} className="btn-secondary" title="Alle Zähler jetzt abfragen">
+            Alle abfragen
+          </button>
           <button onClick={handleCreate} className="btn-primary">
             + Neuer Zähler
           </button>
@@ -286,10 +337,28 @@ export default function MetersPage() {
                   <td className="px-4 py-3 text-gray-500">
                     {meter.location || '–'}
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right space-x-2">
+                    {meter.data_source !== 'manual' && (
+                      <>
+                        <button
+                          onClick={() => handleTestConnection(meter)}
+                          className="text-gray-500 hover:text-gray-700"
+                          title="Verbindung testen"
+                        >
+                          Test
+                        </button>
+                        <button
+                          onClick={() => handlePoll(meter)}
+                          className="text-green-600 hover:text-green-800"
+                          title="Jetzt abfragen"
+                        >
+                          Abfragen
+                        </button>
+                      </>
+                    )}
                     <button
                       onClick={() => handleEdit(meter)}
-                      className="mr-2 text-primary-600 hover:text-primary-800"
+                      className="text-primary-600 hover:text-primary-800"
                     >
                       Bearbeiten
                     </button>
