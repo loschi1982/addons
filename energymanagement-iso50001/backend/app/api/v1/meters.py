@@ -48,7 +48,7 @@ def _meter_to_response(meter) -> MeterResponse:
         co2_factor_override=meter.co2_factor_override,
         tariff_info=meter.tariff_info,
         virtual_config=meter.virtual_config,
-        notes=meter.notes,
+        notes=getattr(meter, 'notes', None),
         is_active=meter.is_active,
         created_at=meter.created_at,
     )
