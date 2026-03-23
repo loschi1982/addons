@@ -426,14 +426,8 @@ class AnalyticsService:
             if label in ambiguous_names:
                 label = f"{label} (Zähler)"
 
-            if is_producer:
-                # Erzeuger: links neben dem Elternzähler positionieren
-                parent_depth = depth_map.get(meter.parent_meter_id, 0) if meter.parent_meter_id else 0
-                node_depth = parent_depth  # Gleiche Spalte wie Quellen des Elternzählers
-                get_node_idx(mid, label, node_type, node_depth)
-            else:
-                # Zähler: Tiefe +1 (Spalte 0 = Quellen)
-                get_node_idx(mid, label, node_type, depth + 1)
+            # Alle Zähler (inkl. Erzeuger) nach Hierarchie-Tiefe platzieren
+            get_node_idx(mid, label, node_type, depth + 1)
 
             # Verbindungen aufbauen – immer anlegen, auch bei 0 kWh
             if meter.parent_meter_id:
@@ -450,20 +444,13 @@ class AnalyticsService:
                     get_node_idx(parent_id, parent_label, parent_type, parent_node_depth)
                     value = consumption_map.get(meter.id, 0)
 
-                    if is_producer:
-                        # Erzeuger: Energie fließt VON Erzeuger ZUM Elternzähler
-                        links.append({
-                            "source": node_ids[mid],
-                            "target": node_ids[parent_id],
-                            "value": max(value, 0),
-                        })
-                    else:
-                        # Zähler: Energie fließt VOM Elternzähler ZUM Kind
-                        links.append({
-                            "source": node_ids[parent_id],
-                            "target": node_ids[mid],
-                            "value": max(value, 0),
-                        })
+                    # Link immer Eltern → Kind (Erzeuger werden durch Typ
+                    # und Pfeil-Symbol als Einspeisung gekennzeichnet)
+                    links.append({
+                        "source": node_ids[parent_id],
+                        "target": node_ids[mid],
+                        "value": max(value, 0),
+                    })
 
             # Verbindung: Zähler → Verbraucher (Anlagen)
             if meter.consumers:
@@ -471,7 +458,7 @@ class AnalyticsService:
                 per_consumer = meter_value / max(len(meter.consumers), 1)
                 for consumer in meter.consumers:
                     cid = f"consumer_{consumer.id}"
-                    consumer_depth = (depth + 2) if not is_producer else (depth + 3)
+                    consumer_depth = depth + 2
                     c_label = consumer.name
                     if c_label in ambiguous_names:
                         c_label = f"{c_label} (Verbraucher)"

@@ -225,12 +225,7 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
         {/* Knoten */}
         {layout.nodes.map((node, idx) => {
           const color = NODE_COLORS[node.type] || '#94a3b8';
-          // Eigenproduktion: Label links, Pfeil-Symbol zeigt Einspeisungsrichtung
           const isProducer = node.type === 'eigenproduktion';
-          const labelX = isProducer
-            ? node.x - LABEL_MARGIN
-            : node.x + NODE_WIDTH + LABEL_MARGIN;
-          const textAnchor = isProducer ? 'end' : 'start';
           return (
             <g key={idx}>
               <rect
@@ -241,28 +236,26 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
                 fill={color}
                 rx={3}
               />
-              {/* Einspeisungs-Pfeil bei Erzeugern */}
+              {/* Einspeisungs-Pfeil bei Erzeugern: zeigt nach links (← Einspeisung) */}
               {isProducer && (
                 <polygon
-                  points={`${node.x + NODE_WIDTH + 2},${node.y + node.h / 2 - 4} ${node.x + NODE_WIDTH + 8},${node.y + node.h / 2} ${node.x + NODE_WIDTH + 2},${node.y + node.h / 2 + 4}`}
+                  points={`${node.x - 2},${node.y + node.h / 2 - 5} ${node.x - 9},${node.y + node.h / 2} ${node.x - 2},${node.y + node.h / 2 + 5}`}
                   fill={color}
                 />
               )}
               <text
-                x={labelX}
+                x={node.x + NODE_WIDTH + LABEL_MARGIN}
                 y={node.y + node.h / 2}
                 dominantBaseline="middle"
-                textAnchor={textAnchor}
                 className="text-xs fill-gray-700"
                 style={{ fontSize: 11 }}
               >
                 {node.label}
               </text>
               <text
-                x={labelX}
+                x={node.x + NODE_WIDTH + LABEL_MARGIN}
                 y={node.y + node.h / 2 + 14}
                 dominantBaseline="middle"
-                textAnchor={textAnchor}
                 className="fill-gray-400"
                 style={{ fontSize: 10 }}
               >
