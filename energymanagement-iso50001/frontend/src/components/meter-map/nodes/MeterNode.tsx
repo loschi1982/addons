@@ -49,6 +49,7 @@ function MeterNodeComponent({ data }: { data: MeterNodeData }) {
       style={{ borderColor: color, borderStyle, backgroundColor: bgColor }}
     >
       <Handle type="target" position={Position.Top} className="!w-2 !h-2" style={{ background: color }} />
+      <Handle type="source" position={Position.Bottom} className="!w-2 !h-2" style={{ background: color }} />
       {/* Farbiger Akzent oben */}
       <div className="h-1" style={{ backgroundColor: color }} />
       <div className="px-3 py-2">
