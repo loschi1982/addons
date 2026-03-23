@@ -250,8 +250,9 @@ class PollingManager:
         )
         last_reading = result.scalar_one_or_none()
 
-        # Nur speichern wenn sich der Wert geändert hat
-        if last_reading and last_reading.value == value:
+        # Nur speichern wenn sich der Wert geändert hat (auf 3 Dezimalen runden)
+        rounded_value = round(value, 3)
+        if last_reading and round(last_reading.value, 3) == rounded_value:
             return {
                 "meter_id": str(meter.id),
                 "meter_name": meter.name,
@@ -259,6 +260,7 @@ class PollingManager:
                 "skipped": True,
                 "reason": "Wert unverändert",
             }
+        value = rounded_value
 
         # Verbrauch berechnen
         consumption = None

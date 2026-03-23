@@ -79,24 +79,26 @@ class ShellyClient:
         gen = await self.detect_generation()
         async with httpx.AsyncClient(timeout=10) as client:
             if gen == 2:
-                # Gen2: Zuerst Switch probieren (Shelly Plus 1PM, 2PM etc.)
+                # Gen2: Zuerst EM-Komponente probieren (Shelly Pro 3EM, EM)
+                try:
+                    phase = ["a", "b", "c"][channel] if channel < 3 else "a"
+                    return await self._get_em_energy(client, phase)
+                except httpx.HTTPStatusError:
+                    pass  # Kein EM-Gerät
+
+                # Fallback: Switch-Komponente (Shelly Plus 1PM, 2PM etc.)
                 resp = await client.get(
                     f"{self.base_url}/rpc/Switch.GetStatus",
                     params={"id": channel},
                 )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    return {
-                        "power": data.get("apower", 0),
-                        "energy_wh": data.get("aenergy", {}).get("total", 0),
-                        "voltage": data.get("voltage", 0),
-                        "current": data.get("current", 0),
-                    }
-
-                # Fallback: EM-Komponente (Shelly Pro 3EM, EM)
-                # Leistung aus EM.GetStatus, Energie aus EMData.GetStatus
-                phase = ["a", "b", "c"][channel] if channel < 3 else "a"
-                return await self._get_em_energy(client, phase)
+                resp.raise_for_status()
+                data = resp.json()
+                return {
+                    "power": data.get("apower", 0),
+                    "energy_wh": data.get("aenergy", {}).get("total", 0),
+                    "voltage": data.get("voltage", 0),
+                    "current": data.get("current", 0),
+                }
             else:
                 # Gen1: /meter/<channel>
                 resp = await client.get(f"{self.base_url}/meter/{channel}")
