@@ -264,7 +264,10 @@ class PollingManager:
 
         # Verbrauch berechnen
         consumption = None
-        if last_reading:
+        if meter.is_delivery_based:
+            # Lieferungsbasiert: Wert IST der Verbrauch
+            consumption = value
+        elif last_reading:
             diff = value - last_reading.value
             # Bei saldierender Messung negative Werte erlauben (Einspeisung)
             config = meter.source_config or {}

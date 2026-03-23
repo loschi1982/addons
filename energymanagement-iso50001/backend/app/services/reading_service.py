@@ -99,11 +99,22 @@ class ReadingService:
                 status_code=404,
             )
 
-        # Plausibilitätsprüfung
-        warnings = await self._check_plausibility(meter_id, value, timestamp)
+        # Lieferungsbasiert: Wert IST der Verbrauch (keine Differenz)
+        if meter.is_delivery_based:
+            warnings = []
+            consumption = value
+        else:
+            # Plausibilitätsprüfung
+            warnings = await self._check_plausibility(meter_id, value, timestamp)
+            # Verbrauch berechnen (Differenz zum vorherigen Stand)
+            consumption = await self._calculate_consumption(meter_id, value, timestamp)
 
-        # Verbrauch berechnen (Differenz zum vorherigen Stand)
-        consumption = await self._calculate_consumption(meter_id, value, timestamp)
+        # Kosten: Netto aus Brutto + MwSt berechnen
+        cost_gross = Decimal(str(data["cost_gross"])) if data.get("cost_gross") else None
+        vat_rate = Decimal(str(data["vat_rate"])) if data.get("vat_rate") else None
+        cost_net = None
+        if cost_gross is not None and vat_rate is not None:
+            cost_net = (cost_gross / (1 + vat_rate / 100)).quantize(Decimal("0.01"))
 
         reading = MeterReading(
             meter_id=meter_id,
@@ -112,6 +123,9 @@ class ReadingService:
             consumption=consumption,
             source=data.get("source", "manual"),
             quality=data.get("quality", "measured"),
+            cost_gross=cost_gross,
+            vat_rate=vat_rate,
+            cost_net=cost_net,
             notes=data.get("notes"),
         )
         self.db.add(reading)
@@ -174,6 +188,16 @@ class ReadingService:
             reading.quality = data["quality"]
         if "notes" in data:
             reading.notes = data["notes"]
+
+        # Kosten aktualisieren
+        if "cost_gross" in data:
+            reading.cost_gross = Decimal(str(data["cost_gross"])) if data["cost_gross"] else None
+        if "vat_rate" in data:
+            reading.vat_rate = Decimal(str(data["vat_rate"])) if data["vat_rate"] else None
+        if reading.cost_gross is not None and reading.vat_rate is not None:
+            reading.cost_net = (reading.cost_gross / (1 + reading.vat_rate / 100)).quantize(Decimal("0.01"))
+        else:
+            reading.cost_net = None
 
         await self.db.commit()
         return reading

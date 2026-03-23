@@ -12,6 +12,7 @@ interface Meter {
   unit: string;
   data_source: string;
   is_active: boolean;
+  is_delivery_based: boolean;
 }
 
 interface Reading {
@@ -22,6 +23,9 @@ interface Reading {
   consumption: number | null;
   source: string;
   quality: string;
+  cost_gross: number | null;
+  vat_rate: number | null;
+  cost_net: number | null;
   notes: string | null;
   import_batch_id: string | null;
 }
@@ -30,6 +34,8 @@ interface ReadingForm {
   meter_id: string;
   timestamp: string;
   value: string;
+  cost_gross: string;
+  vat_rate: string;
   notes: string;
 }
 
@@ -37,13 +43,6 @@ interface BulkRow {
   timestamp: string;
   value: string;
 }
-
-const QUALITY_LABELS: Record<string, string> = {
-  measured: 'Gemessen',
-  estimated: 'Geschätzt',
-  calculated: 'Berechnet',
-  imported: 'Importiert',
-};
 
 const SOURCE_LABELS: Record<string, string> = {
   manual: 'Manuell',
@@ -74,6 +73,8 @@ export default function ReadingsPage() {
     meter_id: '',
     timestamp: new Date().toISOString().slice(0, 16),
     value: '',
+    cost_gross: '',
+    vat_rate: '19',
     notes: '',
   });
   const [singleError, setSingleError] = useState<string | null>(null);
@@ -140,6 +141,8 @@ export default function ReadingsPage() {
       meter_id: selectedMeterId || '',
       timestamp: new Date().toISOString().slice(0, 16),
       value: '',
+      cost_gross: '',
+      vat_rate: '19',
       notes: '',
     });
     setSingleError(null);
@@ -151,12 +154,16 @@ export default function ReadingsPage() {
     setSingleError(null);
     setSaving(true);
     try {
+      const costGross = singleForm.cost_gross ? parseFloat(singleForm.cost_gross.replace(',', '.')) : null;
+      const vatRate = singleForm.vat_rate ? parseFloat(singleForm.vat_rate.replace(',', '.')) : null;
       await apiClient.post('/api/v1/readings', {
         meter_id: singleForm.meter_id,
         timestamp: new Date(singleForm.timestamp).toISOString(),
         value: parseFloat(singleForm.value.replace(',', '.')),
         source: 'manual',
         quality: 'measured',
+        cost_gross: costGross,
+        vat_rate: vatRate,
         notes: singleForm.notes || null,
       });
       setShowSingleModal(false);
@@ -252,6 +259,7 @@ export default function ReadingsPage() {
   };
 
   const selectedMeter = meters.find((m) => m.id === selectedMeterId);
+  const isDelivery = selectedMeter?.is_delivery_based ?? false;
   const totalPages = Math.ceil(total / pageSize);
 
   return (
@@ -318,10 +326,10 @@ export default function ReadingsPage() {
               <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
                 <tr>
                   <th className="px-4 py-3">Zeitpunkt</th>
-                  <th className="px-4 py-3 text-right">Zählerstand</th>
-                  <th className="px-4 py-3 text-right">Verbrauch</th>
+                  <th className="px-4 py-3 text-right">{isDelivery ? 'Liefermenge' : 'Zählerstand'}</th>
+                  <th className="px-4 py-3 text-right">{isDelivery ? 'Menge' : 'Verbrauch'}</th>
+                  <th className="px-4 py-3 text-right">Kosten (brutto)</th>
                   <th className="px-4 py-3">Quelle</th>
-                  <th className="px-4 py-3">Qualität</th>
                   <th className="px-4 py-3">Notizen</th>
                   <th className="px-4 py-3 text-right">Aktionen</th>
                 </tr>
@@ -353,13 +361,17 @@ export default function ReadingsPage() {
                         <span className="text-gray-300">–</span>
                       )}
                     </td>
+                    <td className="px-4 py-3 text-right font-mono text-gray-500">
+                      {r.cost_gross != null ? (
+                        <span title={r.cost_net != null ? `Netto: ${formatNumber(r.cost_net)} € (${r.vat_rate}% MwSt)` : ''}>
+                          {formatNumber(r.cost_gross)} €
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">–</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-gray-500">
                       {SOURCE_LABELS[r.source] || r.source}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-                        {QUALITY_LABELS[r.quality] || r.quality}
-                      </span>
                     </td>
                     <td className="px-4 py-3 text-gray-500 max-w-[200px] truncate">
                       {editingId === r.id ? (
@@ -445,7 +457,11 @@ export default function ReadingsPage() {
       {showSingleModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
-            <h2 className="mb-4 text-lg font-bold">Neuer Zählerstand</h2>
+            <h2 className="mb-4 text-lg font-bold">
+              {meters.find((m) => m.id === singleForm.meter_id)?.is_delivery_based
+                ? 'Neue Lieferung erfassen'
+                : 'Neuer Zählerstand'}
+            </h2>
 
             <form onSubmit={handleSingleSubmit} className="space-y-4">
               {singleError && (
@@ -482,7 +498,9 @@ export default function ReadingsPage() {
                 </div>
                 <div>
                   <label className="label">
-                    Zählerstand *{' '}
+                    {meters.find((m) => m.id === singleForm.meter_id)?.is_delivery_based
+                      ? 'Liefermenge *'
+                      : 'Zählerstand *'}{' '}
                     {singleForm.meter_id && (
                       <span className="font-normal text-gray-400">
                         ({meters.find((m) => m.id === singleForm.meter_id)?.unit})
@@ -492,7 +510,9 @@ export default function ReadingsPage() {
                   <input
                     type="text"
                     className="input"
-                    placeholder="z.B. 12345,67"
+                    placeholder={meters.find((m) => m.id === singleForm.meter_id)?.is_delivery_based
+                      ? 'z.B. 2500'
+                      : 'z.B. 12345,67'}
                     value={singleForm.value}
                     onChange={(e) => setSingleForm({ ...singleForm, value: e.target.value })}
                     required
@@ -500,6 +520,37 @@ export default function ReadingsPage() {
                   />
                 </div>
               </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Bruttokosten (€)</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="z.B. 1250,00"
+                    value={singleForm.cost_gross}
+                    onChange={(e) => setSingleForm({ ...singleForm, cost_gross: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">MwSt-Satz (%)</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="z.B. 19"
+                    value={singleForm.vat_rate}
+                    onChange={(e) => setSingleForm({ ...singleForm, vat_rate: e.target.value })}
+                  />
+                </div>
+              </div>
+              {singleForm.cost_gross && singleForm.vat_rate && (
+                <div className="text-sm text-gray-500">
+                  Netto: {formatNumber(
+                    parseFloat(singleForm.cost_gross.replace(',', '.')) /
+                    (1 + parseFloat(singleForm.vat_rate.replace(',', '.')) / 100)
+                  )} €
+                </div>
+              )}
 
               <div>
                 <label className="label">Notizen</label>

@@ -36,6 +36,7 @@ class MeterBase(BaseModel):
     is_submeter: bool = False
     is_virtual: bool = False
     is_feed_in: bool = False
+    is_delivery_based: bool = False
     is_weather_corrected: bool = False
     co2_factor_override: Decimal | None = None
     tariff_info: dict[str, Any] | None = None
@@ -64,6 +65,7 @@ class MeterUpdate(BaseModel):
     is_submeter: bool | None = None
     is_virtual: bool | None = None
     is_feed_in: bool | None = None
+    is_delivery_based: bool | None = None
     is_weather_corrected: bool | None = None
     co2_factor_override: Decimal | None = None
     tariff_info: dict[str, Any] | None = None

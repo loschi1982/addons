@@ -84,6 +84,7 @@ class Meter(Base, UUIDMixin, TimestampMixin):
     is_submeter: Mapped[bool] = mapped_column(Boolean, default=False)
     is_virtual: Mapped[bool] = mapped_column(Boolean, default=False)
     is_feed_in: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_delivery_based: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Konfiguration für virtuelle Zähler (Berechnungsformel)
     # Beispiel: {"type": "difference", "source_meter_id": "uuid-A", "subtract_meter_ids": ["uuid-B"]}

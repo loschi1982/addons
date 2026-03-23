@@ -35,6 +35,9 @@ class MeterReading(Base, UUIDMixin):
     consumption: Mapped[Decimal | None] = mapped_column(Numeric(16, 4), nullable=True)
     source: Mapped[str] = mapped_column(String(50))
     quality: Mapped[str] = mapped_column(String(50), default="measured")
+    cost_gross: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    vat_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    cost_net: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     import_batch_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(

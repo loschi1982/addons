@@ -22,6 +22,7 @@ interface Meter {
   is_active: boolean;
   is_virtual: boolean;
   is_feed_in: boolean;
+  is_delivery_based: boolean;
   is_weather_corrected: boolean;
   source_config: Record<string, unknown> | null;
   virtual_config: Record<string, unknown> | null;
@@ -37,6 +38,7 @@ interface MeterForm {
   location: string;
   is_virtual: boolean;
   is_feed_in: boolean;
+  is_delivery_based: boolean;
   is_weather_corrected: boolean;
   source_config_ip: string;
   source_config_channel: string;
@@ -59,6 +61,7 @@ const emptyForm: MeterForm = {
   location: '',
   is_virtual: false,
   is_feed_in: false,
+  is_delivery_based: false,
   is_weather_corrected: false,
   parent_meter_id: '',
   source_config_ip: '',
@@ -149,6 +152,7 @@ export default function MetersPage() {
       location: meter.location || '',
       is_virtual: meter.is_virtual,
       is_feed_in: meter.is_feed_in,
+      is_delivery_based: meter.is_delivery_based,
       is_weather_corrected: meter.is_weather_corrected,
       parent_meter_id: meter.parent_meter_id || '',
       source_config_ip: (cfg.ip as string) || '',
@@ -227,6 +231,7 @@ export default function MetersPage() {
       location: form.location || null,
       is_virtual: isVirtual,
       is_feed_in: form.is_feed_in,
+      is_delivery_based: form.is_delivery_based,
       is_weather_corrected: form.is_weather_corrected,
       parent_meter_id: form.parent_meter_id || null,
       site_id: hierarchy.siteId || null,
@@ -883,6 +888,17 @@ function MeterModal({
               />
               <label htmlFor="is_feed_in" className="text-sm">
                 Einspeisezähler (PV / Erzeugung)
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="is_delivery_based"
+                checked={form.is_delivery_based}
+                onChange={(e) => setForm({ ...form, is_delivery_based: e.target.checked })}
+              />
+              <label htmlFor="is_delivery_based" className="text-sm">
+                Lieferungsbasiert (Pellets, Heizöl etc.)
               </label>
             </div>
             <div className="flex items-center gap-2">

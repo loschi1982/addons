@@ -27,6 +27,8 @@ class ReadingCreate(BaseModel):
     value: Decimal = Field(..., description="Zählerstand in der Zählereinheit")
     source: str = Field("manual", max_length=50)
     quality: str = Field("measured", max_length=50)
+    cost_gross: Decimal | None = Field(None, description="Bruttokosten in €")
+    vat_rate: Decimal | None = Field(None, description="MwSt-Satz in % (z.B. 19)")
     notes: str | None = None
 
 
@@ -40,6 +42,8 @@ class ReadingUpdate(BaseModel):
     value: Decimal | None = None
     timestamp: datetime | None = None
     quality: str | None = None
+    cost_gross: Decimal | None = None
+    vat_rate: Decimal | None = None
     notes: str | None = None
 
 
@@ -52,6 +56,9 @@ class ReadingResponse(BaseSchema):
     consumption: Decimal | None = None
     source: str
     quality: str
+    cost_gross: Decimal | None = None
+    vat_rate: Decimal | None = None
+    cost_net: Decimal | None = None
     notes: str | None = None
     import_batch_id: uuid.UUID | None = None
 

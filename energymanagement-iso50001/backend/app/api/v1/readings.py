@@ -38,6 +38,9 @@ def _reading_to_response(r) -> ReadingResponse:
         consumption=r.consumption,
         source=r.source,
         quality=r.quality,
+        cost_gross=r.cost_gross,
+        vat_rate=r.vat_rate,
+        cost_net=r.cost_net,
         notes=r.notes,
         import_batch_id=r.import_batch_id,
     )
