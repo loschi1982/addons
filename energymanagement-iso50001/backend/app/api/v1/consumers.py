@@ -111,13 +111,17 @@ async def create_consumer(
     db.add(consumer)
     await db.flush()
 
-    # Zähler-Zuordnungen speichern
+    # Zähler-Zuordnungen speichern (direkt in Junction-Table)
     meter_ids_list: list[uuid.UUID] = []
     if request.meter_ids:
         for mid in request.meter_ids:
             meter = await db.get(Meter, mid)
             if meter:
-                consumer.meters.append(meter)
+                await db.execute(
+                    meter_consumer.insert().values(
+                        meter_id=mid, consumer_id=consumer.id
+                    )
+                )
                 meter_ids_list.append(mid)
 
     await db.commit()
