@@ -141,7 +141,7 @@ class MeterService:
             "site_id", "building_id", "usage_unit_id",
             "location", "cost_center", "tariff_info", "is_weather_corrected",
             "co2_factor_override", "is_active",
-            "is_submeter", "is_virtual", "is_feed_in", "virtual_config",
+            "is_submeter", "is_virtual", "is_feed_in", "is_delivery_based", "virtual_config",
         ]
 
         for field in updatable_fields:
