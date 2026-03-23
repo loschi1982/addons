@@ -37,8 +37,8 @@ class ShellyClient:
         if self._gen:
             return self._gen
 
-        async with httpx.AsyncClient(timeout=5) as client:
-            # Gen2 zuerst probieren
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Gen2 zuerst probieren (längerer Timeout für Docker-Netzwerk)
             try:
                 resp = await client.get(f"{self.base_url}/rpc/Shelly.GetDeviceInfo")
                 if resp.status_code == 200:
@@ -100,10 +100,16 @@ class ShellyClient:
                     "current": data.get("current", 0),
                 }
             else:
-                # Gen1: /meter/<channel>
-                resp = await client.get(f"{self.base_url}/meter/{channel}")
-                resp.raise_for_status()
-                data = resp.json()
+                # Gen1: /meter/<channel> oder /emeter/<channel>
+                try:
+                    resp = await client.get(f"{self.base_url}/meter/{channel}")
+                    resp.raise_for_status()
+                    data = resp.json()
+                except httpx.HTTPStatusError:
+                    # Fallback: /emeter/ (Gen1 EM-Geräte)
+                    resp = await client.get(f"{self.base_url}/emeter/{channel}")
+                    resp.raise_for_status()
+                    data = resp.json()
                 return {
                     "power": data.get("power", 0),
                     "energy_wh": data.get("total", 0),

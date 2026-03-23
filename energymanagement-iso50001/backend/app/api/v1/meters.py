@@ -47,6 +47,8 @@ def _meter_to_response(meter) -> MeterResponse:
         is_weather_corrected=meter.is_weather_corrected,
         co2_factor_override=meter.co2_factor_override,
         tariff_info=meter.tariff_info,
+        virtual_config=meter.virtual_config,
+        notes=meter.notes,
         is_active=meter.is_active,
         created_at=meter.created_at,
     )
