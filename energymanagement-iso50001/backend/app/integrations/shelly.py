@@ -73,20 +73,22 @@ class ShellyClient:
         """
         Aktuelle Energiedaten eines Kanals abrufen.
 
+        Probiert alle bekannten Endpunkte durch (Gen2 EM → Gen2 Switch →
+        Gen1 /meter/ → Gen1 /emeter/), unabhängig von der erkannten Generation.
+
         Returns:
             Dict mit: power (W), energy_wh (Wh), voltage (V), current (A)
         """
-        gen = await self.detect_generation()
         async with httpx.AsyncClient(timeout=10) as client:
-            if gen == 2:
-                # Gen2: Zuerst EM-Komponente probieren (Shelly Pro 3EM, EM)
-                try:
-                    phase = ["a", "b", "c"][channel] if channel < 3 else "a"
-                    return await self._get_em_energy(client, phase)
-                except httpx.HTTPStatusError:
-                    pass  # Kein EM-Gerät
+            # 1. Gen2 EM (Shelly Pro 3EM)
+            try:
+                phase = ["a", "b", "c"][channel] if channel < 3 else "a"
+                return await self._get_em_energy(client, phase)
+            except (httpx.HTTPStatusError, httpx.HTTPError):
+                pass
 
-                # Fallback: Switch-Komponente (Shelly Plus 1PM, 2PM etc.)
+            # 2. Gen2 Switch (Shelly Plus 1PM, Plug S Plus, PM Mini)
+            try:
                 resp = await client.get(
                     f"{self.base_url}/rpc/Switch.GetStatus",
                     params={"id": channel},
@@ -99,23 +101,33 @@ class ShellyClient:
                     "voltage": data.get("voltage", 0),
                     "current": data.get("current", 0),
                 }
-            else:
-                # Gen1: /meter/<channel> oder /emeter/<channel>
-                try:
-                    resp = await client.get(f"{self.base_url}/meter/{channel}")
-                    resp.raise_for_status()
-                    data = resp.json()
-                except httpx.HTTPStatusError:
-                    # Fallback: /emeter/ (Gen1 EM-Geräte)
-                    resp = await client.get(f"{self.base_url}/emeter/{channel}")
-                    resp.raise_for_status()
-                    data = resp.json()
+            except (httpx.HTTPStatusError, httpx.HTTPError):
+                pass
+
+            # 3. Gen1 /meter/ (Shelly 1PM, 2.5)
+            try:
+                resp = await client.get(f"{self.base_url}/meter/{channel}")
+                resp.raise_for_status()
+                data = resp.json()
                 return {
                     "power": data.get("power", 0),
                     "energy_wh": data.get("total", 0),
                     "voltage": data.get("voltage", 0),
                     "current": data.get("current", 0),
                 }
+            except (httpx.HTTPStatusError, httpx.HTTPError):
+                pass
+
+            # 4. Gen1 /emeter/ (Shelly EM, 3EM Gen1)
+            resp = await client.get(f"{self.base_url}/emeter/{channel}")
+            resp.raise_for_status()
+            data = resp.json()
+            return {
+                "power": data.get("power", 0),
+                "energy_wh": data.get("total", 0),
+                "voltage": data.get("voltage", 0),
+                "current": data.get("current", 0),
+            }
 
     async def _get_em_energy(self, client: httpx.AsyncClient, phase: str = "a") -> dict:
         """
