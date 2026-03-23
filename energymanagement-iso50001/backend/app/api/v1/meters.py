@@ -105,6 +105,51 @@ async def create_meter(
     return _meter_to_response(meter)
 
 
+@router.post("/from-discovery", response_model=MeterResponse, status_code=201)
+async def create_meter_from_discovery(
+    request: dict,
+    current_user: User = Depends(require_permission("meters", "create")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Zähler aus Discovery-Daten anlegen (vereinfachte Anlage)."""
+    integration = request.get("integration", "homeassistant")
+    entity_id = request.get("entity_id", "")
+
+    # source_config basierend auf Integration aufbauen
+    source_config_map = {
+        "homeassistant": {"entity_id": entity_id},
+        "mqtt": {
+            "broker_host": request.get("broker_host", ""),
+            "topic": entity_id,
+            "port": request.get("port", 1883),
+        },
+        "bacnet": {
+            "device_address": request.get("device_address", ""),
+            "object_type": request.get("object_type", "analogInput"),
+            "object_instance": request.get("object_instance", 0),
+        },
+        "shelly": {
+            "shelly_host": entity_id,
+            "channel": request.get("channel", 0),
+        },
+    }
+
+    meter_data = {
+        "name": request.get("name", entity_id),
+        "energy_type": request.get("energy_type", "electricity"),
+        "unit": request.get("unit", "kWh"),
+        "data_source": integration,
+        "source_config": source_config_map.get(integration, {"entity_id": entity_id}),
+        "site_id": request.get("site_id"),
+        "building_id": request.get("building_id"),
+        "parent_meter_id": request.get("parent_meter_id"),
+    }
+
+    service = MeterService(db)
+    meter = await service.create_meter(meter_data)
+    return _meter_to_response(meter)
+
+
 @router.get("/tree", response_model=list[MeterTreeNode])
 async def get_meter_tree(
     energy_type: str | None = None,

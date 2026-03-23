@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '@/utils/api';
 import { type PaginatedResponse } from '@/types';
+import DiscoveryModal from '@/components/DiscoveryModal';
 
 // ── Typen ──
 
@@ -137,6 +138,7 @@ function SensorsPanel() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [showDiscovery, setShowDiscovery] = useState(false);
   const [form, setForm] = useState<SensorForm>(emptySensorForm);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -208,7 +210,10 @@ function SensorsPanel() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm text-gray-500">{total} Sensoren</p>
-        <button onClick={handleCreate} className="btn-primary">+ Neuer Sensor</button>
+        <div className="flex gap-2">
+          <button onClick={() => setShowDiscovery(true)} className="btn-secondary">Sensoren entdecken</button>
+          <button onClick={handleCreate} className="btn-primary">+ Neuer Sensor</button>
+        </div>
       </div>
 
       <div className="card overflow-hidden p-0">
@@ -260,6 +265,15 @@ function SensorsPanel() {
           </table>
         )}
       </div>
+
+      {/* Discovery-Modal */}
+      {showDiscovery && (
+        <DiscoveryModal
+          mode="climate"
+          onClose={() => setShowDiscovery(false)}
+          onCreated={loadSensors}
+        />
+      )}
 
       {/* Modal: Neuer Sensor */}
       {showModal && (

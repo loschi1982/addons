@@ -103,6 +103,33 @@ async def create_sensor(
     return _sensor_to_response(sensor)
 
 
+@router.post("/sensors/from-discovery", response_model=ClimateSensorResponse, status_code=201)
+async def create_sensor_from_discovery(
+    request: dict,
+    current_user: User = Depends(require_permission("climate", "create")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Klimasensor aus Discovery-Daten anlegen (vereinfachte Anlage)."""
+    integration = request.get("integration", "homeassistant")
+
+    sensor_data = {
+        "name": request.get("name", "Sensor"),
+        "sensor_type": "temperature_humidity" if request.get("entity_id_humidity") else "temperature",
+        "zone": request.get("zone"),
+        "data_source": integration,
+        "ha_entity_id_temp": request.get("entity_id_temp"),
+        "ha_entity_id_humidity": request.get("entity_id_humidity"),
+        "target_temp_min": request.get("target_temp_min", 20),
+        "target_temp_max": request.get("target_temp_max", 24),
+        "target_humidity_min": request.get("target_humidity_min", 40),
+        "target_humidity_max": request.get("target_humidity_max", 60),
+    }
+
+    service = ClimateService(db)
+    sensor = await service.create_sensor(sensor_data)
+    return _sensor_to_response(sensor)
+
+
 @router.get("/sensors/{sensor_id}", response_model=ClimateSensorResponse)
 async def get_sensor(
     sensor_id: uuid.UUID,
