@@ -3,6 +3,8 @@
  *
  * Berechnet das Layout selbst (ohne d3-sankey) und rendert
  * Knoten als Rechtecke und Links als gebogene Pfade.
+ * Die Spaltenplatzierung erfolgt über `depth` (Tiefe im Zähler-Baum),
+ * nicht über den Knotentyp.
  */
 import { useMemo, useState } from 'react';
 
@@ -10,6 +12,7 @@ interface SankeyNode {
   id: string;
   label: string;
   type: string;
+  depth?: number;
 }
 
 interface SankeyLink {
@@ -34,7 +37,8 @@ const NODE_COLORS: Record<string, string> = {
 };
 
 const NODE_WIDTH = 20;
-const NODE_PADDING = 12;
+const NODE_PADDING = 14;
+const LABEL_MARGIN = 8;
 
 interface LayoutNode extends SankeyNode {
   x: number;
@@ -64,8 +68,9 @@ function computeLayout(
 ): { nodes: LayoutNode[]; links: LayoutLink[] } {
   if (nodes.length === 0) return { nodes: [], links: [] };
 
-  // Spalten-Zuordnung nach Typ
-  const columnOrder: Record<string, number> = {
+  // Spalte aus depth verwenden (vom Backend geliefert)
+  // Fallback auf Typ-basierte Zuordnung für Rückwärtskompatibilität
+  const typeColumnFallback: Record<string, number> = {
     quelle: 0,
     hauptzaehler: 1,
     unterzaehler: 2,
@@ -80,7 +85,7 @@ function computeLayout(
     nodeValues[link.target] = Math.max(nodeValues[link.target], 0) + link.value;
   }
 
-  // Layout-Knoten erstellen
+  // Layout-Knoten erstellen – Spalte aus depth oder Typ-Fallback
   const layoutNodes: LayoutNode[] = nodes.map((n, i) => ({
     ...n,
     x: 0,
@@ -88,7 +93,7 @@ function computeLayout(
     w: NODE_WIDTH,
     h: 0,
     value: nodeValues[i] || 1,
-    column: columnOrder[n.type] ?? 1,
+    column: n.depth != null ? n.depth : (typeColumnFallback[n.type] ?? 1),
   }));
 
   // Spalten gruppieren
@@ -110,7 +115,7 @@ function computeLayout(
     1,
   );
 
-  const availableHeight = height - 40; // Platz für Labels
+  const availableHeight = height - 40;
   const scale = availableHeight / maxColValue * 0.6;
 
   // Position berechnen
@@ -219,7 +224,7 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
                 rx={3}
               />
               <text
-                x={node.x + NODE_WIDTH + 6}
+                x={node.x + NODE_WIDTH + LABEL_MARGIN}
                 y={node.y + node.h / 2}
                 dominantBaseline="middle"
                 className="text-xs fill-gray-700"
@@ -228,7 +233,7 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
                 {node.label}
               </text>
               <text
-                x={node.x + NODE_WIDTH + 6}
+                x={node.x + NODE_WIDTH + LABEL_MARGIN}
                 y={node.y + node.h / 2 + 14}
                 dominantBaseline="middle"
                 className="fill-gray-400"

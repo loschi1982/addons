@@ -362,33 +362,58 @@ class AnalyticsService:
             conv = CONVERSION_FACTORS.get(meter.unit, Decimal("1"))
             consumption_map[meter.id] = float(raw * conv)
 
+        # Hierarchie-Tiefe berechnen (für korrekte Spaltenplatzierung)
+        meter_by_id = {m.id: m for m in meters}
+
+        def calc_depth(m: Meter) -> int:
+            """Tiefe im Zähler-Baum berechnen (Root = 0)."""
+            depth = 0
+            current = m
+            while current.parent_meter_id and current.parent_meter_id in meter_by_id:
+                depth += 1
+                current = meter_by_id[current.parent_meter_id]
+            return depth
+
+        depth_map = {m.id: calc_depth(m) for m in meters}
+
         # Knoten und Links aufbauen
-        nodes = []
-        links = []
+        nodes: list[dict] = []
+        links: list[dict] = []
         node_ids: dict[str, int] = {}
 
-        def get_node_idx(node_id: str, label: str, node_type: str) -> int:
+        def get_node_idx(node_id: str, label: str, node_type: str, depth: int = 0) -> int:
             if node_id not in node_ids:
                 node_ids[node_id] = len(nodes)
                 nodes.append({
                     "id": node_id,
                     "label": label,
                     "type": node_type,
+                    "depth": depth,
                 })
             return node_ids[node_id]
 
         for meter in meters:
             mid = str(meter.id)
-            node_type = "hauptzaehler" if not meter.parent_meter_id else "unterzaehler"
-            get_node_idx(mid, meter.name, node_type)
+            depth = depth_map[meter.id]
+            # Typ bestimmen: Eigenproduktion (is_feed_in), Hauptzähler (Root), Unterzähler
+            if getattr(meter, "is_feed_in", False):
+                node_type = "eigenproduktion"
+            elif depth == 0:
+                node_type = "hauptzaehler"
+            else:
+                node_type = "unterzaehler"
+            # Tiefe +1, weil Spalte 0 für Quellen reserviert ist
+            get_node_idx(mid, meter.name, node_type, depth + 1)
 
-            # Verbindung: Hauptzähler → Unterzähler
+            # Verbindung: Elternzähler → Kind
             if meter.parent_meter_id:
-                parent_id = str(meter.parent_meter_id)
-                # Sicherstellen, dass der Elternknoten existiert
-                parent = next((m for m in meters if m.id == meter.parent_meter_id), None)
+                parent = meter_by_id.get(meter.parent_meter_id)
                 if parent:
-                    get_node_idx(parent_id, parent.name, "hauptzaehler")
+                    parent_id = str(parent.id)
+                    parent_depth = depth_map[parent.id]
+                    parent_type = "eigenproduktion" if getattr(parent, "is_feed_in", False) \
+                        else ("hauptzaehler" if parent_depth == 0 else "unterzaehler")
+                    get_node_idx(parent_id, parent.name, parent_type, parent_depth + 1)
                     value = consumption_map.get(meter.id, 0)
                     if value > 0:
                         links.append({
@@ -402,7 +427,8 @@ class AnalyticsService:
                 per_consumer = consumption_map.get(meter.id, 0) / max(len(meter.consumers), 1)
                 for consumer in meter.consumers:
                     cid = f"consumer_{consumer.id}"
-                    get_node_idx(cid, consumer.name, "verbraucher")
+                    # Verbraucher eine Spalte hinter dem Zähler
+                    get_node_idx(cid, consumer.name, "verbraucher", depth + 2)
                     if per_consumer > 0:
                         links.append({
                             "source": node_ids[mid],
@@ -410,20 +436,19 @@ class AnalyticsService:
                             "value": per_consumer,
                         })
 
-        # Hauptzähler ohne Eltern: "Energiequelle" als Wurzel
+        # Hauptzähler ohne Eltern: "Energiequelle" als Wurzel (Spalte 0)
         root_meters = [m for m in meters if not m.parent_meter_id]
-        if root_meters:
-            for rm in root_meters:
-                source_label = f"Bezug {rm.energy_type}"
-                source_id = f"source_{rm.energy_type}"
-                src_idx = get_node_idx(source_id, source_label, "quelle")
-                value = consumption_map.get(rm.id, 0)
-                if value > 0:
-                    links.append({
-                        "source": src_idx,
-                        "target": node_ids[str(rm.id)],
-                        "value": value,
-                    })
+        for rm in root_meters:
+            source_label = f"Bezug {rm.energy_type}"
+            source_id = f"source_{rm.energy_type}"
+            src_idx = get_node_idx(source_id, source_label, "quelle", 0)
+            value = consumption_map.get(rm.id, 0)
+            if value > 0:
+                links.append({
+                    "source": src_idx,
+                    "target": node_ids[str(rm.id)],
+                    "value": value,
+                })
 
         return {"nodes": nodes, "links": links}
 
