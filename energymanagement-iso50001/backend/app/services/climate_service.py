@@ -263,6 +263,65 @@ class ClimateService:
             "alerts": alerts,
         }
 
+    async def poll_ha_sensors(self) -> dict:
+        """HA-Klimasensoren abfragen und Messwerte speichern."""
+        from app.integrations.homeassistant import HomeAssistantClient
+
+        sensors_result = await self.db.execute(
+            select(ClimateSensor).where(
+                ClimateSensor.is_active == True,  # noqa: E712
+                ClimateSensor.data_source == "homeassistant",
+            )
+        )
+        sensors = sensors_result.scalars().all()
+        if not sensors:
+            return {"polled": 0, "errors": 0}
+
+        client = await HomeAssistantClient.from_settings(self.db)
+        polled = 0
+        errors = 0
+
+        for sensor in sensors:
+            try:
+                temp = None
+                humidity = None
+
+                if sensor.ha_entity_id_temp:
+                    temp = await client.get_entity_value(sensor.ha_entity_id_temp)
+
+                if sensor.ha_entity_id_humidity:
+                    humidity = await client.get_entity_value(sensor.ha_entity_id_humidity)
+
+                if temp is None and humidity is None:
+                    continue
+
+                # Taupunkt berechnen
+                dew_point = None
+                if temp is not None and humidity is not None:
+                    dew_point = Decimal(
+                        str(calculate_dew_point(float(temp), float(humidity)))
+                    )
+
+                reading = ClimateReading(
+                    sensor_id=sensor.id,
+                    timestamp=datetime.now(timezone.utc),
+                    temperature=Decimal(str(temp)) if temp is not None else None,
+                    humidity=Decimal(str(humidity)) if humidity is not None else None,
+                    dew_point=dew_point,
+                    source="homeassistant",
+                    quality="measured",
+                )
+                self.db.add(reading)
+                polled += 1
+            except Exception as e:
+                logger.warning("Klimasensor-Polling fehlgeschlagen",
+                               sensor_id=str(sensor.id), error=str(e))
+                errors += 1
+
+        await self.db.commit()
+        logger.info("Klimasensor-Polling abgeschlossen", polled=polled, errors=errors)
+        return {"polled": polled, "errors": errors}
+
     async def get_zone_summaries(self, period_start: date, period_end: date) -> list:
         """Zonen-Zusammenfassungen berechnen."""
         # Alle aktiven Zonen ermitteln

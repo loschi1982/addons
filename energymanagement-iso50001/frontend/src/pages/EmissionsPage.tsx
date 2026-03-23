@@ -150,23 +150,23 @@ function DashboardPanel() {
       <div className="grid grid-cols-4 gap-4">
         <KPICard
           label="CO\u2082 Gesamt"
-          value={current ? `${(current.total_co2_kg / 1000).toFixed(1)} t` : '0 t'}
+          value={current ? `${(Number(current.total_co2_kg) / 1000).toFixed(1)} t` : '0 t'}
           subtitle={current?.trend_vs_previous != null
-            ? `${current.trend_vs_previous > 0 ? '+' : ''}${current.trend_vs_previous.toFixed(1)} % vs. Vorjahr`
+            ? `${Number(current.trend_vs_previous) > 0 ? '+' : ''}${Number(current.trend_vs_previous).toFixed(1)} % vs. Vorjahr`
             : undefined}
           trend={current?.trend_vs_previous ?? undefined}
         />
         <KPICard
           label="Verbrauch gesamt"
-          value={current ? `${(current.total_consumption_kwh / 1000).toFixed(0)} MWh` : '0 MWh'}
+          value={current ? `${(Number(current.total_consumption_kwh) / 1000).toFixed(0)} MWh` : '0 MWh'}
         />
         <KPICard
           label="Durchschn. Faktor"
-          value={current ? `${current.avg_co2_g_per_kwh.toFixed(0)} g/kWh` : '–'}
+          value={current ? `${Number(current.avg_co2_g_per_kwh).toFixed(0)} g/kWh` : '–'}
         />
         <KPICard
           label="Vorjahr CO\u2082"
-          value={previous ? `${(previous.total_co2_kg / 1000).toFixed(1)} t` : '–'}
+          value={previous ? `${(Number(previous.total_co2_kg) / 1000).toFixed(1)} t` : '–'}
           subtitle={`${year - 1}`}
         />
       </div>
@@ -377,7 +377,7 @@ function FactorsPanel() {
                   <td className="px-4 py-2 font-medium">
                     {ENERGY_TYPE_LABELS[f.energy_type as EnergyType] || f.energy_type}
                   </td>
-                  <td className="px-4 py-2 text-right font-mono font-bold">{f.co2_g_per_kwh.toFixed(1)}</td>
+                  <td className="px-4 py-2 text-right font-mono font-bold">{Number(f.co2_g_per_kwh).toFixed(1)}</td>
                   <td className="px-4 py-2 text-center">{f.year}</td>
                   <td className="px-4 py-2">
                     <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
