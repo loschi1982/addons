@@ -44,7 +44,7 @@ def _meter_to_response(meter) -> MeterResponse:
         is_submeter=meter.is_submeter,
         is_virtual=meter.is_virtual,
         is_feed_in=meter.is_feed_in,
-        is_delivery_based=meter.is_delivery_based,
+        is_delivery_based=getattr(meter, 'is_delivery_based', False),
         is_weather_corrected=meter.is_weather_corrected,
         co2_factor_override=meter.co2_factor_override,
         tariff_info=meter.tariff_info,
