@@ -1,13 +1,25 @@
 # ===========================================================================
 # Dockerfile – Standalone Energy Management ISO 50001
 # ===========================================================================
-# Verwendet das vorgebaute Frontend aus frontend/dist/.
-# Frontend wird auf der Entwicklungsmaschine gebaut (npm run build)
-# und ins Repository committed.
+# Multi-Stage Build:
+#   1. Frontend mit Node.js bauen (npm run build)
+#   2. Backend + fertiges Frontend in schlankes Python-Image kopieren
 #
 # Externe Dienste (TimescaleDB, Redis) werden via docker-compose bereitgestellt.
 # ===========================================================================
 
+# ── Stage 1: Frontend bauen ──
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /build
+
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
+# ── Stage 2: Backend + Frontend zusammenführen ──
 FROM python:3.12-alpine
 
 # System-Abhängigkeiten
@@ -44,8 +56,8 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 # Backend-Code kopieren
 COPY backend/ ./backend/
 
-# Vorgebautes Frontend kopieren
-COPY frontend/dist ./frontend/dist
+# Frontend aus Stage 1 kopieren
+COPY --from=frontend-builder /build/dist ./frontend/dist
 
 # VERSION-Datei kopieren
 COPY VERSION ./VERSION
