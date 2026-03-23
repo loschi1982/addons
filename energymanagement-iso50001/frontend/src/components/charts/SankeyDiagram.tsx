@@ -36,6 +36,14 @@ const NODE_COLORS: Record<string, string> = {
   eigenproduktion: '#F59E0B',
 };
 
+const NODE_LABELS: Record<string, string> = {
+  quelle: 'Energiebezug',
+  hauptzaehler: 'Hauptzähler',
+  unterzaehler: 'Unterzähler',
+  verbraucher: 'Verbraucher',
+  eigenproduktion: 'Eigenproduktion',
+};
+
 const NODE_WIDTH = 20;
 const NODE_PADDING = 14;
 const LABEL_MARGIN = 8;
@@ -213,6 +221,12 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
         {/* Knoten */}
         {layout.nodes.map((node, idx) => {
           const color = NODE_COLORS[node.type] || '#94a3b8';
+          // Eigenproduktion: Label links, Pfeil-Symbol zeigt Einspeisungsrichtung
+          const isProducer = node.type === 'eigenproduktion';
+          const labelX = isProducer
+            ? node.x - LABEL_MARGIN
+            : node.x + NODE_WIDTH + LABEL_MARGIN;
+          const textAnchor = isProducer ? 'end' : 'start';
           return (
             <g key={idx}>
               <rect
@@ -223,19 +237,28 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
                 fill={color}
                 rx={3}
               />
+              {/* Einspeisungs-Pfeil bei Erzeugern */}
+              {isProducer && (
+                <polygon
+                  points={`${node.x + NODE_WIDTH + 2},${node.y + node.h / 2 - 4} ${node.x + NODE_WIDTH + 8},${node.y + node.h / 2} ${node.x + NODE_WIDTH + 2},${node.y + node.h / 2 + 4}`}
+                  fill={color}
+                />
+              )}
               <text
-                x={node.x + NODE_WIDTH + LABEL_MARGIN}
+                x={labelX}
                 y={node.y + node.h / 2}
                 dominantBaseline="middle"
+                textAnchor={textAnchor}
                 className="text-xs fill-gray-700"
                 style={{ fontSize: 11 }}
               >
                 {node.label}
               </text>
               <text
-                x={node.x + NODE_WIDTH + LABEL_MARGIN}
+                x={labelX}
                 y={node.y + node.h / 2 + 14}
                 dominantBaseline="middle"
+                textAnchor={textAnchor}
                 className="fill-gray-400"
                 style={{ fontSize: 10 }}
               >
@@ -245,6 +268,16 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
           );
         })}
       </svg>
+
+      {/* Legende */}
+      <div className="mt-3 flex flex-wrap gap-4 text-xs text-gray-500">
+        {Object.entries(NODE_COLORS).map(([type, color]) => (
+          <div key={type} className="flex items-center gap-1.5">
+            <span className="inline-block h-3 w-3 rounded-sm" style={{ backgroundColor: color }} />
+            <span>{NODE_LABELS[type] || type}</span>
+          </div>
+        ))}
+      </div>
 
       {/* Tooltip */}
       {tooltip && (

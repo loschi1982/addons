@@ -392,20 +392,35 @@ class AnalyticsService:
                 })
             return node_ids[node_id]
 
+        # Maximale Tiefe der Nicht-Erzeuger bestimmen (für Verbraucher-Spalte)
+        max_consumer_depth = 0
+        for meter in meters:
+            if not getattr(meter, "is_feed_in", False):
+                max_consumer_depth = max(max_consumer_depth, depth_map[meter.id])
+
         for meter in meters:
             mid = str(meter.id)
             depth = depth_map[meter.id]
-            # Typ bestimmen: Eigenproduktion (is_feed_in), Hauptzähler (Root), Unterzähler
-            if getattr(meter, "is_feed_in", False):
+            is_producer = getattr(meter, "is_feed_in", False)
+
+            # Typ bestimmen
+            if is_producer:
                 node_type = "eigenproduktion"
             elif depth == 0:
                 node_type = "hauptzaehler"
             else:
                 node_type = "unterzaehler"
-            # Tiefe +1, weil Spalte 0 für Quellen reserviert ist
-            get_node_idx(mid, meter.name, node_type, depth + 1)
 
-            # Verbindung: Elternzähler → Kind
+            if is_producer:
+                # Erzeuger: links neben dem Elternzähler positionieren
+                parent_depth = depth_map.get(meter.parent_meter_id, 0) if meter.parent_meter_id else 0
+                node_depth = parent_depth  # Gleiche Spalte wie Quellen des Elternzählers
+                get_node_idx(mid, meter.name, node_type, node_depth)
+            else:
+                # Verbraucher/Zähler: Tiefe +1 (Spalte 0 = Quellen)
+                get_node_idx(mid, meter.name, node_type, depth + 1)
+
+            # Verbindungen aufbauen
             if meter.parent_meter_id:
                 parent = meter_by_id.get(meter.parent_meter_id)
                 if parent:
@@ -413,22 +428,35 @@ class AnalyticsService:
                     parent_depth = depth_map[parent.id]
                     parent_type = "eigenproduktion" if getattr(parent, "is_feed_in", False) \
                         else ("hauptzaehler" if parent_depth == 0 else "unterzaehler")
-                    get_node_idx(parent_id, parent.name, parent_type, parent_depth + 1)
+                    parent_node_depth = parent_depth + 1
+                    get_node_idx(parent_id, parent.name, parent_type, parent_node_depth)
                     value = consumption_map.get(meter.id, 0)
-                    if value > 0:
-                        links.append({
-                            "source": node_ids[parent_id],
-                            "target": node_ids[mid],
-                            "value": value,
-                        })
 
-            # Verbindung: Zähler → Verbraucher
+                    if is_producer:
+                        # Erzeuger: Energie fließt VON Erzeuger ZUM Elternzähler
+                        if value > 0:
+                            links.append({
+                                "source": node_ids[mid],
+                                "target": node_ids[parent_id],
+                                "value": value,
+                            })
+                    else:
+                        # Verbraucher: Energie fließt VOM Elternzähler ZUM Kind
+                        if value > 0:
+                            links.append({
+                                "source": node_ids[parent_id],
+                                "target": node_ids[mid],
+                                "value": value,
+                            })
+
+            # Verbindung: Zähler → Verbraucher (Anlagen)
             if meter.consumers:
-                per_consumer = consumption_map.get(meter.id, 0) / max(len(meter.consumers), 1)
+                meter_value = consumption_map.get(meter.id, 0)
+                per_consumer = meter_value / max(len(meter.consumers), 1)
                 for consumer in meter.consumers:
                     cid = f"consumer_{consumer.id}"
-                    # Verbraucher eine Spalte hinter dem Zähler
-                    get_node_idx(cid, consumer.name, "verbraucher", depth + 2)
+                    consumer_depth = (depth + 2) if not is_producer else (depth + 3)
+                    get_node_idx(cid, consumer.name, "verbraucher", consumer_depth)
                     if per_consumer > 0:
                         links.append({
                             "source": node_ids[mid],
