@@ -56,6 +56,7 @@ interface SankeyLink {
   source: number;
   target: number;
   value: number;
+  direction?: 'consumption' | 'feed_in';
 }
 
 interface SankeyData {

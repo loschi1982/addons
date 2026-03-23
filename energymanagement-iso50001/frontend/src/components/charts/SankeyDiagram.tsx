@@ -3,8 +3,8 @@
  *
  * Berechnet das Layout selbst (ohne d3-sankey) und rendert
  * Knoten als Rechtecke und Links als gebogene Pfade.
- * Die Spaltenplatzierung erfolgt über `depth` (Tiefe im Zähler-Baum),
- * nicht über den Knotentyp.
+ * Unterstützt bidirektionale Flüsse: Verbrauch (links→rechts)
+ * und Einspeisung (rechts→links).
  */
 import { useMemo, useState } from 'react';
 
@@ -19,6 +19,7 @@ interface SankeyLink {
   source: number;
   target: number;
   value: number;
+  direction?: 'consumption' | 'feed_in';
 }
 
 interface SankeyDiagramProps {
@@ -34,6 +35,7 @@ const NODE_COLORS: Record<string, string> = {
   unterzaehler: '#3B82F6',
   verbraucher: '#10B981',
   eigenproduktion: '#F59E0B',
+  einspeisung: '#EF4444',
 };
 
 const NODE_LABELS: Record<string, string> = {
@@ -42,7 +44,10 @@ const NODE_LABELS: Record<string, string> = {
   unterzaehler: 'Unterzähler',
   verbraucher: 'Verbraucher',
   eigenproduktion: 'Eigenproduktion',
+  einspeisung: 'Netzeinspeisung',
 };
+
+const FEED_IN_COLOR = '#F59E0B';
 
 const NODE_WIDTH = 20;
 const NODE_PADDING = 14;
@@ -76,31 +81,46 @@ function computeLayout(
 ): { nodes: LayoutNode[]; links: LayoutLink[] } {
   if (nodes.length === 0) return { nodes: [], links: [] };
 
-  // Spalte aus depth verwenden (vom Backend geliefert)
-  // Fallback auf Typ-basierte Zuordnung für Rückwärtskompatibilität
   const typeColumnFallback: Record<string, number> = {
     quelle: 0,
     hauptzaehler: 1,
     unterzaehler: 2,
     verbraucher: 3,
-    eigenproduktion: 0,
+    eigenproduktion: 2,
+    einspeisung: 0,
   };
 
-  // Knotenwerte berechnen (max aus ein-/ausgehenden Links)
-  const nodeValues = new Array(nodes.length).fill(0);
+  // Knotenwerte berechnen – Vorwärts- und Rückwärts-Links separat
+  // Knotenwert = max(eingehend, ausgehend) pro Richtung, dann Summe
+  const forwardIn = new Array(nodes.length).fill(0);
+  const forwardOut = new Array(nodes.length).fill(0);
+  const feedInIn = new Array(nodes.length).fill(0);
+  const feedInOut = new Array(nodes.length).fill(0);
+
   for (const link of links) {
-    nodeValues[link.source] = Math.max(nodeValues[link.source], 0) + link.value;
-    nodeValues[link.target] = Math.max(nodeValues[link.target], 0) + link.value;
+    if (link.direction === 'feed_in') {
+      feedInOut[link.source] += link.value;
+      feedInIn[link.target] += link.value;
+    } else {
+      forwardOut[link.source] += link.value;
+      forwardIn[link.target] += link.value;
+    }
   }
 
-  // Layout-Knoten erstellen – Spalte aus depth oder Typ-Fallback
+  const nodeValues = nodes.map((_, i) => {
+    const fwd = Math.max(forwardIn[i], forwardOut[i]);
+    const fi = Math.max(feedInIn[i], feedInOut[i]);
+    return Math.max(fwd + fi, 1);
+  });
+
+  // Layout-Knoten erstellen
   const layoutNodes: LayoutNode[] = nodes.map((n, i) => ({
     ...n,
     x: 0,
     y: 0,
     w: NODE_WIDTH,
     h: 0,
-    value: nodeValues[i] || 1,
+    value: nodeValues[i],
     column: n.depth != null ? n.depth : (typeColumnFallback[n.type] ?? 1),
   }));
 
@@ -115,7 +135,6 @@ function computeLayout(
   const numCols = Math.max(...Array.from(columns.keys())) + 1;
   const colWidth = (width - NODE_WIDTH) / Math.max(numCols - 1, 1);
 
-  // Gesamtwert für Skalierung
   const maxColValue = Math.max(
     ...Array.from(columns.values()).map((indices) =>
       indices.reduce((s, i) => s + layoutNodes[i].value, 0)
@@ -126,7 +145,6 @@ function computeLayout(
   const availableHeight = height - 40;
   const scale = availableHeight / maxColValue * 0.6;
 
-  // Position berechnen
   for (const [col, indices] of columns) {
     const totalH = indices.reduce((s, i) => s + Math.max(layoutNodes[i].value * scale, 4), 0)
       + (indices.length - 1) * NODE_PADDING;
@@ -141,26 +159,50 @@ function computeLayout(
   }
 
   // Link-Positionen berechnen
-  const sourceOffsets = new Array(nodes.length).fill(0);
-  const targetOffsets = new Array(nodes.length).fill(0);
+  // Vorwärts-Links: rechte Kante Source → linke Kante Target (oben am Knoten)
+  // Rückwärts-Links: linke Kante Source → rechte Kante Target (unten am Knoten)
+  const fwdSourceOffsets = new Array(nodes.length).fill(0);
+  const fwdTargetOffsets = new Array(nodes.length).fill(0);
+  const fiSourceOffsets = new Array(nodes.length).fill(0);
+  const fiTargetOffsets = new Array(nodes.length).fill(0);
 
-  const layoutLinks: LayoutLink[] = links
-    .map((link) => {
-      const sNode = layoutNodes[link.source];
-      const tNode = layoutNodes[link.target];
-      // Mindestbreite 2px für strukturelle Verbindungen ohne Verbrauch
-      const linkW = link.value > 0
-        ? Math.max((link.value / (sNode.value || 1)) * sNode.h, 2)
-        : 2;
+  // Rückwärts-Links starten am unteren Ende des Knotens
+  for (let i = 0; i < nodes.length; i++) {
+    const fwdH = forwardOut[i] > 0
+      ? (forwardOut[i] / nodeValues[i]) * layoutNodes[i].h
+      : 0;
+    fiSourceOffsets[i] = fwdH;
 
-      const sy = sNode.y + sourceOffsets[link.source];
-      const ty = tNode.y + targetOffsets[link.target];
+    const fwdInH = forwardIn[i] > 0
+      ? (forwardIn[i] / nodeValues[i]) * layoutNodes[i].h
+      : 0;
+    fiTargetOffsets[i] = fwdInH;
+  }
 
-      sourceOffsets[link.source] += linkW;
-      targetOffsets[link.target] += linkW;
+  const layoutLinks: LayoutLink[] = links.map((link) => {
+    const sNode = layoutNodes[link.source];
+    const tNode = layoutNodes[link.target];
+    const isFeedIn = link.direction === 'feed_in';
 
-      return { ...link, sy, ty, sw: linkW };
-    });
+    const linkW = link.value > 0
+      ? Math.max((link.value / (sNode.value || 1)) * sNode.h, 2)
+      : 2;
+
+    let sy: number, ty: number;
+    if (isFeedIn) {
+      sy = sNode.y + fiSourceOffsets[link.source];
+      ty = tNode.y + fiTargetOffsets[link.target];
+      fiSourceOffsets[link.source] += linkW;
+      fiTargetOffsets[link.target] += linkW;
+    } else {
+      sy = sNode.y + fwdSourceOffsets[link.source];
+      ty = tNode.y + fwdTargetOffsets[link.target];
+      fwdSourceOffsets[link.source] += linkW;
+      fwdTargetOffsets[link.target] += linkW;
+    }
+
+    return { ...link, sy, ty, sw: linkW };
+  });
 
   return { nodes: layoutNodes, links: layoutLinks };
 }
@@ -186,8 +228,12 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
         {layout.links.map((link, idx) => {
           const sNode = layout.nodes[link.source];
           const tNode = layout.nodes[link.target];
-          const x0 = sNode.x + NODE_WIDTH;
-          const x1 = tNode.x;
+          const isFeedIn = link.direction === 'feed_in';
+
+          // Vorwärts: rechte Kante Source → linke Kante Target
+          // Rückwärts: linke Kante Source → rechte Kante Target
+          const x0 = isFeedIn ? sNode.x : sNode.x + NODE_WIDTH;
+          const x1 = isFeedIn ? tNode.x + NODE_WIDTH : tNode.x;
           const mx = (x0 + x1) / 2;
 
           const path = `M ${x0} ${link.sy}
@@ -196,16 +242,18 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
             C ${mx} ${link.ty + link.sw}, ${mx} ${link.sy + link.sw}, ${x0} ${link.sy + link.sw}
             Z`;
 
-          const color = NODE_COLORS[sNode.type] || '#94a3b8';
+          const color = isFeedIn ? FEED_IN_COLOR : (NODE_COLORS[sNode.type] || '#94a3b8');
           const isEmpty = link.value === 0;
+          const tooltipSuffix = isFeedIn ? ' (Einspeisung)' : '';
+
           return (
             <path
               key={idx}
               d={path}
               fill={isEmpty ? 'none' : color}
-              fillOpacity={isEmpty ? 0 : (hoveredLink === idx ? 0.5 : 0.2)}
+              fillOpacity={isEmpty ? 0 : (hoveredLink === idx ? 0.5 : (isFeedIn ? 0.3 : 0.2))}
               stroke={color}
-              strokeOpacity={isEmpty ? 0.3 : (hoveredLink === idx ? 0.8 : 0.3)}
+              strokeOpacity={isEmpty ? 0.3 : (hoveredLink === idx ? 0.8 : 0.4)}
               strokeWidth={isEmpty ? 1 : 0.5}
               strokeDasharray={isEmpty ? '4 3' : undefined}
               onMouseEnter={(e) => {
@@ -213,7 +261,7 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
                 setTooltip({
                   x: e.clientX,
                   y: e.clientY,
-                  text: `${sNode.label} → ${tNode.label}: ${formatValue(link.value)}`,
+                  text: `${sNode.label} → ${tNode.label}: ${formatValue(link.value)}${tooltipSuffix}`,
                 });
               }}
               onMouseLeave={() => { setHoveredLink(null); setTooltip(null); }}

@@ -429,8 +429,8 @@ class AnalyticsService:
             # Alle Zähler (inkl. Erzeuger) nach Hierarchie-Tiefe platzieren
             get_node_idx(mid, label, node_type, depth + 1)
 
-            # Verbindungen aufbauen – immer anlegen, auch bei 0 kWh
-            if meter.parent_meter_id:
+            # Vorwärts-Links (Verbrauch): Eltern → Kind – nur für Nicht-Erzeuger
+            if meter.parent_meter_id and not is_producer:
                 parent = meter_by_id.get(meter.parent_meter_id)
                 if parent:
                     parent_id = str(parent.id)
@@ -444,12 +444,11 @@ class AnalyticsService:
                     get_node_idx(parent_id, parent_label, parent_type, parent_node_depth)
                     value = consumption_map.get(meter.id, 0)
 
-                    # Link immer Eltern → Kind (Erzeuger werden durch Typ
-                    # und Pfeil-Symbol als Einspeisung gekennzeichnet)
                     links.append({
                         "source": node_ids[parent_id],
                         "target": node_ids[mid],
                         "value": max(value, 0),
+                        "direction": "consumption",
                     })
 
             # Verbindung: Zähler → Verbraucher (Anlagen)
@@ -467,7 +466,38 @@ class AnalyticsService:
                         "source": node_ids[mid],
                         "target": node_ids[cid],
                         "value": per_consumer,
+                        "direction": "consumption",
                     })
+
+        # Rückwärts-Links (Einspeisung): Erzeuger → Eltern → ... → Netzeinspeisung
+        for meter in meters:
+            if not getattr(meter, "is_feed_in", False):
+                continue
+            feed_in_value = abs(consumption_map.get(meter.id, 0))
+
+            # Pfad vom Erzeuger bis zum Root-Zähler nach oben verfolgen
+            current = meter
+            while current.parent_meter_id and current.parent_meter_id in meter_by_id:
+                parent = meter_by_id[current.parent_meter_id]
+                links.append({
+                    "source": node_ids[str(current.id)],
+                    "target": node_ids[str(parent.id)],
+                    "value": feed_in_value,
+                    "direction": "feed_in",
+                })
+                current = parent
+
+            # Am Root-Zähler: Link zur "Netzeinspeisung"
+            if not current.parent_meter_id:
+                export_id = f"export_{current.energy_type}"
+                export_label = f"Einspeisung {current.energy_type}"
+                get_node_idx(export_id, export_label, "einspeisung", 0)
+                links.append({
+                    "source": node_ids[str(current.id)],
+                    "target": node_ids[export_id],
+                    "value": feed_in_value,
+                    "direction": "feed_in",
+                })
 
         # Hauptzähler ohne Eltern: "Energiequelle" als Wurzel (Spalte 0)
         root_meters = [m for m in meters if not m.parent_meter_id]
@@ -481,6 +511,7 @@ class AnalyticsService:
                     "source": src_idx,
                     "target": node_ids[str(rm.id)],
                     "value": value,
+                    "direction": "consumption",
                 })
 
         return {"nodes": nodes, "links": links}
