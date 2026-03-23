@@ -721,6 +721,8 @@ function IntegrationsPanel() {
   const [haConfig, setHaConfig] = useState({ base_url: '', access_token: '', auth_enabled: false, default_role: 'viewer' });
   const [weatherConfig, setWeatherConfig] = useState({ enabled: true, station_id: '', latitude: '', longitude: '' });
   const [co2Config, setCo2Config] = useState({ enabled: false, api_key: '', zone: 'DE' });
+  const [mqttConfig, setMqttConfig] = useState({ enabled: false, broker_host: '', port: 1883, username: '', password: '' });
+  const [bacnetConfig, setBacnetConfig] = useState({ enabled: false, interface: '', port: 47808 });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState('');
   const [testResults, setTestResults] = useState<Record<string, IntegrationTestResult | null>>({});
@@ -734,10 +736,14 @@ function IntegrationsPanel() {
       apiClient.get('/api/v1/settings/integrations_weather'),
       apiClient.get('/api/v1/settings/integrations_co2'),
       apiClient.get('/api/v1/weather/stations').catch(() => ({ data: [] })),
-    ]).then(([ha, weather, co2, stationsRes]) => {
+      apiClient.get('/api/v1/settings/integrations_mqtt').catch(() => ({ data: {} })),
+      apiClient.get('/api/v1/settings/integrations_bacnet').catch(() => ({ data: {} })),
+    ]).then(([ha, weather, co2, stationsRes, mqtt, bacnet]) => {
       if (ha.data.value) setHaConfig({ ...haConfig, ...ha.data.value });
       if (weather.data.value) setWeatherConfig({ ...weatherConfig, ...weather.data.value });
       if (co2.data.value) setCo2Config({ ...co2Config, ...co2.data.value });
+      if (mqtt.data.value) setMqttConfig({ ...mqttConfig, ...mqtt.data.value });
+      if (bacnet.data.value) setBacnetConfig({ ...bacnetConfig, ...bacnet.data.value });
       setStations(Array.isArray(stationsRes.data) ? stationsRes.data : []);
     });
   }, []);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -985,6 +991,135 @@ function IntegrationsPanel() {
           >
             <Save className="w-3.5 h-3.5" />
             {saved === 'integrations_co2' ? 'Gespeichert!' : 'Speichern'}
+          </button>
+        </div>
+      </div>
+
+      {/* MQTT */}
+      <div className="border rounded-lg p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-semibold text-gray-900">MQTT</h3>
+          <div className="flex items-center gap-2">
+            <StatusBadge type="mqtt" />
+            <button
+              onClick={() => testConnection('mqtt')}
+              disabled={testing.mqtt}
+              className="btn-secondary text-xs px-3 py-1"
+            >
+              {testing.mqtt ? 'Teste…' : 'Verbindung testen'}
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="md:col-span-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={mqttConfig.enabled}
+                onChange={(e) => setMqttConfig({ ...mqttConfig, enabled: e.target.checked })}
+                className="rounded border-gray-300 text-primary-500"
+              />
+              <span className="text-sm">MQTT aktivieren</span>
+            </label>
+          </div>
+          <FormField label="Broker-Host">
+            <input
+              className="input"
+              placeholder="192.168.1.100 oder mqtt.local"
+              value={mqttConfig.broker_host}
+              onChange={(e) => setMqttConfig({ ...mqttConfig, broker_host: e.target.value })}
+            />
+          </FormField>
+          <FormField label="Port">
+            <input
+              className="input"
+              type="number"
+              value={mqttConfig.port}
+              onChange={(e) => setMqttConfig({ ...mqttConfig, port: parseInt(e.target.value) || 1883 })}
+            />
+          </FormField>
+          <FormField label="Benutzername">
+            <input
+              className="input"
+              placeholder="optional"
+              value={mqttConfig.username}
+              onChange={(e) => setMqttConfig({ ...mqttConfig, username: e.target.value })}
+            />
+          </FormField>
+          <FormField label="Passwort">
+            <input
+              className="input"
+              type="password"
+              placeholder="optional"
+              value={mqttConfig.password}
+              onChange={(e) => setMqttConfig({ ...mqttConfig, password: e.target.value })}
+            />
+          </FormField>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button
+            onClick={() => saveSection('integrations_mqtt', mqttConfig)}
+            disabled={saving}
+            className="btn-primary text-sm flex items-center gap-1.5"
+          >
+            <Save className="w-3.5 h-3.5" />
+            {saved === 'integrations_mqtt' ? 'Gespeichert!' : 'Speichern'}
+          </button>
+        </div>
+      </div>
+
+      {/* BACnet */}
+      <div className="border rounded-lg p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-semibold text-gray-900">BACnet/IP</h3>
+          <div className="flex items-center gap-2">
+            <StatusBadge type="bacnet" />
+            <button
+              onClick={() => testConnection('bacnet')}
+              disabled={testing.bacnet}
+              className="btn-secondary text-xs px-3 py-1"
+            >
+              {testing.bacnet ? 'Teste…' : 'Verbindung testen'}
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="md:col-span-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={bacnetConfig.enabled}
+                onChange={(e) => setBacnetConfig({ ...bacnetConfig, enabled: e.target.checked })}
+                className="rounded border-gray-300 text-primary-500"
+              />
+              <span className="text-sm">BACnet aktivieren</span>
+            </label>
+          </div>
+          <FormField label="Netzwerk-Interface (optional)">
+            <input
+              className="input"
+              placeholder="z.B. 192.168.1.50 oder leer für Auto"
+              value={bacnetConfig.interface}
+              onChange={(e) => setBacnetConfig({ ...bacnetConfig, interface: e.target.value })}
+            />
+          </FormField>
+          <FormField label="Port">
+            <input
+              className="input"
+              type="number"
+              value={bacnetConfig.port}
+              onChange={(e) => setBacnetConfig({ ...bacnetConfig, port: parseInt(e.target.value) || 47808 })}
+            />
+          </FormField>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button
+            onClick={() => saveSection('integrations_bacnet', bacnetConfig)}
+            disabled={saving}
+            className="btn-primary text-sm flex items-center gap-1.5"
+          >
+            <Save className="w-3.5 h-3.5" />
+            {saved === 'integrations_bacnet' ? 'Gespeichert!' : 'Speichern'}
           </button>
         </div>
       </div>

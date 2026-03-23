@@ -4,6 +4,7 @@ import { Network } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
 import { useSiteHierarchy } from '@/hooks/useSiteHierarchy';
+import DiscoveryModal from '@/components/DiscoveryModal';
 
 // ── Typen ──
 
@@ -45,6 +46,11 @@ interface MeterForm {
   source_config_mode: string;
   source_config_register: string;
   source_config_entity_id: string;
+  source_config_mqtt_topic: string;
+  source_config_mqtt_broker: string;
+  source_config_bacnet_device: string;
+  source_config_bacnet_object_type: string;
+  source_config_bacnet_object_instance: string;
   parent_meter_id: string;
   virtual_type: string;
   virtual_source_meter_id: string;
@@ -69,6 +75,11 @@ const emptyForm: MeterForm = {
   source_config_mode: 'single',
   source_config_register: '',
   source_config_entity_id: '',
+  source_config_mqtt_topic: '',
+  source_config_mqtt_broker: '',
+  source_config_bacnet_device: '',
+  source_config_bacnet_object_type: 'analogInput',
+  source_config_bacnet_object_instance: '0',
   virtual_type: 'difference',
   virtual_source_meter_id: '',
   virtual_subtract_meter_ids: [],
@@ -81,6 +92,8 @@ const DATA_SOURCES: Record<string, string> = {
   modbus: 'Modbus',
   knx: 'KNX',
   homeassistant: 'Home Assistant',
+  mqtt: 'MQTT',
+  bacnet: 'BACnet',
   virtual: 'Virtuell (berechnet)',
 };
 
@@ -93,6 +106,9 @@ export default function MetersPage() {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [loading, setLoading] = useState(true);
+
+  // Discovery-Modal
+  const [showDiscovery, setShowDiscovery] = useState(false);
 
   // Modal-State
   const [showModal, setShowModal] = useState(false);
@@ -160,6 +176,11 @@ export default function MetersPage() {
       source_config_mode: (cfg.mode as string) || 'single',
       source_config_register: (cfg.register?.toString()) || '',
       source_config_entity_id: (cfg.entity_id as string) || '',
+      source_config_mqtt_topic: (cfg.topic as string) || '',
+      source_config_mqtt_broker: (cfg.broker_host as string) || '',
+      source_config_bacnet_device: (cfg.device_address as string) || '',
+      source_config_bacnet_object_type: (cfg.object_type as string) || 'analogInput',
+      source_config_bacnet_object_instance: (cfg.object_instance?.toString()) || '0',
       virtual_type: (vcfg.type as string) || 'difference',
       virtual_source_meter_id: (vcfg.source_meter_id as string) || '',
       virtual_subtract_meter_ids: (vcfg.subtract_meter_ids as string[]) || [],
@@ -202,6 +223,13 @@ export default function MetersPage() {
       if (form.source_config_register) source_config.register = parseInt(form.source_config_register);
     } else if (form.data_source === 'homeassistant') {
       if (form.source_config_entity_id) source_config.entity_id = form.source_config_entity_id;
+    } else if (form.data_source === 'mqtt') {
+      if (form.source_config_mqtt_broker) source_config.broker_host = form.source_config_mqtt_broker;
+      if (form.source_config_mqtt_topic) source_config.topic = form.source_config_mqtt_topic;
+    } else if (form.data_source === 'bacnet') {
+      if (form.source_config_bacnet_device) source_config.device_address = form.source_config_bacnet_device;
+      source_config.object_type = form.source_config_bacnet_object_type;
+      source_config.object_instance = parseInt(form.source_config_bacnet_object_instance) || 0;
     }
 
     // virtual_config zusammenbauen
@@ -327,6 +355,9 @@ export default function MetersPage() {
           </Link>
           <button onClick={handlePollAll} className="btn-secondary" title="Alle Zähler jetzt abfragen">
             Alle abfragen
+          </button>
+          <button onClick={() => setShowDiscovery(true)} className="btn-secondary" title="Integrationen nach Zählern durchsuchen">
+            Geräte entdecken
           </button>
           <button onClick={handleCreate} className="btn-primary">
             + Neuer Zähler
@@ -458,6 +489,15 @@ export default function MetersPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Discovery-Modal */}
+      {showDiscovery && (
+        <DiscoveryModal
+          mode="meter"
+          onClose={() => setShowDiscovery(false)}
+          onCreated={loadMeters}
+        />
       )}
 
       {/* Modal: Zähler erstellen/bearbeiten */}
@@ -689,6 +729,75 @@ function MeterModal({
                   onChange={(e) => setForm({ ...form, source_config_entity_id: e.target.value })}
                   placeholder="sensor.stromzaehler_total"
                 />
+              </div>
+            </div>
+          )}
+
+          {form.data_source === 'mqtt' && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+              <p className="text-sm font-medium text-gray-700 mb-3">MQTT-Konfiguration</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">Broker-Host</label>
+                  <input
+                    type="text"
+                    className="input"
+                    value={form.source_config_mqtt_broker}
+                    onChange={(e) => setForm({ ...form, source_config_mqtt_broker: e.target.value })}
+                    placeholder="z.B. 192.168.1.10"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Leer = globale MQTT-Einstellung</p>
+                </div>
+                <div>
+                  <label className="label">Topic *</label>
+                  <input
+                    type="text"
+                    className="input"
+                    value={form.source_config_mqtt_topic}
+                    onChange={(e) => setForm({ ...form, source_config_mqtt_topic: e.target.value })}
+                    placeholder="z.B. tasmota/sensor/energy/state"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {form.data_source === 'bacnet' && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+              <p className="text-sm font-medium text-gray-700 mb-3">BACnet-Konfiguration</p>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="label">Geräte-Adresse *</label>
+                  <input
+                    type="text"
+                    className="input"
+                    value={form.source_config_bacnet_device}
+                    onChange={(e) => setForm({ ...form, source_config_bacnet_device: e.target.value })}
+                    placeholder="192.168.1.50"
+                  />
+                </div>
+                <div>
+                  <label className="label">Objekttyp</label>
+                  <select
+                    className="input"
+                    value={form.source_config_bacnet_object_type}
+                    onChange={(e) => setForm({ ...form, source_config_bacnet_object_type: e.target.value })}
+                  >
+                    <option value="analogInput">Analog Input</option>
+                    <option value="analogValue">Analog Value</option>
+                    <option value="multiStateInput">Multi-State Input</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Object Instance</label>
+                  <input
+                    type="number"
+                    className="input"
+                    value={form.source_config_bacnet_object_instance}
+                    onChange={(e) => setForm({ ...form, source_config_bacnet_object_instance: e.target.value })}
+                    placeholder="0"
+                  />
+                </div>
               </div>
             </div>
           )}

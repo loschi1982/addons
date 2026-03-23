@@ -157,6 +157,318 @@ async def test_knx_connection(
 
 
 # ---------------------------------------------------------------------------
+# MQTT
+# ---------------------------------------------------------------------------
+
+@router.post("/mqtt/test")
+async def test_mqtt_connection(
+    broker_host: str = Query(..., description="MQTT-Broker Hostname/IP"),
+    port: int = Query(1883),
+    username: str = Query(""),
+    password: str = Query(""),
+    current_user: User = Depends(require_permission("meters", "create")),
+):
+    """Verbindung zu einem MQTT-Broker testen."""
+    from app.integrations.mqtt import MQTTClient
+
+    client = MQTTClient(broker_host, port, username, password)
+    try:
+        connected = await client.check_connection()
+        return {"connected": connected}
+    except Exception as e:
+        return {"connected": False, "error": str(e)}
+
+
+@router.get("/mqtt/discover")
+async def discover_mqtt_sensors(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """MQTT-Sensoren über HA/Tasmota Discovery finden."""
+    from app.integrations.mqtt import MQTTClient
+
+    client = await MQTTClient.from_settings(db)
+    if not client.broker_host:
+        return {"sensors": [], "error": "MQTT nicht konfiguriert"}
+
+    sensors = await client.discover_sensors(timeout=5.0)
+    return {"sensors": sensors, "count": len(sensors)}
+
+
+# ---------------------------------------------------------------------------
+# BACnet
+# ---------------------------------------------------------------------------
+
+@router.post("/bacnet/test")
+async def test_bacnet_connection(
+    current_user: User = Depends(require_permission("meters", "create")),
+    db: AsyncSession = Depends(get_db),
+):
+    """BACnet/IP-Netzwerk testen."""
+    from app.integrations.bacnet import BACnetClient
+
+    client = await BACnetClient.from_settings(db)
+    try:
+        connected = await client.check_connection()
+        return {"connected": connected}
+    except Exception as e:
+        return {"connected": False, "error": str(e)}
+    finally:
+        await client.disconnect()
+
+
+@router.get("/bacnet/discover")
+async def discover_bacnet_devices(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """BACnet-Geräte im Netzwerk finden (Who-Is Broadcast)."""
+    from app.integrations.bacnet import BACnetClient
+
+    client = await BACnetClient.from_settings(db)
+    try:
+        devices = await client.discover_devices(timeout=5.0)
+        return {"devices": devices, "count": len(devices)}
+    except Exception as e:
+        return {"devices": [], "error": str(e)}
+    finally:
+        await client.disconnect()
+
+
+@router.get("/bacnet/device/{device_address}/objects")
+async def list_bacnet_objects(
+    device_address: str,
+    device_id: int = Query(..., description="BACnet Device-ID"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Alle Objekte eines BACnet-Geräts auflisten."""
+    from app.integrations.bacnet import BACnetClient
+
+    client = await BACnetClient.from_settings(db)
+    try:
+        objects = await client.list_objects(device_address, device_id)
+        return {"objects": objects, "count": len(objects)}
+    except Exception as e:
+        return {"objects": [], "error": str(e)}
+    finally:
+        await client.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# Discovery – Alle Integrationen durchsuchen
+# ---------------------------------------------------------------------------
+
+@router.get("/discover")
+async def discover_all_devices(
+    integration: str | None = Query(None, description="Filter: ha, shelly, mqtt, bacnet"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Alle konfigurierten Integrationen nach verfügbaren Sensoren/Zählern durchsuchen.
+
+    Liefert eine kategorisierte Liste aller entdeckten Geräte mit Angabe,
+    ob sie bereits im System konfiguriert sind.
+    """
+    from sqlalchemy import select as sa_select
+
+    from app.models.climate import ClimateSensor
+    from app.models.meter import Meter
+
+    devices: list[dict] = []
+    integrations_scanned: list[str] = []
+
+    # Bereits konfigurierte Entity-IDs laden
+    configured_meter_entities: set[str] = set()
+    configured_climate_entities: set[str] = set()
+
+    meters_result = await db.execute(
+        sa_select(Meter.data_source, Meter.source_config).where(Meter.is_active == True)  # noqa: E712
+    )
+    for ds, sc in meters_result.all():
+        if sc and isinstance(sc, dict):
+            eid = sc.get("entity_id") or sc.get("topic") or sc.get("shelly_host", "")
+            if eid:
+                configured_meter_entities.add(eid)
+
+    climate_result = await db.execute(
+        sa_select(ClimateSensor.ha_entity_id_temp, ClimateSensor.ha_entity_id_humidity)
+        .where(ClimateSensor.is_active == True)  # noqa: E712
+    )
+    for temp_id, hum_id in climate_result.all():
+        if temp_id:
+            configured_climate_entities.add(temp_id)
+        if hum_id:
+            configured_climate_entities.add(hum_id)
+
+    all_configured = configured_meter_entities | configured_climate_entities
+
+    # ── Home Assistant ──
+    if not integration or integration == "ha":
+        try:
+            from app.integrations.homeassistant import HomeAssistantClient
+            ha = await HomeAssistantClient.from_settings(db)
+            if ha.token and ha.base_url:
+                entities = await ha.list_entities(domain="sensor")
+                integrations_scanned.append("homeassistant")
+                for e in entities:
+                    attrs = e
+                    device_class = attrs.get("device_class", "")
+                    unit = attrs.get("unit_of_measurement", "")
+                    cat = _classify_sensor(device_class, unit)
+                    if not cat:
+                        continue
+                    entity_id = attrs.get("entity_id", "")
+                    devices.append({
+                        "integration": "homeassistant",
+                        "entity_id": entity_id,
+                        "name": attrs.get("friendly_name", entity_id),
+                        "category": cat["category"],
+                        "subcategory": device_class,
+                        "energy_type": cat.get("energy_type"),
+                        "unit": unit or "",
+                        "current_value": attrs.get("state"),
+                        "already_configured": entity_id in all_configured,
+                    })
+        except Exception:
+            pass
+
+    # ── MQTT ──
+    if not integration or integration == "mqtt":
+        try:
+            from app.integrations.mqtt import MQTTClient
+            mqtt = await MQTTClient.from_settings(db)
+            if mqtt.broker_host:
+                sensors = await mqtt.discover_sensors(timeout=5.0)
+                integrations_scanned.append("mqtt")
+                for s in sensors:
+                    cat = _classify_sensor(s.get("device_class", ""), s.get("unit", ""))
+                    if not cat:
+                        # Unklassifizierte MQTT-Sensoren trotzdem anzeigen
+                        cat = {"category": "other", "energy_type": None}
+                    topic = s.get("topic", "")
+                    devices.append({
+                        "integration": "mqtt",
+                        "entity_id": topic,
+                        "name": s.get("name", topic),
+                        "category": cat["category"],
+                        "subcategory": s.get("device_class", ""),
+                        "energy_type": cat.get("energy_type"),
+                        "unit": s.get("unit", ""),
+                        "current_value": None,
+                        "device_name": s.get("device_name", ""),
+                        "already_configured": topic in all_configured,
+                    })
+        except Exception:
+            pass
+
+    # ── BACnet ──
+    if not integration or integration == "bacnet":
+        try:
+            from app.integrations.bacnet import BACnetClient
+            bacnet = await BACnetClient.from_settings(db)
+            bac_devices = await bacnet.discover_devices(timeout=5.0)
+            integrations_scanned.append("bacnet")
+            for dev in bac_devices:
+                try:
+                    objects = await bacnet.list_objects(dev["address"], dev["device_id"])
+                    for obj in objects:
+                        cat = _classify_sensor("", obj.get("unit", ""))
+                        if not cat:
+                            cat = {"category": "other", "energy_type": None}
+                        obj_ref = f"bacnet://{dev['address']}/{obj['object_id']}"
+                        devices.append({
+                            "integration": "bacnet",
+                            "entity_id": obj_ref,
+                            "name": obj.get("name", obj["object_id"]),
+                            "category": cat["category"],
+                            "subcategory": obj.get("object_type", ""),
+                            "energy_type": cat.get("energy_type"),
+                            "unit": obj.get("unit", ""),
+                            "current_value": obj.get("value"),
+                            "device_name": dev.get("name", ""),
+                            "already_configured": obj_ref in all_configured,
+                        })
+                except Exception:
+                    pass
+            await bacnet.disconnect()
+        except Exception:
+            pass
+
+    # ── Shelly ──
+    if not integration or integration == "shelly":
+        # Shelly-Hosts aus bestehenden Zählern scannen
+        try:
+            from app.integrations.shelly import ShellyClient
+            shelly_hosts: set[str] = set()
+            for sc in [m.source_config for m in (await db.execute(
+                sa_select(Meter).where(Meter.data_source == "shelly", Meter.is_active == True)  # noqa: E712
+            )).scalars().all()]:
+                if sc:
+                    host = sc.get("shelly_host", sc.get("ip", ""))
+                    if host:
+                        shelly_hosts.add(host)
+            if shelly_hosts:
+                integrations_scanned.append("shelly")
+            for host in shelly_hosts:
+                try:
+                    client = ShellyClient(host)
+                    info = await client.get_device_info()
+                    energy = await client.get_energy()
+                    devices.append({
+                        "integration": "shelly",
+                        "entity_id": host,
+                        "name": info.get("name") or f"Shelly {info.get('model', '')} ({host})",
+                        "category": "meter",
+                        "subcategory": "energy",
+                        "energy_type": "electricity",
+                        "unit": "W",
+                        "current_value": energy.get("power"),
+                        "device_name": info.get("model", ""),
+                        "already_configured": host in all_configured,
+                    })
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    return {
+        "devices": devices,
+        "integrations_scanned": integrations_scanned,
+        "total": len(devices),
+    }
+
+
+def _classify_sensor(device_class: str, unit: str) -> dict | None:
+    """Sensor nach device_class oder Einheit klassifizieren."""
+    dc = (device_class or "").lower()
+    u = (unit or "").lower()
+
+    # Energiezähler
+    if dc in ("energy", "gas", "water") or u in ("kwh", "wh", "mwh", "m³"):
+        energy_map = {"energy": "electricity", "gas": "gas", "water": "water"}
+        etype = energy_map.get(dc)
+        if not etype:
+            etype = "gas" if "m³" in u and dc != "water" else "electricity"
+        return {"category": "meter", "energy_type": etype}
+
+    # Leistung
+    if dc in ("power", "current", "voltage") or u in ("w", "kw", "a", "v"):
+        return {"category": "meter", "energy_type": "electricity"}
+
+    # Klima
+    if dc in ("temperature",) or u in ("°c", "°f"):
+        return {"category": "climate", "energy_type": None}
+    if dc in ("humidity",) or (u == "%" and dc == "humidity"):
+        return {"category": "climate", "energy_type": None}
+    if dc in ("pressure",) or u in ("hpa", "pa", "bar", "mbar"):
+        return {"category": "climate", "energy_type": None}
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Manuelles Polling
 # ---------------------------------------------------------------------------
 

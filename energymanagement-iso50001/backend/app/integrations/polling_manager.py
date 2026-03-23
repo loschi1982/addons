@@ -26,7 +26,7 @@ from app.models.reading import MeterReading
 logger = structlog.get_logger()
 
 # Datenquellen die automatisch abgefragt werden
-AUTO_SOURCES = {"shelly", "modbus", "knx", "homeassistant"}
+AUTO_SOURCES = {"shelly", "modbus", "knx", "homeassistant", "mqtt", "bacnet"}
 
 
 class PollingManager:
@@ -123,6 +123,8 @@ class PollingManager:
             "modbus": self._poll_modbus,
             "knx": self._poll_knx,
             "homeassistant": self._poll_ha_entity,
+            "mqtt": self._poll_mqtt,
+            "bacnet": self._poll_bacnet,
         }
 
         handler = dispatch.get(meter.data_source)
@@ -228,6 +230,58 @@ class PollingManager:
             return self._error_result(meter, f"Kein numerischer Wert von {entity_id}")
 
         return await self._save_reading(meter, value, "homeassistant")
+
+    async def _poll_mqtt(self, meter: Meter) -> dict:
+        """MQTT-Topic abfragen und Reading speichern."""
+        from app.integrations.mqtt import MQTTClient
+
+        config = meter.source_config or {}
+        broker = config.get("broker_host", config.get("host", ""))
+        topic = config.get("topic", "")
+
+        if not broker or not topic:
+            return self._error_result(meter, "MQTT-Broker oder Topic nicht konfiguriert")
+
+        client = MQTTClient(
+            broker_host=broker,
+            port=config.get("port", 1883),
+            username=config.get("username", ""),
+            password=config.get("password", ""),
+        )
+        value = await client.read_value(topic, timeout=config.get("timeout", 5.0))
+
+        if value is None:
+            return self._error_result(meter, f"Kein numerischer Wert von Topic {topic}")
+
+        return await self._save_reading(meter, value, "mqtt")
+
+    async def _poll_bacnet(self, meter: Meter) -> dict:
+        """BACnet-Objekt abfragen und Reading speichern."""
+        from app.integrations.bacnet import BACnetClient
+
+        config = meter.source_config or {}
+        device_address = config.get("device_address", config.get("host", ""))
+        object_type = config.get("object_type", "analogInput")
+        object_instance = config.get("object_instance", 0)
+
+        if not device_address:
+            return self._error_result(meter, "BACnet-Geräteadresse nicht konfiguriert")
+
+        client = BACnetClient(
+            interface=config.get("interface"),
+            port=config.get("port", 47808),
+        )
+        try:
+            value = await client.read_property(
+                device_address, object_type, object_instance
+            )
+            if value is None:
+                return self._error_result(
+                    meter, f"Kein Wert von {device_address} {object_type},{object_instance}"
+                )
+            return await self._save_reading(meter, value, "bacnet")
+        finally:
+            await client.disconnect()
 
     async def _save_reading(
         self, meter: Meter, value: Decimal, source: str
