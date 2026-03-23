@@ -5,7 +5,9 @@
       "Bash(npx tsc:*)",
       "Bash(npm run:*)",
       "Read(//home/rico/.nvm/versions/node/**)",
-      "Read(//usr/local/bin/**)"
+      "Read(//usr/local/bin/**)",
+      "Bash(grep -r data_source /home/rico/addons/energymanagement-iso50001/backend/seed_data --include=*.json)",
+      "Bash(git add:*)"
     ]
   }
 }
