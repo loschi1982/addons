@@ -59,8 +59,11 @@ class AnalyticsService:
 
         Granularity: hourly, daily, weekly, monthly, yearly
         """
-        # Zähler ermitteln
-        meter_query = select(Meter).where(Meter.is_active == True)  # noqa: E712
+        # Zähler ermitteln (Einspeisezähler ausschließen)
+        meter_query = select(Meter).where(
+            Meter.is_active == True,  # noqa: E712
+            Meter.is_feed_in != True,
+        )
         if meter_ids:
             meter_query = meter_query.where(Meter.id.in_(meter_ids))
         if energy_type:
@@ -133,14 +136,28 @@ class AnalyticsService:
 
     async def get_comparison(
         self,
-        meter_ids: list[uuid.UUID],
-        period1_start: date,
-        period1_end: date,
-        period2_start: date,
-        period2_end: date,
+        meter_ids: list[uuid.UUID] | None = None,
+        energy_type: str | None = None,
+        period1_start: date = None,
+        period1_end: date = None,
+        period2_start: date = None,
+        period2_end: date = None,
         granularity: str = "monthly",
     ) -> dict:
         """Zwei Zeiträume vergleichen (z.B. Jahr-zu-Jahr)."""
+        # Wenn energy_type gesetzt, Zähler automatisch ermitteln
+        if not meter_ids and energy_type:
+            meter_query = select(Meter.id).where(
+                Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,
+                Meter.parent_meter_id.is_(None),
+                Meter.energy_type == energy_type,
+            )
+            result = await self.db.execute(meter_query)
+            meter_ids = [row[0] for row in result.all()]
+        if not meter_ids:
+            return {"period1": {"start": "", "end": "", "data": {}}, "period2": {"start": "", "end": "", "data": {}}}
+
         async def _aggregate(start: date, end: date) -> dict[str, list]:
             result = {}
             for mid in meter_ids:
@@ -216,6 +233,8 @@ class AnalyticsService:
             .join(MeterReading, MeterReading.meter_id == Meter.id)
             .where(
                 Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
+                Meter.parent_meter_id.is_(None),  # Keine Unterzähler-Doppelzählung
                 MeterReading.timestamp >= datetime.combine(
                     start_date, datetime.min.time(), tzinfo=timezone.utc
                 ),
@@ -228,22 +247,29 @@ class AnalyticsService:
         result = await self.db.execute(query)
         rows = result.all()
 
-        # In kWh umrechnen und pro Gruppe summieren
-        groups: dict[str, float] = {}
+        # In kWh umrechnen und pro Gruppe summieren + Originalwerte tracken
+        groups: dict[str, dict] = {}
         for row in rows:
             label = row.group or "Unbekannt"
+            raw = row.consumption or Decimal("0")
             conv = CONVERSION_FACTORS.get(row.unit, Decimal("1"))
-            kwh = float((row.consumption or Decimal("0")) * conv)
-            groups[label] = groups.get(label, 0) + kwh
+            kwh = float(raw * conv)
+            if label not in groups:
+                groups[label] = {"kwh": 0.0, "original_value": 0.0, "original_unit": row.unit}
+            groups[label]["kwh"] += kwh
+            if groups[label]["original_unit"] == row.unit:
+                groups[label]["original_value"] += float(raw)
 
-        total = sum(groups.values())
+        total = sum(g["kwh"] for g in groups.values())
         return [
             {
                 "label": label,
-                "value": value,
-                "share_percent": round(value / total * 100, 1) if total > 0 else 0,
+                "value": info["kwh"],
+                "original_value": info["original_value"],
+                "original_unit": info["original_unit"],
+                "share_percent": round(info["kwh"] / total * 100, 1) if total > 0 else 0,
             }
-            for label, value in sorted(groups.items(), key=lambda x: -x[1])
+            for label, info in sorted(groups.items(), key=lambda x: -x[1]["kwh"])
         ]
 
     # ── Heatmap (Wochentag × Stunde) ──
@@ -585,6 +611,7 @@ class AnalyticsService:
             .outerjoin(Site, Site.id == Building.site_id)
             .where(
                 Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
                 MeterReading.timestamp >= ts_start,
                 MeterReading.timestamp < ts_end,
             )
@@ -741,7 +768,10 @@ class AnalyticsService:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
         meters_result = await self.db.execute(
-            select(Meter).where(Meter.is_active == True)  # noqa: E712
+            select(Meter).where(
+                Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
+            )
         )
         meters = list(meters_result.scalars().all())
 
@@ -800,3 +830,213 @@ class AnalyticsService:
                 })
 
         return sorted(anomalies, key=lambda x: -x["deviation_sigma"])
+
+    # ── Eigenverbrauch & Autarkiegrad ──
+
+    async def get_self_consumption_trend(
+        self,
+        start_date: date,
+        end_date: date,
+        granularity: str = "monthly",
+    ) -> list[dict]:
+        """Monatliche Eigenverbrauch- und Autarkiegrad-Zeitreihe."""
+        trunc_map = {"daily": "day", "weekly": "week", "monthly": "month", "yearly": "year"}
+        trunc = trunc_map.get(granularity, "month")
+
+        # PV-Produktion pro Periode (Einspeisezähler)
+        pv_query = (
+            select(
+                func.date_trunc(trunc, MeterReading.timestamp).label("period"),
+                Meter.unit,
+                func.sum(MeterReading.consumption).label("production"),
+            )
+            .join(MeterReading, MeterReading.meter_id == Meter.id)
+            .where(
+                Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in == True,
+                MeterReading.timestamp >= datetime.combine(
+                    start_date, datetime.min.time(), tzinfo=timezone.utc
+                ),
+                MeterReading.timestamp < datetime.combine(
+                    end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+                ),
+            )
+            .group_by(text("period"), Meter.unit)
+            .order_by(text("period"))
+        )
+        pv_result = await self.db.execute(pv_query)
+        pv_rows = pv_result.all()
+
+        # PV pro Periode in kWh aggregieren
+        pv_by_period: dict[str, float] = {}
+        for row in pv_rows:
+            key = row.period.isoformat() if row.period else ""
+            conv = CONVERSION_FACTORS.get(row.unit, Decimal("1"))
+            pv_by_period[key] = pv_by_period.get(key, 0) + abs(float((row.production or Decimal("0")) * conv))
+
+        # Gesamtverbrauch pro Periode (ohne Einspeisung, ohne Unterzähler)
+        consumption_query = (
+            select(
+                func.date_trunc(trunc, MeterReading.timestamp).label("period"),
+                Meter.unit,
+                func.sum(MeterReading.consumption).label("consumption"),
+            )
+            .join(MeterReading, MeterReading.meter_id == Meter.id)
+            .where(
+                Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,
+                Meter.parent_meter_id.is_(None),
+                MeterReading.timestamp >= datetime.combine(
+                    start_date, datetime.min.time(), tzinfo=timezone.utc
+                ),
+                MeterReading.timestamp < datetime.combine(
+                    end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+                ),
+            )
+            .group_by(text("period"), Meter.unit)
+            .order_by(text("period"))
+        )
+        cons_result = await self.db.execute(consumption_query)
+        cons_rows = cons_result.all()
+
+        cons_by_period: dict[str, float] = {}
+        for row in cons_rows:
+            key = row.period.isoformat() if row.period else ""
+            conv = CONVERSION_FACTORS.get(row.unit, Decimal("1"))
+            cons_by_period[key] = cons_by_period.get(key, 0) + float((row.consumption or Decimal("0")) * conv)
+
+        # Zusammenführen
+        all_periods = sorted(set(list(pv_by_period.keys()) + list(cons_by_period.keys())))
+        series = []
+        for period in all_periods:
+            if not period:
+                continue
+            pv_kwh = pv_by_period.get(period, 0)
+            cons_kwh = cons_by_period.get(period, 0)
+            autarky = min(pv_kwh / cons_kwh * 100, 100) if cons_kwh > 0 else 0
+            series.append({
+                "period": period,
+                "production_kwh": round(pv_kwh, 1),
+                "consumption_kwh": round(cons_kwh, 1),
+                "self_consumption_kwh": round(min(pv_kwh, cons_kwh), 1),
+                "autarky_percent": round(autarky, 1),
+            })
+
+        return series
+
+    # ── Jahresdauerlinie ──
+
+    async def get_load_duration_curve(
+        self,
+        meter_id: uuid.UUID,
+        year: int | None = None,
+    ) -> dict:
+        """Jahresdauerlinie: Alle Verbrauchswerte eines Zählers absteigend sortiert."""
+        if not year:
+            year = date.today().year
+        start = datetime.combine(date(year, 1, 1), datetime.min.time(), tzinfo=timezone.utc)
+        end = datetime.combine(date(year + 1, 1, 1), datetime.min.time(), tzinfo=timezone.utc)
+
+        meter = await self.db.get(Meter, meter_id)
+        if not meter:
+            return {"meter_id": str(meter_id), "year": year, "data": []}
+
+        query = (
+            select(MeterReading.consumption)
+            .where(
+                MeterReading.meter_id == meter_id,
+                MeterReading.timestamp >= start,
+                MeterReading.timestamp < end,
+                MeterReading.consumption.isnot(None),
+                MeterReading.consumption > 0,
+            )
+            .order_by(MeterReading.consumption.desc())
+        )
+        result = await self.db.execute(query)
+        values = [float(row[0]) for row in result.all()]
+
+        conv = float(CONVERSION_FACTORS.get(meter.unit, Decimal("1")))
+        return {
+            "meter_id": str(meter_id),
+            "meter_name": meter.name,
+            "year": year,
+            "unit": "kWh",
+            "data": [
+                {"index": i, "value": round(v * conv, 2)}
+                for i, v in enumerate(values)
+            ],
+        }
+
+    # ── Summenlinie ──
+
+    async def get_cumulative(
+        self,
+        meter_ids: list[uuid.UUID] | None = None,
+        energy_type: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[dict]:
+        """Kumulative Verbrauchslinie pro Zähler."""
+        meter_query = select(Meter).where(
+            Meter.is_active == True,  # noqa: E712
+            Meter.is_feed_in != True,
+            Meter.parent_meter_id.is_(None),
+        )
+        if meter_ids:
+            meter_query = meter_query.where(Meter.id.in_(meter_ids))
+        if energy_type:
+            meter_query = meter_query.where(Meter.energy_type == energy_type)
+        meters_result = await self.db.execute(meter_query)
+        meters = list(meters_result.scalars().all())
+
+        if not meters:
+            return []
+
+        series = []
+        for meter in meters:
+            query = (
+                select(
+                    MeterReading.timestamp,
+                    MeterReading.consumption,
+                )
+                .where(
+                    MeterReading.meter_id == meter.id,
+                    MeterReading.consumption.isnot(None),
+                )
+                .order_by(MeterReading.timestamp)
+            )
+            if start_date:
+                query = query.where(
+                    MeterReading.timestamp >= datetime.combine(
+                        start_date, datetime.min.time(), tzinfo=timezone.utc
+                    )
+                )
+            if end_date:
+                query = query.where(
+                    MeterReading.timestamp < datetime.combine(
+                        end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+                    )
+                )
+
+            result = await self.db.execute(query)
+            rows = result.all()
+
+            conv = float(CONVERSION_FACTORS.get(meter.unit, Decimal("1")))
+            cumulative = 0.0
+            data_points = []
+            for row in rows:
+                cumulative += float(row.consumption or 0) * conv
+                data_points.append({
+                    "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                    "value": round(cumulative, 1),
+                })
+
+            series.append({
+                "meter_id": str(meter.id),
+                "meter_name": meter.name,
+                "energy_type": meter.energy_type,
+                "unit": "kWh",
+                "data": data_points,
+            })
+
+        return series

@@ -19,6 +19,30 @@ BRIGHT_SKY_BASE_URL = "https://api.brightsky.dev"
 class BrightSkyClient:
     """Client für die Bright Sky API (DWD-Wetterdaten)."""
 
+    def __init__(self, base_url: str = ""):
+        self.base_url = base_url.rstrip("/") if base_url else BRIGHT_SKY_BASE_URL
+
+    @classmethod
+    async def from_settings(cls, db) -> "BrightSkyClient":
+        """Client aus DB-Settings erstellen."""
+        from app.services.settings_service import SettingsService
+        svc = SettingsService(db)
+        cfg = await svc.get("integrations_weather")
+        if cfg and cfg.get("value"):
+            val = cfg["value"]
+            if val.get("base_url"):
+                return cls(base_url=val["base_url"])
+        return cls()
+
+    async def check_connection(self) -> bool:
+        """Verbindung zur BrightSky API testen."""
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(f"{self.base_url}/weather", params={
+                "dwd_station_id": "01766",  # Dresden-Klotzsche als Test
+                "date": "2024-01-01", "last_date": "2024-01-01",
+            })
+            return response.status_code == 200
+
     async def get_weather(
         self,
         dwd_station_id: str,
@@ -34,7 +58,7 @@ class BrightSkyClient:
         """
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(
-                f"{BRIGHT_SKY_BASE_URL}/weather",
+                f"{self.base_url}/weather",
                 params={
                     "dwd_station_id": dwd_station_id,
                     "date": start_date.isoformat(),
@@ -51,7 +75,7 @@ class BrightSkyClient:
         """Nächste DWD-Station zu gegebenen Koordinaten finden."""
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(
-                f"{BRIGHT_SKY_BASE_URL}/current_weather",
+                f"{self.base_url}/current_weather",
                 params={"lat": str(latitude), "lon": str(longitude)},
             )
             response.raise_for_status()

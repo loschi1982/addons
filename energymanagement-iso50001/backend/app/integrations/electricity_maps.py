@@ -21,10 +21,35 @@ ELECTRICITY_MAPS_BASE_URL = "https://api.electricitymap.org/v3"
 class ElectricityMapsClient:
     """Client für die Electricity Maps API."""
 
-    def __init__(self):
-        settings = get_settings()
-        self.api_key = settings.electricity_maps_api_key
+    def __init__(self, api_key: str = ""):
+        if api_key:
+            self.api_key = api_key
+        else:
+            settings = get_settings()
+            self.api_key = settings.electricity_maps_api_key
         self.headers = {"auth-token": self.api_key} if self.api_key else {}
+
+    @classmethod
+    async def from_settings(cls, db) -> "ElectricityMapsClient":
+        """Client aus DB-Settings erstellen."""
+        from app.services.settings_service import SettingsService
+        svc = SettingsService(db)
+        cfg = await svc.get("integrations_co2")
+        if cfg and cfg.get("value"):
+            val = cfg["value"]
+            if val.get("api_key"):
+                return cls(api_key=val["api_key"])
+        return cls()
+
+    async def check_connection(self, zone: str = "DE") -> bool:
+        """Verbindung zur Electricity Maps API testen."""
+        if not self.api_key:
+            return False
+        try:
+            result = await self.get_carbon_intensity(zone)
+            return result is not None
+        except Exception:
+            return False
 
     async def get_carbon_intensity(self, zone: str = "DE") -> dict | None:
         """

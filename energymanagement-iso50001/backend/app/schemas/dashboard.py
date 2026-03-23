@@ -32,6 +32,8 @@ class EnergyBreakdown(BaseModel):
     """Verbrauchsaufteilung nach Energieart."""
     energy_type: str
     consumption_kwh: Decimal
+    original_value: Decimal | None = None
+    original_unit: str | None = None
     cost_eur: Decimal | None = None
     co2_kg: Decimal | None = None
     share_percent: Decimal

@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import {
   TrendingUp, TrendingDown, Minus, AlertTriangle, Activity,
-  Zap, Leaf, Euro, Gauge,
+  Zap, Leaf, Euro, Gauge, Sun, BatteryCharging,
 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, ENERGY_TYPE_COLORS } from '@/types';
@@ -25,6 +25,8 @@ interface KPICard {
 interface EnergyBreakdown {
   energy_type: string;
   consumption_kwh: number;
+  original_value?: number;
+  original_unit?: string;
   share_percent: number;
 }
 
@@ -80,6 +82,8 @@ const KPI_ICONS: Record<string, React.ElementType> = {
   'CO₂-Emissionen': Leaf,
   'Energiekosten': Euro,
   'Aktive Zähler': Gauge,
+  'Eigenproduktion': Sun,
+  'Autarkiegrad': BatteryCharging,
 };
 
 const PIE_COLORS = [
@@ -91,7 +95,11 @@ const PIE_COLORS = [
 
 function KPICardComponent({ card }: { card: KPICard }) {
   const Icon = KPI_ICONS[card.label] || Activity;
-  const trendColor = card.trend_direction === 'down' ? 'text-green-600' : card.trend_direction === 'up' ? 'text-red-500' : 'text-gray-400';
+  // Für Eigenproduktion/Autarkiegrad: Anstieg ist positiv (grün)
+  const invertTrend = card.label === 'Eigenproduktion' || card.label === 'Autarkiegrad';
+  const trendColor = invertTrend
+    ? (card.trend_direction === 'up' ? 'text-green-600' : card.trend_direction === 'down' ? 'text-red-500' : 'text-gray-400')
+    : (card.trend_direction === 'down' ? 'text-green-600' : card.trend_direction === 'up' ? 'text-red-500' : 'text-gray-400');
   const TrendIcon = card.trend_direction === 'up' ? TrendingUp : card.trend_direction === 'down' ? TrendingDown : Minus;
 
   return (
@@ -239,7 +247,7 @@ export default function DashboardPage() {
       )}
 
       {/* KPI-Karten */}
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {data.kpi_cards.map((card) => (
           <KPICardComponent key={card.label} card={card} />
         ))}
@@ -306,10 +314,14 @@ export default function DashboardPage() {
                     ))}
                   </Pie>
                   <Tooltip
-                    formatter={(value: number, name: string) => [
-                      `${formatNumber(value)} kWh`,
-                      ENERGY_TYPE_LABELS[name as keyof typeof ENERGY_TYPE_LABELS] || name,
-                    ]}
+                    formatter={(value: number, name: string) => {
+                      const entry = data.energy_breakdown.find(b => b.energy_type === name);
+                      const label = ENERGY_TYPE_LABELS[name as keyof typeof ENERGY_TYPE_LABELS] || name;
+                      if (entry?.original_unit && entry.original_unit !== 'kWh') {
+                        return [`${formatNumber(entry.original_value)} ${entry.original_unit} (${formatNumber(value)} kWh)`, label];
+                      }
+                      return [`${formatNumber(value)} kWh`, label];
+                    }}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -329,7 +341,13 @@ export default function DashboardPage() {
                         {ENERGY_TYPE_LABELS[b.energy_type as keyof typeof ENERGY_TYPE_LABELS] || b.energy_type}
                       </span>
                     </div>
-                    <span className="font-medium text-gray-900">{(Number(b.share_percent) || 0).toFixed(1)}%</span>
+                    <span className="font-medium text-gray-900">
+                      {b.original_unit && b.original_unit !== 'kWh'
+                        ? `${formatNumber(b.original_value)} ${b.original_unit} · `
+                        : ''
+                      }
+                      {(Number(b.share_percent) || 0).toFixed(1)}%
+                    </span>
                   </div>
                 ))}
               </div>

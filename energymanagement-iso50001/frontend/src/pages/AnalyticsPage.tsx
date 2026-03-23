@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area,
-  PieChart, Pie, Cell,
+  ComposedChart, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer,
 } from 'recharts';
 import { RefreshCw } from 'lucide-react';
+import SankeyDiagram from '@/components/charts/SankeyDiagram';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS } from '@/types';
 
@@ -33,6 +34,8 @@ interface TimeSeriesMeter {
 interface DistributionItem {
   label: string;
   value: number;
+  original_value?: number;
+  original_unit?: string;
   share_percent: number;
 }
 
@@ -94,8 +97,11 @@ const TABS = [
   { key: 'timeseries', label: 'Zeitreihen' },
   { key: 'comparison', label: 'Vergleich' },
   { key: 'distribution', label: 'Verteilung' },
+  { key: 'self_consumption', label: 'Eigenverbrauch' },
   { key: 'heatmap', label: 'Heatmap' },
-  { key: 'sankey', label: 'Sankey' },
+  { key: 'sankey', label: 'Energiefluss' },
+  { key: 'duration_curve', label: 'Dauerlinie' },
+  { key: 'cumulative', label: 'Summenlinie' },
   { key: 'weather', label: 'Witterungskorrektur' },
   { key: 'co2path', label: 'CO₂-Pfad' },
   { key: 'anomalies', label: 'Anomalien' },
@@ -169,8 +175,11 @@ export default function AnalyticsPage() {
         {tab === 'timeseries' && <TimeSeriesTab meters={meters} />}
         {tab === 'comparison' && <ComparisonTab meters={meters} />}
         {tab === 'distribution' && <DistributionTab />}
+        {tab === 'self_consumption' && <SelfConsumptionTab />}
         {tab === 'heatmap' && <HeatmapTab meters={meters} />}
         {tab === 'sankey' && <SankeyTab />}
+        {tab === 'duration_curve' && <DurationCurveTab meters={meters} />}
+        {tab === 'cumulative' && <CumulativeTab meters={meters} />}
         {tab === 'weather' && <WeatherCorrectionTab meters={meters} />}
         {tab === 'co2path' && <CO2PathTab />}
         {tab === 'anomalies' && <AnomaliesTab />}
@@ -307,65 +316,105 @@ function TimeSeriesTab({ meters }: { meters: Meter[] }) {
 /* ── Tab: Vergleich ── */
 
 function ComparisonTab({ meters }: { meters: Meter[] }) {
+  const [mode, setMode] = useState<'meter' | 'energy_type'>('energy_type');
   const [selectedMeter, setSelectedMeter] = useState('');
+  const [selectedEnergyType, setSelectedEnergyType] = useState('');
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
   const thisYear = new Date().getFullYear();
 
-  const fetchComparison = async () => {
-    if (!selectedMeter) return;
+  // Verfügbare Energieträger aus Zählern ableiten
+  const energyTypes = [...new Set(meters.map((m) => m.energy_type))];
+
+  const fetchComparison = useCallback(async () => {
+    const params: Record<string, string> = {
+      period1_start: `${thisYear - 1}-01-01`,
+      period1_end: `${thisYear - 1}-12-31`,
+      period2_start: `${thisYear}-01-01`,
+      period2_end: `${thisYear}-12-31`,
+      granularity: 'monthly',
+    };
+    if (mode === 'meter') {
+      if (!selectedMeter) return;
+      params.meter_ids = selectedMeter;
+    } else {
+      if (!selectedEnergyType) return;
+      params.energy_type = selectedEnergyType;
+    }
     setLoading(true);
     try {
-      const res = await apiClient.get('/api/v1/analytics/comparison', {
-        params: {
-          meter_ids: selectedMeter,
-          period1_start: `${thisYear - 1}-01-01`,
-          period1_end: `${thisYear - 1}-12-31`,
-          period2_start: `${thisYear}-01-01`,
-          period2_end: `${thisYear}-12-31`,
-          granularity: 'monthly',
-        },
-      });
+      const res = await apiClient.get('/api/v1/analytics/comparison', { params });
       setData(res.data);
     } catch { /* leer */ }
     setLoading(false);
-  };
+  }, [mode, selectedMeter, selectedEnergyType, thisYear]);
 
-  useEffect(() => { if (selectedMeter) fetchComparison(); }, [selectedMeter]);
+  useEffect(() => { fetchComparison(); }, [fetchComparison]);
 
-  // Vergleichsdaten aufbereiten
+  // Vergleichsdaten aufbereiten – alle Zähler in der Antwort aggregieren
   const chartData: { label: string; vorjahr: number; aktuell: number }[] = [];
   if (data) {
     const p1 = (data.period1 as Record<string, unknown>)?.data as Record<string, { period: string; value: number }[]> | undefined;
     const p2 = (data.period2 as Record<string, unknown>)?.data as Record<string, { period: string; value: number }[]> | undefined;
     if (p1 && p2) {
-      const d1 = p1[selectedMeter] || [];
-      const d2 = p2[selectedMeter] || [];
       const months = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+      // Alle Zähler-Daten pro Monat aggregieren
+      const agg1 = new Array(12).fill(0);
+      const agg2 = new Array(12).fill(0);
+      for (const series of Object.values(p1)) {
+        series.forEach((pt, i) => { if (i < 12) agg1[i] += pt.value || 0; });
+      }
+      for (const series of Object.values(p2)) {
+        series.forEach((pt, i) => { if (i < 12) agg2[i] += pt.value || 0; });
+      }
       for (let i = 0; i < 12; i++) {
-        chartData.push({
-          label: months[i],
-          vorjahr: d1[i]?.value || 0,
-          aktuell: d2[i]?.value || 0,
-        });
+        chartData.push({ label: months[i], vorjahr: agg1[i], aktuell: agg2[i] });
       }
     }
   }
 
+  const selectionLabel = mode === 'energy_type' && selectedEnergyType
+    ? (ENERGY_TYPE_LABELS[selectedEnergyType as keyof typeof ENERGY_TYPE_LABELS] || selectedEnergyType)
+    : '';
+
   return (
     <div>
-      <div className="mb-6">
-        <label className="label">Zähler auswählen</label>
-        <select className="input w-64" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
-          <option value="">— Bitte wählen —</option>
-          {meters.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
-          ))}
-        </select>
+      <div className="flex flex-wrap gap-4 items-end mb-6">
+        <div>
+          <label className="label">Vergleich nach</label>
+          <select className="input w-48" value={mode} onChange={(e) => { setMode(e.target.value as 'meter' | 'energy_type'); setData(null); }}>
+            <option value="energy_type">Energieträger</option>
+            <option value="meter">Einzelner Zähler</option>
+          </select>
+        </div>
+        {mode === 'meter' ? (
+          <div>
+            <label className="label">Zähler auswählen</label>
+            <select className="input w-64" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
+              <option value="">— Bitte wählen —</option>
+              {meters.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div>
+            <label className="label">Energieträger</label>
+            <select className="input w-64" value={selectedEnergyType} onChange={(e) => setSelectedEnergyType(e.target.value)}>
+              <option value="">— Bitte wählen —</option>
+              {energyTypes.map((et) => (
+                <option key={et} value={et}>{ENERGY_TYPE_LABELS[et as keyof typeof ENERGY_TYPE_LABELS] || et}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       <div className="card">
-        <h2 className="mb-4 text-lg font-semibold">Jahresvergleich {thisYear - 1} vs. {thisYear}</h2>
+        <h2 className="mb-4 text-lg font-semibold">
+          Jahresvergleich {thisYear - 1} vs. {thisYear}
+          {selectionLabel && ` – ${selectionLabel}`}
+        </h2>
         {loading ? (
           <div className="flex h-80 items-center justify-center">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
@@ -384,7 +433,9 @@ function ComparisonTab({ meters }: { meters: Meter[] }) {
           </ResponsiveContainer>
         ) : (
           <div className="flex h-80 items-center justify-center text-gray-400">
-            {selectedMeter ? 'Keine Vergleichsdaten vorhanden' : 'Bitte Zähler auswählen'}
+            {(mode === 'meter' && !selectedMeter) || (mode === 'energy_type' && !selectedEnergyType)
+              ? `Bitte ${mode === 'meter' ? 'Zähler' : 'Energieträger'} auswählen`
+              : 'Keine Vergleichsdaten vorhanden'}
           </div>
         )}
       </div>
@@ -459,7 +510,13 @@ function DistributionTab() {
                     <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(val: number) => [`${formatNumber(val)} kWh`, '']} />
+                <Tooltip formatter={(val: number, name: string) => {
+                  const entry = data.find(d => d.label === name);
+                  if (entry?.original_unit && entry.original_unit !== 'kWh') {
+                    return [`${formatNumber(entry.original_value)} ${entry.original_unit} (${formatNumber(val)} kWh)`, ''];
+                  }
+                  return [`${formatNumber(val)} kWh`, ''];
+                }} />
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-3">
@@ -472,7 +529,12 @@ function DistributionTab() {
                     </span>
                   </div>
                   <div className="text-right">
-                    <span className="text-sm font-semibold text-gray-900">{formatNumber(item.value)} kWh</span>
+                    <span className="text-sm font-semibold text-gray-900">
+                      {item.original_unit && item.original_unit !== 'kWh'
+                        ? `${formatNumber(item.original_value)} ${item.original_unit}`
+                        : `${formatNumber(item.value)} kWh`
+                      }
+                    </span>
                     <span className="ml-2 text-xs text-gray-500">({item.share_percent}%)</span>
                   </div>
                 </div>
@@ -620,13 +682,6 @@ function SankeyTab() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const nodeColors: Record<string, string> = {
-    quelle: '#3B82F6',
-    hauptzaehler: '#1B5E7B',
-    unterzaehler: '#10B981',
-    verbraucher: '#F59E0B',
-  };
-
   return (
     <div>
       <div className="flex flex-wrap gap-3 items-end mb-6">
@@ -647,71 +702,8 @@ function SankeyTab() {
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
           </div>
         ) : data && data.nodes.length > 0 ? (
-          <div>
-            {/* Vereinfachte Sankey-Darstellung als Treemap + Link-Tabelle */}
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-              {/* Knoten nach Typ gruppiert */}
-              {['quelle', 'hauptzaehler', 'unterzaehler', 'verbraucher'].map((type) => {
-                const nodesOfType = data.nodes.filter((n) => n.type === type);
-                if (nodesOfType.length === 0) return null;
-                const typeLabels: Record<string, string> = {
-                  quelle: 'Energiequellen',
-                  hauptzaehler: 'Hauptzähler',
-                  unterzaehler: 'Unterzähler',
-                  verbraucher: 'Verbraucher',
-                };
-                return (
-                  <div key={type}>
-                    <h3 className="mb-2 text-sm font-medium text-gray-500">{typeLabels[type]}</h3>
-                    <div className="space-y-1">
-                      {nodesOfType.map((node) => {
-                        // Summe der eingehenden Links
-                        const nodeIdx = data.nodes.indexOf(node);
-                        const inFlow = data.links
-                          .filter((l) => l.target === nodeIdx)
-                          .reduce((s, l) => s + l.value, 0);
-                        const outFlow = data.links
-                          .filter((l) => l.source === nodeIdx)
-                          .reduce((s, l) => s + l.value, 0);
-                        const flow = Math.max(inFlow, outFlow);
-
-                        return (
-                          <div
-                            key={node.id}
-                            className="rounded-lg border p-3"
-                            style={{ borderLeftColor: nodeColors[type], borderLeftWidth: 4 }}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-medium">{node.label}</span>
-                              <span className="text-sm text-gray-500">
-                                {flow > 0 ? `${formatNumber(flow)} kWh` : '–'}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Verbindungen */}
-            {data.links.length > 0 && (
-              <div className="mt-6">
-                <h3 className="mb-2 text-sm font-medium text-gray-500">Energieflüsse</h3>
-                <div className="space-y-1">
-                  {data.links.map((link, idx) => (
-                    <div key={idx} className="flex items-center gap-2 text-sm">
-                      <span className="font-medium text-gray-700">{data.nodes[link.source]?.label}</span>
-                      <span className="text-gray-400">→</span>
-                      <span className="font-medium text-gray-700">{data.nodes[link.target]?.label}</span>
-                      <span className="ml-auto text-gray-500">{formatNumber(link.value)} kWh</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+          <div className="overflow-x-auto">
+            <SankeyDiagram nodes={data.nodes} links={data.links} width={800} height={450} />
           </div>
         ) : (
           <div className="flex h-80 items-center justify-center text-gray-400">
@@ -978,6 +970,265 @@ function AnomaliesTab() {
         ) : (
           <div className="flex h-40 items-center justify-center text-gray-400">
             Keine Anomalien erkannt
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Tab: Eigenverbrauch & Autarkiegrad ── */
+
+interface SelfConsumptionPoint {
+  period: string;
+  production_kwh: number;
+  consumption_kwh: number;
+  self_consumption_kwh: number;
+  autarky_percent: number;
+}
+
+function SelfConsumptionTab() {
+  const [data, setData] = useState<SelfConsumptionPoint[]>([]);
+  const [startDate, setStartDate] = useState(yearStart());
+  const [endDate, setEndDate] = useState(today());
+  const [granularity, setGranularity] = useState('monthly');
+  const [loading, setLoading] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiClient.get('/api/v1/analytics/self-consumption', {
+        params: { start_date: startDate, end_date: endDate, granularity },
+      });
+      setData(res.data);
+    } catch { /* leer */ }
+    setLoading(false);
+  }, [startDate, endDate, granularity]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const chartData = data.map((d) => ({
+    label: formatDate(d.period),
+    eigenverbrauch: d.self_consumption_kwh,
+    produktion: d.production_kwh,
+    autarkiegrad: d.autarky_percent,
+  }));
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-3 items-end mb-6">
+        <div>
+          <label className="label">Von</label>
+          <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        </div>
+        <div>
+          <label className="label">Bis</label>
+          <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        </div>
+        <div>
+          <label className="label">Granularität</label>
+          <select className="input" value={granularity} onChange={(e) => setGranularity(e.target.value)}>
+            <option value="daily">Täglich</option>
+            <option value="weekly">Wöchentlich</option>
+            <option value="monthly">Monatlich</option>
+            <option value="yearly">Jährlich</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2 className="mb-4 text-lg font-semibold">Eigenverbrauch & Autarkiegrad</h2>
+        {loading ? (
+          <div className="flex h-80 items-center justify-center">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
+          </div>
+        ) : chartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={400}>
+            <ComposedChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+              <YAxis yAxisId="kwh" tick={{ fontSize: 12 }} />
+              <YAxis yAxisId="pct" orientation="right" domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
+              <Tooltip
+                formatter={(value: number, name: string) => {
+                  if (name === 'Autarkiegrad') return [`${value.toFixed(1)}%`, name];
+                  return [`${formatNumber(value)} kWh`, name];
+                }}
+              />
+              <Legend />
+              <Bar yAxisId="kwh" dataKey="produktion" name="PV-Produktion" fill="#F59E0B" radius={[4, 4, 0, 0]} />
+              <Bar yAxisId="kwh" dataKey="eigenverbrauch" name="Eigenverbrauch" fill="#10B981" radius={[4, 4, 0, 0]} />
+              <Line yAxisId="pct" dataKey="autarkiegrad" name="Autarkiegrad" stroke="#1B5E7B" strokeWidth={2} dot={{ r: 3 }} type="monotone" />
+            </ComposedChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="flex h-80 items-center justify-center text-gray-400">
+            Keine PV-/Einspeisedaten vorhanden
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Tab: Jahresdauerlinie ── */
+
+function DurationCurveTab({ meters }: { meters: Meter[] }) {
+  const [selectedMeter, setSelectedMeter] = useState('');
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [data, setData] = useState<{ index: number; value: number }[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    if (!selectedMeter) return;
+    setLoading(true);
+    try {
+      const res = await apiClient.get('/api/v1/analytics/duration-curve', {
+        params: { meter_id: selectedMeter, year },
+      });
+      setData(res.data.data || []);
+    } catch { /* leer */ }
+    setLoading(false);
+  }, [selectedMeter, year]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-3 items-end mb-6">
+        <div>
+          <label className="label">Zähler</label>
+          <select className="input" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
+            <option value="">Bitte wählen…</option>
+            {meters.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="label">Jahr</label>
+          <input type="number" className="input w-24" value={year} onChange={(e) => setYear(Number(e.target.value))} />
+        </div>
+      </div>
+
+      <div className="card">
+        <h2 className="mb-4 text-lg font-semibold">Jahresdauerlinie</h2>
+        {loading ? (
+          <div className="flex h-80 items-center justify-center">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
+          </div>
+        ) : data.length > 0 ? (
+          <ResponsiveContainer width="100%" height={400}>
+            <AreaChart data={data}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="index" tick={{ fontSize: 11 }} label={{ value: 'Stunden', position: 'insideBottom', offset: -5 }} />
+              <YAxis tick={{ fontSize: 12 }} label={{ value: 'kWh', angle: -90, position: 'insideLeft' }} />
+              <Tooltip formatter={(val: number) => [`${formatNumber(val)} kWh`, 'Verbrauch']} />
+              <Area type="monotone" dataKey="value" stroke="#1B5E7B" fill="#1B5E7B" fillOpacity={0.2} />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="flex h-80 items-center justify-center text-gray-400">
+            {selectedMeter ? 'Keine Daten vorhanden' : 'Bitte Zähler auswählen'}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Tab: Summenlinie (Kumulativer Verbrauch) ── */
+
+function CumulativeTab({ meters }: { meters: Meter[] }) {
+  const [selectedMeters, setSelectedMeters] = useState<string[]>([]);
+  const [startDate, setStartDate] = useState(yearStart());
+  const [endDate, setEndDate] = useState(today());
+  const [data, setData] = useState<TimeSeriesMeter[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    if (selectedMeters.length === 0) return;
+    setLoading(true);
+    try {
+      const res = await apiClient.get('/api/v1/analytics/cumulative', {
+        params: { meter_ids: selectedMeters.join(','), start_date: startDate, end_date: endDate },
+      });
+      setData(res.data);
+    } catch { /* leer */ }
+    setLoading(false);
+  }, [selectedMeters, startDate, endDate]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Daten für Chart kombinieren
+  const chartData: Record<string, number | string>[] = [];
+  if (data.length > 0) {
+    const maxLen = Math.max(...data.map((s) => s.data.length));
+    for (let i = 0; i < maxLen; i++) {
+      const row: Record<string, number | string> = { label: '' };
+      data.forEach((s) => {
+        if (s.data[i]) {
+          row.label = formatDate(s.data[i].timestamp);
+          row[s.meter_name] = s.data[i].value;
+        }
+      });
+      chartData.push(row);
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-3 items-end mb-6">
+        <div>
+          <label className="label">Zähler (Mehrfachauswahl)</label>
+          <select
+            className="input"
+            multiple
+            size={4}
+            value={selectedMeters}
+            onChange={(e) => setSelectedMeters(Array.from(e.target.selectedOptions, (o) => o.value))}
+          >
+            {meters.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="label">Von</label>
+          <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        </div>
+        <div>
+          <label className="label">Bis</label>
+          <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        </div>
+      </div>
+
+      <div className="card">
+        <h2 className="mb-4 text-lg font-semibold">Kumulativer Verbrauch</h2>
+        {loading ? (
+          <div className="flex h-80 items-center justify-center">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
+          </div>
+        ) : chartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={400}>
+            <AreaChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 12 }} />
+              <Tooltip formatter={(val: number) => [`${formatNumber(val)} kWh`, '']} />
+              <Legend />
+              {data.map((s, idx) => (
+                <Area
+                  key={s.meter_id}
+                  type="monotone"
+                  dataKey={s.meter_name}
+                  stroke={CHART_COLORS[idx % CHART_COLORS.length]}
+                  fill={CHART_COLORS[idx % CHART_COLORS.length]}
+                  fillOpacity={0.15}
+                  strokeWidth={2}
+                />
+              ))}
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="flex h-80 items-center justify-center text-gray-400">
+            {selectedMeters.length > 0 ? 'Keine Daten vorhanden' : 'Bitte Zähler auswählen'}
           </div>
         )}
       </div>

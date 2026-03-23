@@ -65,6 +65,38 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         "description": "Benachrichtigungseinstellungen",
         "category": "notifications",
     },
+    "integrations_ha": {
+        "value": {
+            "base_url": "",
+            "access_token": "",
+            "auth_enabled": False,
+            "default_role": "viewer",
+        },
+        "description": "Home Assistant Verbindungseinstellungen",
+        "category": "integrations",
+    },
+    "integrations_weather": {
+        "value": {
+            "enabled": True,
+            "provider": "brightsky",
+            "base_url": "https://api.brightsky.dev",
+            "station_id": "",
+            "latitude": None,
+            "longitude": None,
+        },
+        "description": "Wetterdaten-Integration (BrightSky / DWD)",
+        "category": "integrations",
+    },
+    "integrations_co2": {
+        "value": {
+            "enabled": False,
+            "provider": "electricity_maps",
+            "api_key": "",
+            "zone": "DE",
+        },
+        "description": "CO₂-Intensität (Electricity Maps)",
+        "category": "integrations",
+    },
 }
 
 

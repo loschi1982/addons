@@ -64,3 +64,52 @@ async def clear_cache(
     """Alle Caches leeren."""
     deleted = await cache_delete("*")
     return {"message": f"{deleted} Cache-Einträge gelöscht"}
+
+
+@router.post("/integrations/test/ha")
+async def test_ha_integration(
+    current_user: User = Depends(require_permission("settings", "update")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Home Assistant Verbindung testen."""
+    from app.integrations.homeassistant import HomeAssistantClient
+    try:
+        client = await HomeAssistantClient.from_settings(db)
+        ok = await client.check_connection()
+        return {"success": ok, "message": "Verbindung erfolgreich" if ok else "Verbindung fehlgeschlagen"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+@router.post("/integrations/test/weather")
+async def test_weather_integration(
+    current_user: User = Depends(require_permission("settings", "update")),
+    db: AsyncSession = Depends(get_db),
+):
+    """BrightSky Wetter-API testen."""
+    from app.integrations.bright_sky import BrightSkyClient
+    try:
+        client = await BrightSkyClient.from_settings(db)
+        ok = await client.check_connection()
+        return {"success": ok, "message": "Verbindung erfolgreich" if ok else "Verbindung fehlgeschlagen"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+@router.post("/integrations/test/co2")
+async def test_co2_integration(
+    current_user: User = Depends(require_permission("settings", "update")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Electricity Maps API testen."""
+    from app.integrations.electricity_maps import ElectricityMapsClient
+    try:
+        client = await ElectricityMapsClient.from_settings(db)
+        # Zone aus Settings lesen
+        service = SettingsService(db)
+        cfg = await service.get("integrations_co2")
+        zone = cfg["value"].get("zone", "DE") if cfg and cfg.get("value") else "DE"
+        ok = await client.check_connection(zone)
+        return {"success": ok, "message": "Verbindung erfolgreich" if ok else "Kein API-Key oder Verbindung fehlgeschlagen"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}

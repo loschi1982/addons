@@ -43,7 +43,8 @@ async def get_timeseries(
 
 @router.get("/comparison")
 async def get_comparison(
-    meter_ids: str = Query(..., description="Kommagetrennte Zähler-IDs"),
+    meter_ids: str | None = Query(None, description="Kommagetrennte Zähler-IDs"),
+    energy_type: str | None = None,
     period1_start: date = Query(...),
     period1_end: date = Query(...),
     period2_start: date = Query(...),
@@ -52,11 +53,12 @@ async def get_comparison(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Zwei Zeiträume vergleichen."""
+    """Zwei Zeiträume vergleichen (nach Zähler-IDs oder Energieträger)."""
     service = AnalyticsService(db)
-    ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")]
+    ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")] if meter_ids else None
     return await service.get_comparison(
         meter_ids=ids,
+        energy_type=energy_type,
         period1_start=period1_start,
         period1_end=period1_end,
         period2_start=period2_start,
@@ -149,3 +151,49 @@ async def get_anomalies(
     """Anomalie-Erkennung für alle aktiven Zähler."""
     service = AnalyticsService(db)
     return await service.get_anomalies(threshold, days)
+
+
+@router.get("/self-consumption")
+async def get_self_consumption(
+    start_date: date | None = None,
+    end_date: date | None = None,
+    granularity: str = Query("monthly", pattern="^(daily|weekly|monthly|yearly)$"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Eigenverbrauch und Autarkiegrad als Zeitreihe."""
+    from datetime import date as date_type
+    today = date_type.today()
+    if not start_date:
+        start_date = date_type(today.year, 1, 1)
+    if not end_date:
+        end_date = today
+    service = AnalyticsService(db)
+    return await service.get_self_consumption_trend(start_date, end_date, granularity)
+
+
+@router.get("/duration-curve")
+async def get_duration_curve(
+    meter_id: uuid.UUID = Query(...),
+    year: int | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Jahresdauerlinie für einen Zähler."""
+    service = AnalyticsService(db)
+    return await service.get_load_duration_curve(meter_id, year)
+
+
+@router.get("/cumulative")
+async def get_cumulative(
+    meter_ids: str | None = Query(None, description="Kommagetrennte Zähler-IDs"),
+    energy_type: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Kumulative Verbrauchslinie."""
+    service = AnalyticsService(db)
+    ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")] if meter_ids else None
+    return await service.get_cumulative(ids, energy_type, start_date, end_date)

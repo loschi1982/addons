@@ -30,11 +30,16 @@ ALL_RELEVANT_CLASSES = ENERGY_DEVICE_CLASSES | CLIMATE_DEVICE_CLASSES
 class HomeAssistantClient:
     """Client für die Home Assistant API."""
 
-    def __init__(self):
-        settings = get_settings()
-        self.base_url = settings.ha_base_url.rstrip("/") if settings.ha_base_url else ""
-        # Token-Priorität: ha_access_token > ha_supervisor_token (Rückwärtskompatibilität)
-        self.token = settings.ha_access_token or settings.ha_supervisor_token
+    def __init__(self, base_url: str = "", token: str = ""):
+        if base_url and token:
+            # Direkte Konfiguration (z.B. aus DB-Settings)
+            self.base_url = base_url.rstrip("/")
+            self.token = token
+        else:
+            # Fallback: Env-Vars
+            settings = get_settings()
+            self.base_url = settings.ha_base_url.rstrip("/") if settings.ha_base_url else ""
+            self.token = settings.ha_access_token or settings.ha_supervisor_token
         if not self.token or not self.base_url:
             logger.warning(
                 "ha_not_configured",
@@ -45,6 +50,18 @@ class HomeAssistantClient:
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
         }
+
+    @classmethod
+    async def from_settings(cls, db) -> "HomeAssistantClient":
+        """Client aus DB-Settings erstellen (Fallback: Env-Vars)."""
+        from app.services.settings_service import SettingsService
+        svc = SettingsService(db)
+        cfg = await svc.get("integrations_ha")
+        if cfg and cfg.get("value"):
+            val = cfg["value"]
+            if val.get("base_url") and val.get("access_token"):
+                return cls(base_url=val["base_url"], token=val["access_token"])
+        return cls()
 
     async def get_entity_state(self, entity_id: str) -> dict:
         """Aktuellen Zustand einer Entität abrufen."""

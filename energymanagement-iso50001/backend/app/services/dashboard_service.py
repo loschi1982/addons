@@ -160,6 +160,30 @@ class DashboardService:
             "comparison_label": None,
         })
 
+        # 5. + 6. PV-Kennzahlen (nur wenn Einspeisezähler vorhanden)
+        pv = await self._calc_pv_metrics(start, end)
+        if pv["has_pv"]:
+            prev_pv = await self._calc_pv_metrics(prev_start, prev_end)
+            prod_trend = self._calc_trend(pv["production"], prev_pv["production"])
+            cards.append({
+                "label": "Eigenproduktion",
+                "value": pv["production"],
+                "unit": "kWh",
+                "trend_percent": prod_trend,
+                "trend_direction": self._trend_dir(prod_trend),
+                "comparison_value": prev_pv["production"],
+                "comparison_label": "Vorjahr",
+            })
+            cards.append({
+                "label": "Autarkiegrad",
+                "value": pv["autarky"],
+                "unit": "%",
+                "trend_percent": None,
+                "trend_direction": None,
+                "comparison_value": prev_pv["autarky"] if prev_pv["has_pv"] else None,
+                "comparison_label": "Vorjahr",
+            })
+
         return cards
 
     async def _total_consumption(self, start: date, end: date) -> Decimal:
@@ -172,6 +196,7 @@ class DashboardService:
             .join(MeterReading, MeterReading.meter_id == Meter.id)
             .where(
                 Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
                 Meter.parent_meter_id.is_(None),
                 MeterReading.timestamp >= datetime.combine(
                     start, datetime.min.time(), tzinfo=timezone.utc
@@ -204,6 +229,7 @@ class DashboardService:
         meters_result = await self.db.execute(
             select(Meter).where(
                 Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
                 Meter.tariff_info.isnot(None),
             )
         )
@@ -240,7 +266,7 @@ class DashboardService:
         return result.scalar() or 0
 
     async def _get_energy_breakdown(self, start: date, end: date) -> list[dict]:
-        """Verbrauch nach Energietyp aufschlüsseln."""
+        """Verbrauch nach Energietyp aufschlüsseln (mit Originaleinheiten)."""
         query = (
             select(
                 Meter.energy_type,
@@ -250,6 +276,8 @@ class DashboardService:
             .join(MeterReading, MeterReading.meter_id == Meter.id)
             .where(
                 Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
+                Meter.parent_meter_id.is_(None),  # Keine Unterzähler-Doppelzählung
                 MeterReading.timestamp >= datetime.combine(
                     start, datetime.min.time(), tzinfo=timezone.utc
                 ),
@@ -262,20 +290,33 @@ class DashboardService:
         result = await self.db.execute(query)
         rows = result.all()
 
-        groups: dict[str, Decimal] = {}
+        # Pro Energietyp: kWh-Summe + Originalwerte tracken
+        groups: dict[str, dict] = {}
         for row in rows:
+            raw = row.consumption or Decimal("0")
             conv = CONVERSION_FACTORS.get(row.unit, Decimal("1"))
-            kwh = (row.consumption or Decimal("0")) * conv
-            groups[row.energy_type] = groups.get(row.energy_type, Decimal("0")) + kwh
+            kwh = raw * conv
+            if row.energy_type not in groups:
+                groups[row.energy_type] = {
+                    "kwh": Decimal("0"),
+                    "original_value": Decimal("0"),
+                    "original_unit": row.unit,
+                }
+            groups[row.energy_type]["kwh"] += kwh
+            # Originalwert nur akkumulieren wenn gleiche Einheit
+            if groups[row.energy_type]["original_unit"] == row.unit:
+                groups[row.energy_type]["original_value"] += raw
 
-        total = sum(groups.values(), Decimal("0"))
+        total = sum(g["kwh"] for g in groups.values())
         return [
             {
                 "energy_type": et,
-                "consumption_kwh": kwh,
-                "share_percent": Decimal(str(round(float(kwh / total * 100), 1))) if total > 0 else Decimal("0"),
+                "consumption_kwh": info["kwh"],
+                "original_value": info["original_value"],
+                "original_unit": info["original_unit"],
+                "share_percent": Decimal(str(round(float(info["kwh"] / total * 100), 1))) if total > 0 else Decimal("0"),
             }
-            for et, kwh in sorted(groups.items(), key=lambda x: -x[1])
+            for et, info in sorted(groups.items(), key=lambda x: -x[1]["kwh"])
         ]
 
     async def _get_consumption_chart(
@@ -288,6 +329,7 @@ class DashboardService:
         meters_result = await self.db.execute(
             select(Meter).where(
                 Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
                 Meter.parent_meter_id.is_(None),
             )
         )
@@ -347,6 +389,8 @@ class DashboardService:
             .join(MeterReading, MeterReading.meter_id == Meter.id)
             .where(
                 Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
+                Meter.parent_meter_id.is_(None),  # Keine Unterzähler-Doppelzählung
                 MeterReading.timestamp >= datetime.combine(
                     start, datetime.min.time(), tzinfo=timezone.utc
                 ),
@@ -423,6 +467,7 @@ class DashboardService:
         meters_result = await self.db.execute(
             select(Meter).where(
                 Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
                 Meter.parent_meter_id.is_(None),
             )
         )
@@ -458,6 +503,51 @@ class DashboardService:
             })
 
         return result
+
+    async def _calc_pv_metrics(self, start: date, end: date) -> dict:
+        """PV-Kennzahlen: Eigenproduktion und Autarkiegrad."""
+        # Einspeisezähler = PV-Produktion (is_feed_in == True)
+        query = (
+            select(
+                Meter.unit,
+                func.sum(MeterReading.consumption).label("total"),
+            )
+            .join(MeterReading, MeterReading.meter_id == Meter.id)
+            .where(
+                Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in == True,  # Nur Einspeisezähler
+                MeterReading.timestamp >= datetime.combine(
+                    start, datetime.min.time(), tzinfo=timezone.utc
+                ),
+                MeterReading.timestamp < datetime.combine(
+                    end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+                ),
+            )
+            .group_by(Meter.unit)
+        )
+        result = await self.db.execute(query)
+        rows = result.all()
+
+        if not rows:
+            return {"has_pv": False, "production": Decimal("0"), "autarky": Decimal("0")}
+
+        production = Decimal("0")
+        for row in rows:
+            conv = CONVERSION_FACTORS.get(row.unit, Decimal("1"))
+            production += abs(row.total or Decimal("0")) * conv
+
+        # Autarkiegrad = Eigenproduktion / Gesamtverbrauch × 100
+        consumption = await self._total_consumption(start, end)
+        if consumption > 0:
+            autarky = min(production / consumption * 100, Decimal("100"))
+        else:
+            autarky = Decimal("0")
+
+        return {
+            "has_pv": True,
+            "production": Decimal(str(round(float(production), 1))),
+            "autarky": Decimal(str(round(float(autarky), 1))),
+        }
 
     @staticmethod
     def _calc_trend(current: Decimal, previous: Decimal) -> Decimal | None:

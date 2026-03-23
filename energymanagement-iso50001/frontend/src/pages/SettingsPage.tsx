@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell, Monitor, Download, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
+import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell, Monitor, Download, CheckCircle, AlertTriangle, XCircle, Plug2 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 
 interface SettingEntry {
@@ -16,6 +16,7 @@ const TABS = [
   { id: 'report_defaults', label: 'Berichte', icon: FileText },
   { id: 'enpi_config', label: 'EnPI', icon: Activity },
   { id: 'notifications', label: 'Benachrichtigungen', icon: Bell },
+  { id: 'integrations', label: 'Integrationen', icon: Plug2 },
   { id: 'system', label: 'System', icon: Monitor },
 ] as const;
 
@@ -89,7 +90,7 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="page-title">Einstellungen</h1>
-        {activeTab !== 'system' && (
+        {activeTab !== 'system' && activeTab !== 'integrations' && (
           <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2">
             <Save className="w-4 h-4" />
             {saving ? 'Speichern...' : saved ? 'Gespeichert!' : 'Speichern'}
@@ -141,6 +142,7 @@ export default function SettingsPage() {
         {activeTab === 'notifications' && (
           <NotificationsForm values={editValues} onChange={updateField} />
         )}
+        {activeTab === 'integrations' && <IntegrationsPanel />}
         {activeTab === 'system' && <SystemPanel />}
       </div>
     </div>
@@ -703,6 +705,288 @@ function SystemPanel() {
             Klicken Sie auf "Nach Updates suchen", um zu prüfen ob eine neue Version verfügbar ist.
           </p>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Integrationen-Panel ── */
+
+interface IntegrationTestResult {
+  success: boolean;
+  message: string;
+}
+
+function IntegrationsPanel() {
+  const [haConfig, setHaConfig] = useState({ base_url: '', access_token: '', auth_enabled: false, default_role: 'viewer' });
+  const [weatherConfig, setWeatherConfig] = useState({ enabled: true, station_id: '', latitude: '', longitude: '' });
+  const [co2Config, setCo2Config] = useState({ enabled: false, api_key: '', zone: 'DE' });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState('');
+  const [testResults, setTestResults] = useState<Record<string, IntegrationTestResult | null>>({});
+  const [testing, setTesting] = useState<Record<string, boolean>>({});
+  const [stations, setStations] = useState<{ id: string; name: string; dwd_station_id: string }[]>([]);
+
+  useEffect(() => {
+    // Settings laden
+    Promise.all([
+      apiClient.get('/api/v1/settings/integrations_ha'),
+      apiClient.get('/api/v1/settings/integrations_weather'),
+      apiClient.get('/api/v1/settings/integrations_co2'),
+      apiClient.get('/api/v1/weather/stations').catch(() => ({ data: [] })),
+    ]).then(([ha, weather, co2, stationsRes]) => {
+      if (ha.data.value) setHaConfig({ ...haConfig, ...ha.data.value });
+      if (weather.data.value) setWeatherConfig({ ...weatherConfig, ...weather.data.value });
+      if (co2.data.value) setCo2Config({ ...co2Config, ...co2.data.value });
+      setStations(Array.isArray(stationsRes.data) ? stationsRes.data : []);
+    });
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveSection = async (key: string, value: Record<string, unknown>) => {
+    setSaving(true);
+    try {
+      await apiClient.put(`/api/v1/settings/${key}`, { value });
+      setSaved(key);
+      setTimeout(() => setSaved(''), 2000);
+    } catch { /* leer */ }
+    setSaving(false);
+  };
+
+  const testConnection = async (type: string) => {
+    setTesting((p) => ({ ...p, [type]: true }));
+    setTestResults((p) => ({ ...p, [type]: null }));
+    try {
+      const res = await apiClient.post(`/api/v1/settings/integrations/test/${type}`);
+      setTestResults((p) => ({ ...p, [type]: res.data }));
+    } catch (err: unknown) {
+      setTestResults((p) => ({ ...p, [type]: { success: false, message: 'Verbindungsfehler' } }));
+    }
+    setTesting((p) => ({ ...p, [type]: false }));
+  };
+
+  const StatusBadge = ({ type }: { type: string }) => {
+    const result = testResults[type];
+    if (!result) return null;
+    return (
+      <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
+        result.success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+      }`}>
+        {result.success ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+        {result.message}
+      </span>
+    );
+  };
+
+  return (
+    <div className="space-y-8">
+      {/* Home Assistant */}
+      <div className="border rounded-lg p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-semibold text-gray-900">Home Assistant</h3>
+          <div className="flex items-center gap-2">
+            <StatusBadge type="ha" />
+            <button
+              onClick={() => testConnection('ha')}
+              disabled={testing.ha}
+              className="btn-secondary text-xs px-3 py-1"
+            >
+              {testing.ha ? 'Teste…' : 'Verbindung testen'}
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormField label="Base-URL">
+            <input
+              className="input"
+              placeholder="http://supervisor/core"
+              value={haConfig.base_url}
+              onChange={(e) => setHaConfig({ ...haConfig, base_url: e.target.value })}
+            />
+          </FormField>
+          <FormField label="Access Token">
+            <input
+              className="input"
+              type="password"
+              placeholder="Long-Lived Access Token"
+              value={haConfig.access_token}
+              onChange={(e) => setHaConfig({ ...haConfig, access_token: e.target.value })}
+            />
+          </FormField>
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={haConfig.auth_enabled}
+                onChange={(e) => setHaConfig({ ...haConfig, auth_enabled: e.target.checked })}
+                className="rounded border-gray-300 text-primary-500"
+              />
+              <span className="text-sm">HA-Authentifizierung aktivieren</span>
+            </label>
+          </div>
+          <FormField label="Standard-Rolle">
+            <select
+              className="input"
+              value={haConfig.default_role}
+              onChange={(e) => setHaConfig({ ...haConfig, default_role: e.target.value })}
+            >
+              <option value="viewer">Betrachter</option>
+              <option value="editor">Bearbeiter</option>
+              <option value="admin">Administrator</option>
+            </select>
+          </FormField>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button
+            onClick={() => saveSection('integrations_ha', haConfig)}
+            disabled={saving}
+            className="btn-primary text-sm flex items-center gap-1.5"
+          >
+            <Save className="w-3.5 h-3.5" />
+            {saved === 'integrations_ha' ? 'Gespeichert!' : 'Speichern'}
+          </button>
+        </div>
+      </div>
+
+      {/* Wetter (BrightSky) */}
+      <div className="border rounded-lg p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-semibold text-gray-900">Wetter (BrightSky / DWD)</h3>
+          <div className="flex items-center gap-2">
+            <StatusBadge type="weather" />
+            <button
+              onClick={() => testConnection('weather')}
+              disabled={testing.weather}
+              className="btn-secondary text-xs px-3 py-1"
+            >
+              {testing.weather ? 'Teste…' : 'Verbindung testen'}
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="md:col-span-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={weatherConfig.enabled}
+                onChange={(e) => setWeatherConfig({ ...weatherConfig, enabled: e.target.checked })}
+                className="rounded border-gray-300 text-primary-500"
+              />
+              <span className="text-sm">Wetterdaten aktivieren</span>
+            </label>
+          </div>
+          <FormField label="DWD-Station">
+            <select
+              className="input"
+              value={weatherConfig.station_id}
+              onChange={(e) => setWeatherConfig({ ...weatherConfig, station_id: e.target.value })}
+            >
+              <option value="">Bitte wählen…</option>
+              {stations.map((s) => (
+                <option key={s.id} value={s.dwd_station_id}>
+                  {s.name} ({s.dwd_station_id})
+                </option>
+              ))}
+            </select>
+          </FormField>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Breitengrad">
+              <input
+                className="input"
+                type="number"
+                step="0.001"
+                placeholder="51.05"
+                value={weatherConfig.latitude || ''}
+                onChange={(e) => setWeatherConfig({ ...weatherConfig, latitude: e.target.value })}
+              />
+            </FormField>
+            <FormField label="Längengrad">
+              <input
+                className="input"
+                type="number"
+                step="0.001"
+                placeholder="13.74"
+                value={weatherConfig.longitude || ''}
+                onChange={(e) => setWeatherConfig({ ...weatherConfig, longitude: e.target.value })}
+              />
+            </FormField>
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button
+            onClick={() => saveSection('integrations_weather', weatherConfig)}
+            disabled={saving}
+            className="btn-primary text-sm flex items-center gap-1.5"
+          >
+            <Save className="w-3.5 h-3.5" />
+            {saved === 'integrations_weather' ? 'Gespeichert!' : 'Speichern'}
+          </button>
+        </div>
+      </div>
+
+      {/* CO₂ (Electricity Maps) */}
+      <div className="border rounded-lg p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-semibold text-gray-900">CO₂-Intensität (Electricity Maps)</h3>
+          <div className="flex items-center gap-2">
+            <StatusBadge type="co2" />
+            <button
+              onClick={() => testConnection('co2')}
+              disabled={testing.co2}
+              className="btn-secondary text-xs px-3 py-1"
+            >
+              {testing.co2 ? 'Teste…' : 'Verbindung testen'}
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="md:col-span-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={co2Config.enabled}
+                onChange={(e) => setCo2Config({ ...co2Config, enabled: e.target.checked })}
+                className="rounded border-gray-300 text-primary-500"
+              />
+              <span className="text-sm">CO₂-Intensität aktivieren</span>
+            </label>
+          </div>
+          <FormField label="API-Key">
+            <input
+              className="input"
+              type="password"
+              placeholder="Electricity Maps API Key"
+              value={co2Config.api_key}
+              onChange={(e) => setCo2Config({ ...co2Config, api_key: e.target.value })}
+            />
+          </FormField>
+          <FormField label="Zone">
+            <select
+              className="input"
+              value={co2Config.zone}
+              onChange={(e) => setCo2Config({ ...co2Config, zone: e.target.value })}
+            >
+              <option value="DE">Deutschland (DE)</option>
+              <option value="AT">Österreich (AT)</option>
+              <option value="CH">Schweiz (CH)</option>
+              <option value="FR">Frankreich (FR)</option>
+              <option value="NL">Niederlande (NL)</option>
+              <option value="PL">Polen (PL)</option>
+              <option value="CZ">Tschechien (CZ)</option>
+              <option value="DK-DK1">Dänemark West (DK-DK1)</option>
+              <option value="DK-DK2">Dänemark Ost (DK-DK2)</option>
+            </select>
+          </FormField>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button
+            onClick={() => saveSection('integrations_co2', co2Config)}
+            disabled={saving}
+            className="btn-primary text-sm flex items-center gap-1.5"
+          >
+            <Save className="w-3.5 h-3.5" />
+            {saved === 'integrations_co2' ? 'Gespeichert!' : 'Speichern'}
+          </button>
+        </div>
       </div>
     </div>
   );
