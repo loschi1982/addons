@@ -119,15 +119,37 @@ class ShellyClient:
                 pass
 
             # 4. Gen1 /emeter/ (Shelly EM, 3EM Gen1)
-            resp = await client.get(f"{self.base_url}/emeter/{channel}")
+            try:
+                resp = await client.get(f"{self.base_url}/emeter/{channel}")
+                resp.raise_for_status()
+                data = resp.json()
+                return {
+                    "power": data.get("power", 0),
+                    "energy_wh": data.get("total", 0),
+                    "voltage": data.get("voltage", 0),
+                    "current": data.get("current", 0),
+                }
+            except (httpx.HTTPStatusError, httpx.HTTPError):
+                pass
+
+            # 5. Gen1 /status → meters[] Fallback (Shelly 1PM ohne /meter/-Endpunkt)
+            resp = await client.get(f"{self.base_url}/status")
             resp.raise_for_status()
             data = resp.json()
-            return {
-                "power": data.get("power", 0),
-                "energy_wh": data.get("total", 0),
-                "voltage": data.get("voltage", 0),
-                "current": data.get("current", 0),
-            }
+            meters = data.get("meters", [])
+            if channel < len(meters):
+                m = meters[channel]
+                return {
+                    "power": m.get("power", 0),
+                    "energy_wh": m.get("total", 0),
+                    "voltage": 0,
+                    "current": 0,
+                }
+
+            raise ConnectionError(
+                f"Shelly {self.host}: Keine Energiedaten gefunden "
+                f"(Kanal {channel}, alle Endpunkte getestet)"
+            )
 
     async def _get_em_energy(self, client: httpx.AsyncClient, phase: str = "a") -> dict:
         """
