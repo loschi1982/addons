@@ -2,7 +2,7 @@
  * MeterMapCanvas – ReactFlow-Wrapper für die Zähler-Mindmap.
  *
  * Registriert die Custom-Nodes, zeigt Minimap + Controls,
- * und behandelt Drag & Drop zum Verschieben von Zählern.
+ * und behandelt Drag & Drop zum Verschieben von Zählern in der Messtopologie.
  */
 
 import { useCallback, useMemo, useState } from 'react';
@@ -32,7 +32,6 @@ interface MeterMapCanvasProps {
   edges: Edge[];
   onNodesChange: OnNodesChange;
   onEdgesChange: OnEdgesChange;
-  onAddMeter: (unitId: string) => void;
   onRefetch: () => void;
 }
 
@@ -41,32 +40,17 @@ export default function MeterMapCanvas({
   edges,
   onNodesChange,
   onEdgesChange,
-  onAddMeter,
   onRefetch,
 }: MeterMapCanvasProps) {
   const { getIntersectingNodes } = useReactFlow();
   const [reassignDialog, setReassignDialog] = useState<{
     meterId: string;
     meterName: string;
-    targetUnitId: string;
-    targetUnitName: string;
+    targetId: string;
+    targetName: string;
+    targetType: 'meter' | 'site';
   } | null>(null);
   const [reassigning, setReassigning] = useState(false);
-
-  // onAddMeter Callback in UnitNode-Daten injizieren
-  const nodesWithCallbacks = useMemo(
-    () =>
-      nodes.map((node) => {
-        if (node.type === 'unitNode') {
-          return {
-            ...node,
-            data: { ...node.data, onAddMeter },
-          };
-        }
-        return node;
-      }),
-    [nodes, onAddMeter]
-  );
 
   const nodeTypes: NodeTypes = useMemo(
     () => ({
@@ -78,44 +62,70 @@ export default function MeterMapCanvas({
     []
   );
 
-  /** Nach Drag: Positionen speichern + Prüfen ob Zähler auf Unit gezogen */
+  /** Nach Drag: Positionen speichern + Prüfen ob Zähler auf anderen Node gezogen */
   const handleNodeDragStop = useCallback(
     (_event: React.MouseEvent, node: Node) => {
-      // Positionen speichern
       savePositions(nodes);
 
       // Nur Meter-Nodes prüfen
       if (node.type !== 'meterNode') return;
 
       const intersecting = getIntersectingNodes(node);
-      const targetUnit = intersecting.find((n) => n.type === 'unitNode');
 
-      if (!targetUnit) return;
+      // Priorität: anderer Meter-Node → Site-Node
+      const targetMeter = intersecting.find(
+        (n) => n.type === 'meterNode' && n.id !== node.id
+      );
+      const targetSite = intersecting.find((n) => n.type === 'siteNode');
 
-      const currentUnitId = node.data.unitId as string;
-      const targetUnitId = targetUnit.data.unitId as string;
+      if (targetMeter) {
+        const currentParent = node.data.parentMeterId as string | null;
+        const targetMeterId = targetMeter.data.meterId as string;
 
-      // Gleiche Unit → nichts tun
-      if (currentUnitId === targetUnitId) return;
+        // Gleicher Elternzähler → nichts tun
+        if (currentParent === targetMeterId) return;
 
-      setReassignDialog({
-        meterId: node.data.meterId as string,
-        meterName: node.data.label as string,
-        targetUnitId,
-        targetUnitName: targetUnit.data.label as string,
-      });
+        setReassignDialog({
+          meterId: node.data.meterId as string,
+          meterName: node.data.label as string,
+          targetId: targetMeterId,
+          targetName: targetMeter.data.label as string,
+          targetType: 'meter',
+        });
+      } else if (targetSite) {
+        // Auf Site gezogen → Root-Zähler machen (parent_meter_id entfernen)
+        const currentParent = node.data.parentMeterId as string | null;
+        if (!currentParent) return; // Ist bereits Root
+
+        setReassignDialog({
+          meterId: node.data.meterId as string,
+          meterName: node.data.label as string,
+          targetId: targetSite.data.siteId as string,
+          targetName: targetSite.data.label as string,
+          targetType: 'site',
+        });
+      }
     },
     [nodes, getIntersectingNodes]
   );
 
-  /** Zähler-Zuordnung aktualisieren */
+  /** Zähler-Zuordnung in der Messtopologie aktualisieren */
   const confirmReassign = useCallback(async () => {
     if (!reassignDialog) return;
     setReassigning(true);
     try {
-      await apiClient.put(`/api/v1/meters/${reassignDialog.meterId}`, {
-        usage_unit_id: reassignDialog.targetUnitId,
-      });
+      if (reassignDialog.targetType === 'meter') {
+        // Unterzähler von Ziel-Meter machen
+        await apiClient.put(`/api/v1/meters/${reassignDialog.meterId}`, {
+          parent_meter_id: reassignDialog.targetId,
+        });
+      } else {
+        // Root-Zähler am Standort → parent_meter_id entfernen
+        await apiClient.put(`/api/v1/meters/${reassignDialog.meterId}`, {
+          parent_meter_id: null,
+          site_id: reassignDialog.targetId,
+        });
+      }
       setReassignDialog(null);
       onRefetch();
     } catch {
@@ -125,10 +135,15 @@ export default function MeterMapCanvas({
     }
   }, [reassignDialog, onRefetch]);
 
+  const dialogMessage =
+    reassignDialog?.targetType === 'meter'
+      ? <>Zähler <strong>„{reassignDialog.meterName}"</strong> als Unterzähler von <strong>„{reassignDialog.targetName}"</strong> zuordnen?</>
+      : <>Zähler <strong>„{reassignDialog?.meterName}"</strong> als Hauptzähler an <strong>„{reassignDialog?.targetName}"</strong> setzen?</>;
+
   return (
     <div className="w-full h-full relative">
       <ReactFlow
-        nodes={nodesWithCallbacks}
+        nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
@@ -146,8 +161,6 @@ export default function MeterMapCanvas({
           position="bottom-left"
           nodeColor={(node) => {
             if (node.type === 'siteNode') return '#1B5E7B';
-            if (node.type === 'buildingNode') return '#9CA3AF';
-            if (node.type === 'unitNode') return '#1B5E7B';
             return '#F59E0B';
           }}
           maskColor="rgba(0, 0, 0, 0.1)"
@@ -159,10 +172,7 @@ export default function MeterMapCanvas({
         <div className="absolute inset-0 bg-black/30 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl p-6 max-w-sm mx-4">
             <h3 className="font-semibold text-gray-900 mb-2">Zähler verschieben?</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Zähler <strong>„{reassignDialog.meterName}"</strong> zu{' '}
-              <strong>„{reassignDialog.targetUnitName}"</strong> verschieben?
-            </p>
+            <p className="text-sm text-gray-600 mb-4">{dialogMessage}</p>
             <div className="flex justify-end gap-2">
               <button
                 className="btn-secondary text-sm"

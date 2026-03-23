@@ -18,6 +18,7 @@ interface Meter {
   site_id: string | null;
   building_id: string | null;
   usage_unit_id: string | null;
+  parent_meter_id: string | null;
   is_active: boolean;
   is_virtual: boolean;
   is_feed_in: boolean;
@@ -42,6 +43,7 @@ interface MeterForm {
   source_config_mode: string;
   source_config_register: string;
   source_config_entity_id: string;
+  parent_meter_id: string;
   virtual_type: string;
   virtual_source_meter_id: string;
   virtual_subtract_meter_ids: string[];
@@ -58,6 +60,7 @@ const emptyForm: MeterForm = {
   is_virtual: false,
   is_feed_in: false,
   is_weather_corrected: false,
+  parent_meter_id: '',
   source_config_ip: '',
   source_config_channel: '0',
   source_config_mode: 'single',
@@ -147,6 +150,7 @@ export default function MetersPage() {
       is_virtual: meter.is_virtual,
       is_feed_in: meter.is_feed_in,
       is_weather_corrected: meter.is_weather_corrected,
+      parent_meter_id: meter.parent_meter_id || '',
       source_config_ip: (cfg.ip as string) || '',
       source_config_channel: (cfg.channel?.toString()) || '0',
       source_config_mode: (cfg.mode as string) || 'single',
@@ -224,6 +228,7 @@ export default function MetersPage() {
       is_virtual: isVirtual,
       is_feed_in: form.is_feed_in,
       is_weather_corrected: form.is_weather_corrected,
+      parent_meter_id: form.parent_meter_id || null,
       site_id: hierarchy.siteId || null,
       building_id: hierarchy.buildingId || null,
       usage_unit_id: hierarchy.unitId || null,
@@ -494,15 +499,13 @@ function MeterModal({
     unitId: editingMeter.usage_unit_id,
   } : undefined);
 
-  // Alle Zähler laden für die Formelauswahl bei virtuellen Zählern
+  // Alle Zähler laden für Formelauswahl + Übergeordneter Zähler
   const [allMeters, setAllMeters] = useState<Meter[]>([]);
   useEffect(() => {
-    if (form.data_source === 'virtual') {
-      apiClient.get('/api/v1/meters?page_size=100&is_active=true')
-        .then((res) => setAllMeters((res.data.items || []).filter((m: Meter) => m.id !== editingId)))
-        .catch(() => {});
-    }
-  }, [form.data_source, editingId]);
+    apiClient.get('/api/v1/meters?page_size=100&is_active=true')
+      .then((res) => setAllMeters((res.data.items || []).filter((m: Meter) => m.id !== editingId)))
+      .catch(() => {});
+  }, [editingId]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -848,6 +851,26 @@ function MeterModal({
                 </select>
               </div>
             </div>
+          </div>
+
+          {/* Übergeordneter Zähler (Messtopologie) */}
+          <div>
+            <label className="label">Übergeordneter Zähler</label>
+            <select
+              className="input"
+              value={form.parent_meter_id}
+              onChange={(e) => setForm({ ...form, parent_meter_id: e.target.value })}
+            >
+              <option value="">– Kein übergeordneter Zähler (Hauptzähler) –</option>
+              {allMeters.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} {m.meter_number ? `(${m.meter_number})` : ''} – {ENERGY_TYPE_LABELS[m.energy_type as EnergyType] || m.energy_type}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              Definiert die Messtopologie: Unterzähler werden in der Karte unterhalb des übergeordneten Zählers angezeigt.
+            </p>
           </div>
 
           <div className="flex items-center gap-4">

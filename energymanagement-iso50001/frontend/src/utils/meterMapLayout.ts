@@ -2,7 +2,7 @@
  * meterMapLayout – Dagre-basiertes Auto-Layout für die Zähler-Mindmap.
  *
  * Berechnet x/y-Positionen für alle Nodes in einem hierarchischen
- * Top-Down-Baum (Standort → Gebäude → Nutzungseinheit → Zähler).
+ * Top-Down-Baum (Standort → Hauptzähler → Unterzähler → ...).
  */
 
 import dagre from 'dagre';
@@ -27,8 +27,8 @@ export function layoutHierarchy(nodes: Node[], edges: Edge[]): Node[] {
   g.setDefaultEdgeLabel(() => ({}));
   g.setGraph({
     rankdir: 'TB',
-    nodesep: 50,
-    ranksep: 100,
+    nodesep: 60,
+    ranksep: 120,
     marginx: 40,
     marginy: 40,
   });

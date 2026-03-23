@@ -101,17 +101,6 @@ function MeterMapContent() {
     });
   }, []);
 
-  const handleAddMeter = useCallback((unitId: string) => {
-    setQuickCreateUnitId(unitId);
-    setQuickForm({
-      name: '',
-      meter_number: '',
-      energy_type: 'electricity',
-      unit: 'kWh',
-      data_source: 'manual',
-    });
-    setQuickError(null);
-  }, []);
 
   const handleQuickSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -193,7 +182,6 @@ function MeterMapContent() {
           edges={filteredEdges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
-          onAddMeter={handleAddMeter}
           onRefetch={refetch}
         />
       </div>

@@ -17,7 +17,8 @@ interface MeterNodeData {
   dataSource?: string;
   isVirtual?: boolean;
   isFeedIn?: boolean;
-  unitId: string;
+  buildingName?: string;
+  parentMeterId?: string | null;
   [key: string]: unknown;
 }
 
@@ -63,6 +64,11 @@ function MeterNodeComponent({ data }: { data: MeterNodeData }) {
               {label}
               {data.meterNumber ? ` · ${data.meterNumber}` : ''}
             </div>
+            {data.buildingName && (
+              <div className="text-[10px] text-gray-400 truncate">
+                &#127968; {data.buildingName as string}
+              </div>
+            )}
           </div>
         </div>
       </div>
