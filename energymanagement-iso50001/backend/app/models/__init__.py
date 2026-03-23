@@ -29,3 +29,9 @@ from app.models.iso import (  # noqa: F401
     Document, DocumentRevision, LegalRequirement,
     InternalAudit, AuditFinding, ManagementReview, Nonconformity,
 )
+from app.models.energy_review import (  # noqa: F401
+    RelevantVariable, RelevantVariableValue,
+    SignificantEnergyUse, seu_relevant_variables,
+    EnergyPerformanceIndicator, EnPIValue,
+    EnergyBaseline,
+)
