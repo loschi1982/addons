@@ -16,6 +16,7 @@ from app.api.v1 import (
     consumers,
     dashboard,
     emissions,
+    energy_review,
     imports,
     integrations,
     iso,
@@ -57,6 +58,11 @@ api_router.include_router(reports.router, prefix="/reports", tags=["Berichte"])
 
 # ISO 50001 Management
 api_router.include_router(iso.router, prefix="/iso", tags=["ISO 50001"])
+
+# Energiebewertung (EnPI, Baseline, SEU, Variablen)
+api_router.include_router(
+    energy_review.router, prefix="/energy-review", tags=["Energiebewertung"]
+)
 
 # Integrationen (HA, Shelly, Modbus, KNX, Polling)
 api_router.include_router(integrations.router, prefix="/integrations", tags=["Integrationen"])

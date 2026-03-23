@@ -24,6 +24,7 @@ import IntegrationsPage from '@/pages/IntegrationsPage';
 import AnalyticsPage from '@/pages/AnalyticsPage';
 import SettingsPage from '@/pages/SettingsPage';
 import MeterMapPage from '@/pages/MeterMapPage';
+import EnergyReviewPage from '@/pages/EnergyReviewPage';
 
 /**
  * Geschützte Route – leitet auf /login um wenn nicht authentifiziert.
@@ -73,6 +74,7 @@ export default function App() {
         <Route path="meter-map" element={<MeterMapPage />} />
         <Route path="readings" element={<ReadingsPage />} />
         <Route path="consumers" element={<ConsumersPage />} />
+        <Route path="energy-review" element={<EnergyReviewPage />} />
         <Route path="schemas/*" element={<SchemasPage />} />
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="emissions" element={<EmissionsPage />} />
