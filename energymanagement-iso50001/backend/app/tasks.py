@@ -44,6 +44,10 @@ celery_app.conf.update(
             "task": "app.tasks.recalculate_co2",
             "schedule": 86400.0,
         },
+        "poll-climate-every-5-min": {
+            "task": "app.tasks.poll_climate_sensors",
+            "schedule": 300.0,  # alle 5 Minuten
+        },
     },
 )
 
@@ -105,6 +109,20 @@ def recalculate_co2():
         async with async_session_factory() as db:
             service = CO2Service(db)
             return await service.calculate_all_meters(start, today)
+
+    return _run_async(_run())
+
+
+@celery_app.task(name="app.tasks.poll_climate_sensors")
+def poll_climate_sensors():
+    """HA-Klimasensoren (Temperatur, Feuchte) automatisch abfragen."""
+    async def _run():
+        from app.core.database import async_session_factory
+        from app.services.climate_service import ClimateService
+
+        async with async_session_factory() as db:
+            service = ClimateService(db)
+            return await service.poll_ha_sensors()
 
     return _run_async(_run())
 

@@ -463,13 +463,13 @@ function ReadingsPanel() {
                           })}
                         </td>
                         <td className="px-3 py-1.5 text-right font-mono">
-                          {r.temperature != null ? `${r.temperature.toFixed(1)} °C` : '–'}
+                          {r.temperature != null ? `${Number(r.temperature).toFixed(1)} °C` : '–'}
                         </td>
                         <td className="px-3 py-1.5 text-right font-mono">
-                          {r.humidity != null ? `${r.humidity.toFixed(0)} %` : '–'}
+                          {r.humidity != null ? `${Number(r.humidity).toFixed(0)} %` : '–'}
                         </td>
                         <td className="px-3 py-1.5 text-right font-mono text-gray-500">
-                          {r.dew_point != null ? `${r.dew_point.toFixed(1)} °C` : '–'}
+                          {r.dew_point != null ? `${Number(r.dew_point).toFixed(1)} °C` : '–'}
                         </td>
                         <td className="px-3 py-1.5 text-gray-500">{r.source}</td>
                       </tr>
@@ -535,10 +535,10 @@ function ComfortPanel() {
             {dashboard.current_readings.map((r) => (
               <div key={r.id} className="card text-center">
                 <div className="text-2xl font-bold">
-                  {r.temperature != null ? `${r.temperature.toFixed(1)} °C` : '–'}
+                  {r.temperature != null ? `${Number(r.temperature).toFixed(1)} °C` : '–'}
                 </div>
                 {r.humidity != null && (
-                  <div className="text-sm text-gray-500">{r.humidity.toFixed(0)} % RH</div>
+                  <div className="text-sm text-gray-500">{Number(r.humidity).toFixed(0)} % RH</div>
                 )}
                 <div className="text-xs text-gray-400 mt-1">
                   {new Date(r.timestamp).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
@@ -570,10 +570,10 @@ function ComfortPanel() {
               {dashboard.zones.map((z, idx) => (
                 <tr key={idx} className="hover:bg-gray-50">
                   <td className="px-4 py-2 font-medium">{z.zone}</td>
-                  <td className="px-4 py-2 text-right font-mono">{z.avg_temperature.toFixed(1)} °C</td>
-                  <td className="px-4 py-2 text-right font-mono text-blue-600">{z.min_temperature.toFixed(1)}</td>
-                  <td className="px-4 py-2 text-right font-mono text-red-500">{z.max_temperature.toFixed(1)}</td>
-                  <td className="px-4 py-2 text-right font-mono">{z.avg_humidity.toFixed(0)} %</td>
+                  <td className="px-4 py-2 text-right font-mono">{Number(z.avg_temperature).toFixed(1)} °C</td>
+                  <td className="px-4 py-2 text-right font-mono text-blue-600">{Number(z.min_temperature).toFixed(1)}</td>
+                  <td className="px-4 py-2 text-right font-mono text-red-500">{Number(z.max_temperature).toFixed(1)}</td>
+                  <td className="px-4 py-2 text-right font-mono">{Number(z.avg_humidity).toFixed(0)} %</td>
                   <td className="px-4 py-2 text-right">
                     {z.comfort_score != null ? (
                       <ComfortBadge score={z.comfort_score} />
@@ -602,7 +602,7 @@ function ComfortBadge({ score }: { score: number }) {
 
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold ${color}`}>
-      {score.toFixed(0)}
+      {Number(score).toFixed(0)}
     </span>
   );
 }

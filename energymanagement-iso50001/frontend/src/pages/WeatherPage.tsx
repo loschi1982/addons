@@ -148,8 +148,8 @@ function StationsPanel({ stations }: { stations: WeatherStation[] }) {
                 <tr key={s.id} className="hover:bg-gray-50">
                   <td className="px-4 py-2 font-medium">{s.name}</td>
                   <td className="px-4 py-2 font-mono text-gray-500">{s.dwd_station_id}</td>
-                  <td className="px-4 py-2 text-right font-mono">{s.latitude.toFixed(4)}</td>
-                  <td className="px-4 py-2 text-right font-mono">{s.longitude.toFixed(4)}</td>
+                  <td className="px-4 py-2 text-right font-mono">{Number(s.latitude).toFixed(4)}</td>
+                  <td className="px-4 py-2 text-right font-mono">{Number(s.longitude).toFixed(4)}</td>
                   <td className="px-4 py-2 text-right">{s.altitude ?? '–'}</td>
                 </tr>
               ))}
@@ -265,16 +265,16 @@ function WeatherDataPanel({
                 {records.map((r) => (
                   <tr key={r.id} className="hover:bg-gray-50">
                     <td className="px-3 py-1.5">{new Date(r.date).toLocaleDateString('de-DE')}</td>
-                    <td className="px-3 py-1.5 text-right font-mono">{r.temp_avg.toFixed(1)} °C</td>
+                    <td className="px-3 py-1.5 text-right font-mono">{Number(r.temp_avg).toFixed(1)} °C</td>
                     <td className="px-3 py-1.5 text-right font-mono text-blue-600">
-                      {r.temp_min?.toFixed(1) ?? '–'}
+                      {r.temp_min != null ? Number(r.temp_min).toFixed(1) : '–'}
                     </td>
                     <td className="px-3 py-1.5 text-right font-mono text-red-500">
-                      {r.temp_max?.toFixed(1) ?? '–'}
+                      {r.temp_max != null ? Number(r.temp_max).toFixed(1) : '–'}
                     </td>
-                    <td className="px-3 py-1.5 text-right font-mono">{r.heating_degree_days.toFixed(1)}</td>
-                    <td className="px-3 py-1.5 text-right font-mono">{r.cooling_degree_days.toFixed(1)}</td>
-                    <td className="px-3 py-1.5 text-right font-mono">{r.sunshine_hours?.toFixed(1) ?? '–'}</td>
+                    <td className="px-3 py-1.5 text-right font-mono">{Number(r.heating_degree_days).toFixed(1)}</td>
+                    <td className="px-3 py-1.5 text-right font-mono">{Number(r.cooling_degree_days).toFixed(1)}</td>
+                    <td className="px-3 py-1.5 text-right font-mono">{r.sunshine_hours != null ? Number(r.sunshine_hours).toFixed(1) : '–'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -363,11 +363,11 @@ function DegreeDaysPanel({
           {/* Zusammenfassung */}
           <div className="grid grid-cols-2 gap-4">
             <div className="card text-center">
-              <div className="text-3xl font-bold text-orange-600">{data.total_hdd.toFixed(0)}</div>
+              <div className="text-3xl font-bold text-orange-600">{Number(data.total_hdd).toFixed(0)}</div>
               <div className="text-sm text-gray-500 mt-1">Heizgradtage (Gt20/15)</div>
             </div>
             <div className="card text-center">
-              <div className="text-3xl font-bold text-blue-600">{data.total_cdd.toFixed(0)}</div>
+              <div className="text-3xl font-bold text-blue-600">{Number(data.total_cdd).toFixed(0)}</div>
               <div className="text-sm text-gray-500 mt-1">Kühlgradtage</div>
             </div>
           </div>
@@ -389,19 +389,20 @@ function DegreeDaysPanel({
                 </thead>
                 <tbody className="divide-y">
                   {data.monthly_data.map((m) => {
-                    const deviation =
-                      m.long_term_avg_hdd != null
-                        ? ((m.heating_degree_days - m.long_term_avg_hdd) / m.long_term_avg_hdd) * 100
+                    const hdd = Number(m.heating_degree_days);
+                    const ltAvg = m.long_term_avg_hdd != null ? Number(m.long_term_avg_hdd) : null;
+                    const deviation = ltAvg != null && ltAvg > 0
+                        ? ((hdd - ltAvg) / ltAvg) * 100
                         : null;
                     return (
                       <tr key={m.id} className="hover:bg-gray-50">
                         <td className="px-4 py-2 font-medium">{MONTHS[m.month - 1]} {m.year}</td>
-                        <td className="px-4 py-2 text-right font-mono">{m.heating_degree_days.toFixed(1)}</td>
-                        <td className="px-4 py-2 text-right font-mono">{m.cooling_degree_days.toFixed(1)}</td>
-                        <td className="px-4 py-2 text-right font-mono">{m.avg_temperature.toFixed(1)}</td>
+                        <td className="px-4 py-2 text-right font-mono">{hdd.toFixed(1)}</td>
+                        <td className="px-4 py-2 text-right font-mono">{Number(m.cooling_degree_days).toFixed(1)}</td>
+                        <td className="px-4 py-2 text-right font-mono">{Number(m.avg_temperature).toFixed(1)}</td>
                         <td className="px-4 py-2 text-right">{m.heating_days}</td>
                         <td className="px-4 py-2 text-right font-mono text-gray-500">
-                          {m.long_term_avg_hdd?.toFixed(1) ?? '–'}
+                          {ltAvg != null ? ltAvg.toFixed(1) : '–'}
                         </td>
                         <td className="px-4 py-2 text-right font-mono">
                           {deviation != null ? (
@@ -424,16 +425,17 @@ function DegreeDaysPanel({
               <h3 className="mb-3 text-sm font-semibold">Heizgradtage pro Monat</h3>
               <div className="flex items-end gap-1 h-40">
                 {data.monthly_data.map((m) => {
-                  const maxHDD = Math.max(...data.monthly_data.map((d) => d.heating_degree_days), 1);
-                  const height = (m.heating_degree_days / maxHDD) * 100;
+                  const maxHDD = Math.max(...data.monthly_data.map((d) => Number(d.heating_degree_days)), 1);
+                  const hddVal = Number(m.heating_degree_days);
+                  const height = (hddVal / maxHDD) * 100;
                   return (
                     <div key={m.id} className="flex-1 flex flex-col items-center gap-1">
                       <div className="text-[10px] text-gray-500 font-mono">
-                        {m.heating_degree_days > 0 ? m.heating_degree_days.toFixed(0) : ''}
+                        {hddVal > 0 ? hddVal.toFixed(0) : ''}
                       </div>
                       <div
                         className="w-full rounded-t bg-orange-400"
-                        style={{ height: `${height}%`, minHeight: m.heating_degree_days > 0 ? '2px' : '0' }}
+                        style={{ height: `${height}%`, minHeight: hddVal > 0 ? '2px' : '0' }}
                       />
                       <div className="text-[10px] text-gray-500">{MONTHS[m.month - 1]}</div>
                     </div>
