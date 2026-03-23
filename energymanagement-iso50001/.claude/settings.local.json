@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(export PATH=\"/home/rico/.nvm/versions/node/v20.20.1/bin:$PATH\")",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}
