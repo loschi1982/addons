@@ -398,6 +398,16 @@ class AnalyticsService:
             if not getattr(meter, "is_feed_in", False):
                 max_consumer_depth = max(max_consumer_depth, depth_map[meter.id])
 
+        # Namen sammeln, um Duplikate zwischen Zählern und Verbrauchern zu erkennen
+        meter_names = {m.name for m in meters}
+        all_consumer_names: set[str] = set()
+        for m in meters:
+            if m.consumers:
+                for c in m.consumers:
+                    all_consumer_names.add(c.name)
+        # Namen, die sowohl als Zähler als auch als Verbraucher vorkommen
+        ambiguous_names = meter_names & all_consumer_names
+
         for meter in meters:
             mid = str(meter.id)
             depth = depth_map[meter.id]
@@ -411,16 +421,21 @@ class AnalyticsService:
             else:
                 node_type = "unterzaehler"
 
+            # Label: Bei Namenskollision Typ-Suffix anhängen
+            label = meter.name
+            if label in ambiguous_names:
+                label = f"{label} (Zähler)"
+
             if is_producer:
                 # Erzeuger: links neben dem Elternzähler positionieren
                 parent_depth = depth_map.get(meter.parent_meter_id, 0) if meter.parent_meter_id else 0
                 node_depth = parent_depth  # Gleiche Spalte wie Quellen des Elternzählers
-                get_node_idx(mid, meter.name, node_type, node_depth)
+                get_node_idx(mid, label, node_type, node_depth)
             else:
-                # Verbraucher/Zähler: Tiefe +1 (Spalte 0 = Quellen)
-                get_node_idx(mid, meter.name, node_type, depth + 1)
+                # Zähler: Tiefe +1 (Spalte 0 = Quellen)
+                get_node_idx(mid, label, node_type, depth + 1)
 
-            # Verbindungen aufbauen
+            # Verbindungen aufbauen – immer anlegen, auch bei 0 kWh
             if meter.parent_meter_id:
                 parent = meter_by_id.get(meter.parent_meter_id)
                 if parent:
@@ -429,40 +444,43 @@ class AnalyticsService:
                     parent_type = "eigenproduktion" if getattr(parent, "is_feed_in", False) \
                         else ("hauptzaehler" if parent_depth == 0 else "unterzaehler")
                     parent_node_depth = parent_depth + 1
-                    get_node_idx(parent_id, parent.name, parent_type, parent_node_depth)
+                    parent_label = parent.name
+                    if parent_label in ambiguous_names:
+                        parent_label = f"{parent_label} (Zähler)"
+                    get_node_idx(parent_id, parent_label, parent_type, parent_node_depth)
                     value = consumption_map.get(meter.id, 0)
 
                     if is_producer:
                         # Erzeuger: Energie fließt VON Erzeuger ZUM Elternzähler
-                        if value > 0:
-                            links.append({
-                                "source": node_ids[mid],
-                                "target": node_ids[parent_id],
-                                "value": value,
-                            })
+                        links.append({
+                            "source": node_ids[mid],
+                            "target": node_ids[parent_id],
+                            "value": max(value, 0),
+                        })
                     else:
-                        # Verbraucher: Energie fließt VOM Elternzähler ZUM Kind
-                        if value > 0:
-                            links.append({
-                                "source": node_ids[parent_id],
-                                "target": node_ids[mid],
-                                "value": value,
-                            })
+                        # Zähler: Energie fließt VOM Elternzähler ZUM Kind
+                        links.append({
+                            "source": node_ids[parent_id],
+                            "target": node_ids[mid],
+                            "value": max(value, 0),
+                        })
 
             # Verbindung: Zähler → Verbraucher (Anlagen)
             if meter.consumers:
-                meter_value = consumption_map.get(meter.id, 0)
+                meter_value = max(consumption_map.get(meter.id, 0), 0)
                 per_consumer = meter_value / max(len(meter.consumers), 1)
                 for consumer in meter.consumers:
                     cid = f"consumer_{consumer.id}"
                     consumer_depth = (depth + 2) if not is_producer else (depth + 3)
-                    get_node_idx(cid, consumer.name, "verbraucher", consumer_depth)
-                    if per_consumer > 0:
-                        links.append({
-                            "source": node_ids[mid],
-                            "target": node_ids[cid],
-                            "value": per_consumer,
-                        })
+                    c_label = consumer.name
+                    if c_label in ambiguous_names:
+                        c_label = f"{c_label} (Verbraucher)"
+                    get_node_idx(cid, c_label, "verbraucher", consumer_depth)
+                    links.append({
+                        "source": node_ids[mid],
+                        "target": node_ids[cid],
+                        "value": per_consumer,
+                    })
 
         # Hauptzähler ohne Eltern: "Energiequelle" als Wurzel (Spalte 0)
         root_meters = [m for m in meters if not m.parent_meter_id]

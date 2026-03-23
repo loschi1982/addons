@@ -145,11 +145,13 @@ function computeLayout(
   const targetOffsets = new Array(nodes.length).fill(0);
 
   const layoutLinks: LayoutLink[] = links
-    .filter((l) => l.value > 0)
     .map((link) => {
       const sNode = layoutNodes[link.source];
       const tNode = layoutNodes[link.target];
-      const linkW = Math.max((link.value / (sNode.value || 1)) * sNode.h, 1);
+      // Mindestbreite 2px für strukturelle Verbindungen ohne Verbrauch
+      const linkW = link.value > 0
+        ? Math.max((link.value / (sNode.value || 1)) * sNode.h, 2)
+        : 2;
 
       const sy = sNode.y + sourceOffsets[link.source];
       const ty = tNode.y + targetOffsets[link.target];
@@ -195,15 +197,17 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
             Z`;
 
           const color = NODE_COLORS[sNode.type] || '#94a3b8';
+          const isEmpty = link.value === 0;
           return (
             <path
               key={idx}
               d={path}
-              fill={color}
-              fillOpacity={hoveredLink === idx ? 0.5 : 0.2}
+              fill={isEmpty ? 'none' : color}
+              fillOpacity={isEmpty ? 0 : (hoveredLink === idx ? 0.5 : 0.2)}
               stroke={color}
-              strokeOpacity={hoveredLink === idx ? 0.8 : 0.3}
-              strokeWidth={0.5}
+              strokeOpacity={isEmpty ? 0.3 : (hoveredLink === idx ? 0.8 : 0.3)}
+              strokeWidth={isEmpty ? 1 : 0.5}
+              strokeDasharray={isEmpty ? '4 3' : undefined}
               onMouseEnter={(e) => {
                 setHoveredLink(idx);
                 setTooltip({
