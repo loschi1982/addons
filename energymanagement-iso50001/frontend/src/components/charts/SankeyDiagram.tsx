@@ -73,6 +73,28 @@ function formatValue(val: number): string {
   return `${val.toFixed(0)} kWh`;
 }
 
+/** Durchschnittliche Y-Mitte aller verbundenen Knoten (Barycenter-Heuristik). */
+function avgConnectedY(
+  nodeIdx: number,
+  layoutNodes: LayoutNode[],
+  links: SankeyLink[],
+): number {
+  let sumY = 0;
+  let count = 0;
+  for (const link of links) {
+    if (link.source === nodeIdx) {
+      const t = layoutNodes[link.target];
+      sumY += t.y + t.h / 2;
+      count++;
+    } else if (link.target === nodeIdx) {
+      const s = layoutNodes[link.source];
+      sumY += s.y + s.h / 2;
+      count++;
+    }
+  }
+  return count > 0 ? sumY / count : layoutNodes[nodeIdx].y;
+}
+
 function computeLayout(
   nodes: SankeyNode[],
   links: SankeyLink[],
@@ -124,6 +146,16 @@ function computeLayout(
     column: n.depth != null ? n.depth : (typeColumnFallback[n.type] ?? 1),
   }));
 
+  // Alle Verbraucher in eine dedizierte Spalte ganz rechts verschieben
+  const maxMeterCol = Math.max(
+    ...layoutNodes.filter(n => n.type !== 'verbraucher').map(n => n.column),
+    0,
+  );
+  const CONSUMER_COL = maxMeterCol + 1;
+  for (const n of layoutNodes) {
+    if (n.type === 'verbraucher') n.column = CONSUMER_COL;
+  }
+
   // Spalten gruppieren
   const columns: Map<number, number[]> = new Map();
   layoutNodes.forEach((n, i) => {
@@ -145,15 +177,39 @@ function computeLayout(
   const availableHeight = height - 40;
   const scale = availableHeight / maxColValue * 0.6;
 
+  // Erste Runde: vorläufige Y-Positionen zuweisen
   for (const [col, indices] of columns) {
     const totalH = indices.reduce((s, i) => s + Math.max(layoutNodes[i].value * scale, 4), 0)
       + (indices.length - 1) * NODE_PADDING;
     let y = (height - totalH) / 2;
-
     for (const i of indices) {
       layoutNodes[i].x = col * colWidth;
       layoutNodes[i].y = y;
       layoutNodes[i].h = Math.max(layoutNodes[i].value * scale, 4);
+      y += layoutNodes[i].h + NODE_PADDING;
+    }
+  }
+
+  // Barycenter-Sortierung: Knoten nach Schwerpunkt ihrer verbundenen Knoten ordnen
+  // Minimiert Kreuzungen der Links
+  const sortedCols = Array.from(columns.keys()).sort((a, b) => a - b);
+  for (const col of sortedCols) {
+    if (col === 0) continue;
+    const indices = columns.get(col)!;
+    if (indices.length <= 1) continue;
+
+    indices.sort((a, b) => {
+      const centerA = avgConnectedY(a, layoutNodes, links);
+      const centerB = avgConnectedY(b, layoutNodes, links);
+      return centerA - centerB;
+    });
+
+    // Y-Positionen nach Sortierung neu zuweisen
+    const totalH = indices.reduce((s, i) => s + layoutNodes[i].h, 0)
+      + (indices.length - 1) * NODE_PADDING;
+    let y = (height - totalH) / 2;
+    for (const i of indices) {
+      layoutNodes[i].y = y;
       y += layoutNodes[i].h + NODE_PADDING;
     }
   }
@@ -269,6 +325,30 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
             />
           );
         })}
+
+        {/* Trennlinie Zähler | Verbraucher */}
+        {(() => {
+          const consumerNodes = layout.nodes.filter(n => n.type === 'verbraucher');
+          const meterNodes = layout.nodes.filter(n => n.type !== 'verbraucher');
+          if (consumerNodes.length === 0 || meterNodes.length === 0) return null;
+          const maxMeterX = Math.max(...meterNodes.map(n => n.x + NODE_WIDTH));
+          const minConsumerX = Math.min(...consumerNodes.map(n => n.x));
+          const sepX = (maxMeterX + minConsumerX) / 2;
+          return (
+            <g>
+              <line
+                x1={sepX} y1={8} x2={sepX} y2={height - 8}
+                stroke="#cbd5e1" strokeWidth={1} strokeDasharray="6 4"
+              />
+              <text
+                x={sepX + 6} y={14}
+                className="fill-gray-400" style={{ fontSize: 10, fontWeight: 500 }}
+              >
+                Verbraucher (SEU)
+              </text>
+            </g>
+          );
+        })()}
 
         {/* Knoten */}
         {layout.nodes.map((node, idx) => {
