@@ -90,9 +90,28 @@ async def close_db():
 def async_session_factory():
     """
     Gibt die Session-Factory zurück (für Celery-Tasks und andere Nicht-FastAPI-Kontexte).
+
+    Falls die DB noch nicht initialisiert wurde (z.B. im Celery-Worker),
+    wird eine eigene Engine + Session-Factory erstellt.
     """
+    global _engine, _async_session_factory
+
     if _async_session_factory is None:
-        raise RuntimeError("Datenbank wurde noch nicht initialisiert. Bitte init_db() aufrufen.")
+        # Lazy-Init für Celery-Worker und andere Nicht-FastAPI-Kontexte
+        settings = get_settings()
+        _engine = create_async_engine(
+            settings.database_url,
+            echo=False,
+            pool_size=5,
+            max_overflow=10,
+            pool_recycle=3600,
+        )
+        _async_session_factory = async_sessionmaker(
+            _engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+
     return _async_session_factory()
 
 
