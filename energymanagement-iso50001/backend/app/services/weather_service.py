@@ -6,7 +6,7 @@ und führt die Witterungskorrektur des Heizenergieverbrauchs durch.
 """
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import structlog
@@ -395,7 +395,7 @@ class WeatherCorrectionService:
                 select(func.sum(MeterReading.consumption)).where(
                     MeterReading.meter_id == meter_id,
                     MeterReading.timestamp >= datetime.combine(current, datetime.min.time(), tzinfo=timezone.utc),
-                    MeterReading.timestamp < datetime.combine(period_end, datetime.min.time(), tzinfo=timezone.utc),
+                    MeterReading.timestamp < datetime.combine(period_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc),
                 )
             )
             raw_consumption = cons_result.scalar() or Decimal("0")

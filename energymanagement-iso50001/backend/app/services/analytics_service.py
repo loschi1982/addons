@@ -102,7 +102,7 @@ class AnalyticsService:
             if end_date:
                 query = query.where(
                     MeterReading.timestamp < datetime.combine(
-                        end_date, datetime.min.time(), tzinfo=timezone.utc
+                        end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
                     )
                 )
 
@@ -159,7 +159,7 @@ class AnalyticsService:
                             start, datetime.min.time(), tzinfo=timezone.utc
                         ),
                         MeterReading.timestamp < datetime.combine(
-                            end, datetime.min.time(), tzinfo=timezone.utc
+                            end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
                         ),
                     )
                     .group_by(text("period"))
@@ -328,7 +328,7 @@ class AnalyticsService:
                         start_date, datetime.min.time(), tzinfo=timezone.utc
                     ),
                     MeterReading.timestamp < datetime.combine(
-                        end_date, datetime.min.time(), tzinfo=timezone.utc
+                        end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
                     ),
                 )
             )
@@ -556,7 +556,7 @@ class AnalyticsService:
         start = date(year, 1, 1)
         end = date(year, 12, 31)
         ts_start = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
-        ts_end = datetime.combine(end, datetime.min.time(), tzinfo=timezone.utc)
+        ts_end = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
 
         # Verbrauch pro Zähler mit Gebäude-/Flächen-Daten
         query = (

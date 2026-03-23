@@ -7,7 +7,7 @@ generiert PDF-Dokumente via Jinja2 + WeasyPrint.
 
 import os
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -501,7 +501,7 @@ figure {{ page-break-inside: avoid; }}
                         start, datetime.min.time(), tzinfo=timezone.utc
                     ),
                     MeterReading.timestamp < datetime.combine(
-                        end, datetime.min.time(), tzinfo=timezone.utc
+                        end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
                     ),
                 )
             )

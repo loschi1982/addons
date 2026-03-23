@@ -5,7 +5,7 @@ Stellt KPI-Karten, Energieaufschlüsselung, Top-Verbraucher,
 Zeitreihen und Warnungen für die Dashboard-Übersicht bereit.
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
 import structlog
@@ -177,7 +177,7 @@ class DashboardService:
                     start, datetime.min.time(), tzinfo=timezone.utc
                 ),
                 MeterReading.timestamp < datetime.combine(
-                    end, datetime.min.time(), tzinfo=timezone.utc
+                    end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
                 ),
             )
             .group_by(Meter.unit)
@@ -223,7 +223,7 @@ class DashboardService:
                         start, datetime.min.time(), tzinfo=timezone.utc
                     ),
                     MeterReading.timestamp < datetime.combine(
-                        end, datetime.min.time(), tzinfo=timezone.utc
+                        end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
                     ),
                 )
             )
@@ -254,7 +254,7 @@ class DashboardService:
                     start, datetime.min.time(), tzinfo=timezone.utc
                 ),
                 MeterReading.timestamp < datetime.combine(
-                    end, datetime.min.time(), tzinfo=timezone.utc
+                    end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
                 ),
             )
             .group_by(Meter.energy_type, Meter.unit)
@@ -306,7 +306,7 @@ class DashboardService:
                         start, datetime.min.time(), tzinfo=timezone.utc
                     ),
                     MeterReading.timestamp < datetime.combine(
-                        end, datetime.min.time(), tzinfo=timezone.utc
+                        end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
                     ),
                 )
                 .group_by(func.date_trunc(trunc, MeterReading.timestamp))
@@ -351,7 +351,7 @@ class DashboardService:
                     start, datetime.min.time(), tzinfo=timezone.utc
                 ),
                 MeterReading.timestamp < datetime.combine(
-                    end, datetime.min.time(), tzinfo=timezone.utc
+                    end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
                 ),
             )
             .group_by(Meter.id, Meter.name, Meter.energy_type, Meter.unit)
@@ -437,7 +437,7 @@ class DashboardService:
                         start, datetime.min.time(), tzinfo=timezone.utc
                     ),
                     MeterReading.timestamp < datetime.combine(
-                        end, datetime.min.time(), tzinfo=timezone.utc
+                        end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
                     ),
                 )
             )

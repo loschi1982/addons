@@ -9,7 +9,7 @@ mit Prioritätskaskade für die Faktor-Auflösung.
 import csv
 import io
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import structlog
@@ -155,7 +155,7 @@ class CO2Service:
                     start_date, datetime.min.time(), tzinfo=timezone.utc
                 ),
                 MeterReading.timestamp < datetime.combine(
-                    end_date, datetime.min.time(), tzinfo=timezone.utc
+                    end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
                 ),
             )
         )
