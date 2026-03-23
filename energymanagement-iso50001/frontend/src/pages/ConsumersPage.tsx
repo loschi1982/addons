@@ -15,6 +15,7 @@ interface Consumer {
   priority: string;
   usage_unit_id: string | null;
   description: string | null;
+  meter_ids: string[];
   created_at: string;
 }
 
@@ -132,7 +133,7 @@ export default function ConsumersPage() {
       operating_hours_per_year: consumer.operating_hours_per_year?.toString() || '',
       priority: consumer.priority || 'normal',
       description: consumer.description || '',
-      meter_ids: [],
+      meter_ids: consumer.meter_ids || [],
     });
     setFormError(null);
     setShowModal(true);
@@ -354,7 +355,7 @@ function ConsumerModal({
 }) {
   const hierarchy = useSiteHierarchy(editingConsumer?.usage_unit_id);
   const [meters, setMeters] = useState<MeterOption[]>([]);
-  const [selectedMeterIds, setSelectedMeterIds] = useState<string[]>([]);
+  const [selectedMeterIds, setSelectedMeterIds] = useState<string[]>(form.meter_ids || []);
 
   // Zähler-Liste laden
   useEffect(() => {

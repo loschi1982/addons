@@ -62,7 +62,10 @@ async def list_consumers(
     total = (await db.execute(count_query)).scalar() or 0
 
     offset = (page - 1) * page_size
-    query = query.offset(offset).limit(page_size).order_by(Consumer.name)
+    query = (
+        query.offset(offset).limit(page_size).order_by(Consumer.name)
+        .options(selectinload(Consumer.meters))
+    )
     result = await db.execute(query)
     consumers = result.scalars().all()
 
@@ -73,9 +76,10 @@ async def list_consumers(
             category=c.category,
             rated_power_kw=c.rated_power,
             operating_hours_per_year=int(c.operating_hours) if c.operating_hours else None,
-            priority=str(c.priority),
+            priority=_priority_to_str(c.priority),
             usage_unit_id=c.usage_unit_id,
             description=c.notes,
+            meter_ids=[m.id for m in c.meters],
             created_at=c.created_at,
         )
         for c in consumers
@@ -147,7 +151,12 @@ async def get_consumer(
     db: AsyncSession = Depends(get_db),
 ):
     """Einzelnen Verbraucher abrufen."""
-    consumer = await db.get(Consumer, consumer_id)
+    result = await db.execute(
+        select(Consumer)
+        .where(Consumer.id == consumer_id)
+        .options(selectinload(Consumer.meters))
+    )
+    consumer = result.scalar_one_or_none()
     if not consumer:
         from app.core.exceptions import EnergyManagementError
         raise EnergyManagementError(
@@ -165,6 +174,7 @@ async def get_consumer(
         priority=_priority_to_str(consumer.priority),
         usage_unit_id=consumer.usage_unit_id,
         description=consumer.notes,
+        meter_ids=[m.id for m in consumer.meters],
         created_at=consumer.created_at,
     )
 
