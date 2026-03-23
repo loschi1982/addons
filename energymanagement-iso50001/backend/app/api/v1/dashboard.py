@@ -28,8 +28,17 @@ async def get_dashboard(
     db: AsyncSession = Depends(get_db),
 ):
     """Dashboard-Daten für den angegebenen Zeitraum abrufen."""
-    service = DashboardService(db)
-    return await service.get_dashboard(period_start, period_end, granularity)
+    import structlog
+    logger = structlog.get_logger()
+    try:
+        service = DashboardService(db)
+        result = await service.get_dashboard(period_start, period_end, granularity)
+        return result
+    except Exception as e:
+        logger.error("dashboard_error", error=str(e), error_type=type(e).__name__)
+        import traceback
+        logger.error("dashboard_traceback", tb=traceback.format_exc())
+        raise
 
 
 @router.get("/enpi", response_model=list[EnPIResponse])

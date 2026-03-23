@@ -12,7 +12,6 @@ import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.cache import cached
 from app.models.emission import CO2Calculation
 from app.models.meter import Meter
 from app.models.reading import MeterReading
@@ -34,7 +33,6 @@ class DashboardService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    @cached("dashboard", ttl=300)
     async def get_dashboard(
         self,
         period_start: date | None = None,
@@ -52,12 +50,41 @@ class DashboardService:
         prev_start = date(period_start.year - 1, period_start.month, period_start.day)
         prev_end = date(period_end.year - 1, period_end.month, period_end.day)
 
-        kpi_cards = await self._build_kpi_cards(period_start, period_end, prev_start, prev_end)
-        breakdown = await self._get_energy_breakdown(period_start, period_end)
-        chart = await self._get_consumption_chart(period_start, period_end, granularity)
-        top_consumers = await self._get_top_consumers(period_start, period_end)
-        alerts = await self._get_alerts()
-        enpi = await self._get_enpi_overview(period_start, period_end)
+        try:
+            kpi_cards = await self._build_kpi_cards(period_start, period_end, prev_start, prev_end)
+        except Exception as e:
+            logger.error("dashboard_kpi_error", error=str(e))
+            kpi_cards = []
+
+        try:
+            breakdown = await self._get_energy_breakdown(period_start, period_end)
+        except Exception as e:
+            logger.error("dashboard_breakdown_error", error=str(e))
+            breakdown = []
+
+        try:
+            chart = await self._get_consumption_chart(period_start, period_end, granularity)
+        except Exception as e:
+            logger.error("dashboard_chart_error", error=str(e))
+            chart = []
+
+        try:
+            top_consumers = await self._get_top_consumers(period_start, period_end)
+        except Exception as e:
+            logger.error("dashboard_top_consumers_error", error=str(e))
+            top_consumers = []
+
+        try:
+            alerts = await self._get_alerts()
+        except Exception as e:
+            logger.error("dashboard_alerts_error", error=str(e))
+            alerts = []
+
+        try:
+            enpi = await self._get_enpi_overview(period_start, period_end)
+        except Exception as e:
+            logger.error("dashboard_enpi_error", error=str(e))
+            enpi = []
 
         return {
             "period_start": period_start,
