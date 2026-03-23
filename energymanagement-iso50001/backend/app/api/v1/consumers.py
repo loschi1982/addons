@@ -22,6 +22,15 @@ from app.schemas.meter import ConsumerCreate, ConsumerResponse, ConsumerUpdate
 
 router = APIRouter()
 
+# Mapping zwischen Schema-Strings und DB-Integers für Priorität
+_PRIORITY_TO_INT = {"low": 0, "normal": 1, "high": 2, "critical": 3}
+_PRIORITY_TO_STR = {v: k for k, v in _PRIORITY_TO_INT.items()}
+
+
+def _priority_to_str(val: int | None) -> str:
+    """DB-Integer → Schema-String."""
+    return _PRIORITY_TO_STR.get(val or 0, "normal")
+
 
 @router.get("", response_model=PaginatedResponse[ConsumerResponse])
 async def list_consumers(
@@ -88,12 +97,14 @@ async def create_consumer(
     db: AsyncSession = Depends(get_db),
 ):
     """Neuen Verbraucher anlegen."""
+    priority_val = _PRIORITY_TO_INT.get(request.priority, 1)
+
     consumer = Consumer(
         name=request.name,
         category=request.category,
         rated_power=request.rated_power_kw,
         operating_hours=request.operating_hours_per_year,
-        priority=int(request.priority) if request.priority else 0,
+        priority=priority_val,
         usage_unit_id=request.usage_unit_id,
         notes=request.description,
     )
@@ -117,7 +128,7 @@ async def create_consumer(
         category=consumer.category,
         rated_power_kw=consumer.rated_power,
         operating_hours_per_year=int(consumer.operating_hours) if consumer.operating_hours else None,
-        priority=str(consumer.priority),
+        priority=_priority_to_str(consumer.priority),
         usage_unit_id=consumer.usage_unit_id,
         description=consumer.notes,
         meter_ids=meter_ids_list,
@@ -147,7 +158,7 @@ async def get_consumer(
         category=consumer.category,
         rated_power_kw=consumer.rated_power,
         operating_hours_per_year=int(consumer.operating_hours) if consumer.operating_hours else None,
-        priority=str(consumer.priority),
+        priority=_priority_to_str(consumer.priority),
         usage_unit_id=consumer.usage_unit_id,
         description=consumer.notes,
         created_at=consumer.created_at,
@@ -183,7 +194,10 @@ async def update_consumer(
     }
     for schema_field, model_field in field_map.items():
         if schema_field in data:
-            setattr(consumer, model_field, data[schema_field])
+            value = data[schema_field]
+            if schema_field == "priority":
+                value = _PRIORITY_TO_INT.get(value, 1)
+            setattr(consumer, model_field, value)
 
     # Zähler-Zuordnungen aktualisieren
     meter_ids_list: list[uuid.UUID] = []
@@ -209,7 +223,7 @@ async def update_consumer(
         category=consumer.category,
         rated_power_kw=consumer.rated_power,
         operating_hours_per_year=int(consumer.operating_hours) if consumer.operating_hours else None,
-        priority=str(consumer.priority),
+        priority=_priority_to_str(consumer.priority),
         usage_unit_id=consumer.usage_unit_id,
         description=consumer.notes,
         meter_ids=meter_ids_list,
