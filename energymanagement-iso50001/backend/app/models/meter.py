@@ -93,6 +93,10 @@ class Meter(Base, UUIDMixin, TimestampMixin):
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Betrachtungspunkt: Wenn gesetzt, ist dieser Zähler ein Schema-Einstiegspunkt
+    # Der Unterbaum ab diesem Zähler wird als Energieschema visualisiert
+    schema_label: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
     # Beziehungen
     readings = relationship("MeterReading", back_populates="meter", cascade="all, delete-orphan")
     parent_meter = relationship("Meter", remote_side="Meter.id", backref="sub_meters")
