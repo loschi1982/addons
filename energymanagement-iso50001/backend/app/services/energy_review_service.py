@@ -449,13 +449,26 @@ class EnergyReviewService:
             if enpi.denominator_fixed_value:
                 denominator = enpi.denominator_fixed_value
             elif enpi.denominator_variable_id:
-                # Summe der Variable-Werte im Zeitraum
+                # Werte im Zeitraum suchen (exakte Überlappung)
                 var_q = select(func.sum(RelevantVariableValue.value)).where(
                     RelevantVariableValue.variable_id == enpi.denominator_variable_id,
                     RelevantVariableValue.period_start >= period_start,
                     RelevantVariableValue.period_end <= period_end,
                 )
                 denominator = (await self.db.execute(var_q)).scalar()
+
+                # Fallback: letzten gültigen Wert nehmen (z.B. Fläche)
+                if not denominator:
+                    fallback_q = (
+                        select(RelevantVariableValue.value)
+                        .where(
+                            RelevantVariableValue.variable_id == enpi.denominator_variable_id,
+                            RelevantVariableValue.period_start <= period_end,
+                        )
+                        .order_by(RelevantVariableValue.period_start.desc())
+                        .limit(1)
+                    )
+                    denominator = (await self.db.execute(fallback_q)).scalar()
 
             if not denominator or denominator == 0:
                 raise ValueError("Kein Bezugswert (Denominator) verfügbar")
