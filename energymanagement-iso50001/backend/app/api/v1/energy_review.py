@@ -7,7 +7,7 @@ SEU, EnPI, Baseline und relevante Variablen.
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -379,7 +379,10 @@ async def calculate_enpi(
 ):
     """EnPI für einen Zeitraum berechnen."""
     service = EnergyReviewService(db)
-    value = await service.calculate_enpi(enpi_id, period_start, period_end)
+    try:
+        value = await service.calculate_enpi(enpi_id, period_start, period_end)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return EnPIValueResponse.model_validate(value)
 
 
