@@ -717,6 +717,45 @@ interface IntegrationTestResult {
   message: string;
 }
 
+interface HAEntity {
+  entity_id: string;
+  state: string;
+  attributes: Record<string, unknown>;
+  friendly_name?: string;
+  device_class?: string;
+  unit_of_measurement?: string;
+}
+
+interface ShellyTestResult {
+  connected: boolean;
+  error?: string;
+  device_info?: {
+    model: string;
+    firmware: string;
+    mac: string;
+    gen: number;
+    name: string;
+  };
+  current_energy?: {
+    power: number;
+    energy_wh: number;
+    voltage: number;
+    current: number;
+  };
+}
+
+interface ConnectionTestResult {
+  connected: boolean;
+  error?: string;
+}
+
+interface PollResult {
+  polled?: number;
+  success?: number;
+  errors?: number;
+  details?: Array<Record<string, unknown>>;
+}
+
 function IntegrationsPanel() {
   const [haConfig, setHaConfig] = useState({ base_url: '', access_token: '', auth_enabled: false, default_role: 'viewer' });
   const [weatherConfig, setWeatherConfig] = useState({ enabled: true, station_id: '', latitude: '', longitude: '' });
@@ -728,6 +767,33 @@ function IntegrationsPanel() {
   const [testResults, setTestResults] = useState<Record<string, IntegrationTestResult | null>>({});
   const [testing, setTesting] = useState<Record<string, boolean>>({});
   const [stations, setStations] = useState<{ id: string; name: string; dwd_station_id: string }[]>([]);
+
+  // HA Entity-Browser
+  const [showEntityBrowser, setShowEntityBrowser] = useState(false);
+  const [haEntities, setHaEntities] = useState<HAEntity[]>([]);
+  const [loadingEntities, setLoadingEntities] = useState(false);
+  const [domainFilter, setDomainFilter] = useState('');
+  const [entitySearch, setEntitySearch] = useState('');
+
+  // Verbindungstests
+  const [deviceTestTab, setDeviceTestTab] = useState<'shelly' | 'modbus' | 'knx'>('shelly');
+  const [shellyHost, setShellyHost] = useState('');
+  const [shellyTesting, setShellyTesting] = useState(false);
+  const [shellyResult, setShellyResult] = useState<ShellyTestResult | null>(null);
+  const [modbusHost, setModbusHost] = useState('');
+  const [modbusPort, setModbusPort] = useState('502');
+  const [modbusUnitId, setModbusUnitId] = useState('1');
+  const [modbusRegister, setModbusRegister] = useState('0');
+  const [modbusTesting, setModbusTesting] = useState(false);
+  const [modbusResult, setModbusResult] = useState<ConnectionTestResult | null>(null);
+  const [knxGatewayIp, setKnxGatewayIp] = useState('');
+  const [knxPort, setKnxPort] = useState('3671');
+  const [knxTesting, setKnxTesting] = useState(false);
+  const [knxResult, setKnxResult] = useState<ConnectionTestResult | null>(null);
+
+  // Manuelles Polling
+  const [polling, setPolling] = useState(false);
+  const [pollResult, setPollResult] = useState<PollResult | null>(null);
 
   useEffect(() => {
     // Settings laden
@@ -850,6 +916,105 @@ function IntegrationsPanel() {
             <Save className="w-3.5 h-3.5" />
             {saved === 'integrations_ha' ? 'Gespeichert!' : 'Speichern'}
           </button>
+        </div>
+
+        {/* Entity-Browser */}
+        <div className="mt-4 border-t pt-4">
+          <button
+            onClick={() => setShowEntityBrowser(!showEntityBrowser)}
+            className="text-sm font-medium text-primary-600 hover:text-primary-700"
+          >
+            {showEntityBrowser ? '▾ Entity-Browser ausblenden' : '▸ Entity-Browser anzeigen'}
+          </button>
+
+          {showEntityBrowser && (
+            <div className="mt-3">
+              <div className="flex gap-3 mb-3">
+                <select
+                  className="input w-48"
+                  value={domainFilter}
+                  onChange={(e) => setDomainFilter(e.target.value)}
+                >
+                  <option value="">Alle Domains</option>
+                  <option value="sensor">sensor</option>
+                  <option value="input_number">input_number</option>
+                  <option value="climate">climate</option>
+                  <option value="switch">switch</option>
+                  <option value="binary_sensor">binary_sensor</option>
+                </select>
+                <input
+                  type="text"
+                  className="input flex-1"
+                  placeholder="Suche nach Entity-ID oder Name…"
+                  value={entitySearch}
+                  onChange={(e) => setEntitySearch(e.target.value)}
+                />
+                <button
+                  onClick={async () => {
+                    setLoadingEntities(true);
+                    try {
+                      const params = new URLSearchParams();
+                      if (domainFilter) params.append('domain', domainFilter);
+                      const res = await apiClient.get<{ entities: HAEntity[]; count: number }>(
+                        `/api/v1/integrations/ha/entities?${params}`
+                      );
+                      setHaEntities(res.data.entities);
+                    } catch { /* interceptor */ }
+                    setLoadingEntities(false);
+                  }}
+                  className="btn-primary text-sm"
+                  disabled={loadingEntities}
+                >
+                  {loadingEntities ? 'Laden…' : 'Entitäten laden'}
+                </button>
+              </div>
+
+              {haEntities.length > 0 && (
+                <div className="overflow-hidden rounded-lg border">
+                  <div className="max-h-96 overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead className="sticky top-0 border-b bg-gray-50 text-xs uppercase text-gray-500">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Entity-ID</th>
+                          <th className="px-3 py-2 text-left">Name</th>
+                          <th className="px-3 py-2 text-right">Wert</th>
+                          <th className="px-3 py-2 text-left">Einheit</th>
+                          <th className="px-3 py-2 text-left">Klasse</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {haEntities
+                          .filter((e) => {
+                            if (!entitySearch) return true;
+                            const lower = entitySearch.toLowerCase();
+                            return (
+                              e.entity_id.toLowerCase().includes(lower) ||
+                              (e.friendly_name || '').toLowerCase().includes(lower)
+                            );
+                          })
+                          .map((e) => (
+                            <tr key={e.entity_id} className="hover:bg-gray-50">
+                              <td className="px-3 py-2 font-mono text-xs">{e.entity_id}</td>
+                              <td className="px-3 py-2">{e.friendly_name || '–'}</td>
+                              <td className="px-3 py-2 text-right font-mono">{e.state}</td>
+                              <td className="px-3 py-2 text-gray-500">{e.unit_of_measurement || '–'}</td>
+                              <td className="px-3 py-2 text-gray-500">{e.device_class || '–'}</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="border-t bg-gray-50 px-3 py-2 text-xs text-gray-500">
+                    {haEntities.filter((e) => {
+                      if (!entitySearch) return true;
+                      const lower = entitySearch.toLowerCase();
+                      return e.entity_id.toLowerCase().includes(lower) || (e.friendly_name || '').toLowerCase().includes(lower);
+                    }).length} von {haEntities.length} Entitäten
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1122,6 +1287,291 @@ function IntegrationsPanel() {
             {saved === 'integrations_bacnet' ? 'Gespeichert!' : 'Speichern'}
           </button>
         </div>
+      </div>
+
+      {/* Verbindungstest – Feldgeräte */}
+      <div className="border rounded-lg p-5">
+        <h3 className="text-base font-semibold text-gray-900 mb-1">Verbindungstest</h3>
+        <p className="text-sm text-gray-500 mb-4">Ad-hoc Verbindungstests für Feldgeräte</p>
+
+        <div className="flex gap-4 mb-4 border-b">
+          {(['shelly', 'modbus', 'knx'] as const).map((tab) => (
+            <button
+              key={tab}
+              className={`pb-2 text-sm font-medium ${
+                deviceTestTab === tab
+                  ? 'border-b-2 border-primary-600 text-primary-600'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+              onClick={() => setDeviceTestTab(tab)}
+            >
+              {tab === 'shelly' ? 'Shelly' : tab === 'modbus' ? 'Modbus' : 'KNX'}
+            </button>
+          ))}
+        </div>
+
+        {/* Shelly */}
+        {deviceTestTab === 'shelly' && (
+          <div>
+            <p className="mb-3 text-sm text-gray-500">
+              IP-Adresse eines Shelly-Geräts eingeben (Gen1 + Gen2+).
+            </p>
+            <div className="flex gap-3 mb-4">
+              <input
+                type="text"
+                className="input flex-1 max-w-xs"
+                placeholder="z.B. 192.168.1.100"
+                value={shellyHost}
+                onChange={(e) => setShellyHost(e.target.value)}
+              />
+              <button
+                onClick={async () => {
+                  if (!shellyHost) return;
+                  setShellyTesting(true);
+                  setShellyResult(null);
+                  try {
+                    const res = await apiClient.post<ShellyTestResult>(
+                      `/api/v1/integrations/shelly/test?host=${encodeURIComponent(shellyHost)}`
+                    );
+                    setShellyResult(res.data);
+                  } catch (err: unknown) {
+                    const error = err as { response?: { data?: { detail?: string } } };
+                    setShellyResult({ connected: false, error: error.response?.data?.detail || 'Verbindungsfehler' });
+                  }
+                  setShellyTesting(false);
+                }}
+                className="btn-primary text-sm"
+                disabled={shellyTesting || !shellyHost}
+              >
+                {shellyTesting ? 'Teste…' : 'Verbindung testen'}
+              </button>
+            </div>
+            {shellyResult && (
+              <div className={`rounded-lg p-4 ${shellyResult.connected ? 'bg-green-50' : 'bg-red-50'}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className={`h-2.5 w-2.5 rounded-full ${shellyResult.connected ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <span className={`font-medium ${shellyResult.connected ? 'text-green-700' : 'text-red-700'}`}>
+                    {shellyResult.connected ? 'Verbindung erfolgreich' : 'Verbindung fehlgeschlagen'}
+                  </span>
+                </div>
+                {shellyResult.error && <p className="text-sm text-red-600">{shellyResult.error}</p>}
+                {shellyResult.device_info && (
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                    <div><span className="text-gray-500">Modell:</span> {shellyResult.device_info.model}</div>
+                    <div><span className="text-gray-500">Generation:</span> Gen{shellyResult.device_info.gen}</div>
+                    <div><span className="text-gray-500">Name:</span> {shellyResult.device_info.name || '–'}</div>
+                    <div><span className="text-gray-500">MAC:</span> {shellyResult.device_info.mac}</div>
+                    <div><span className="text-gray-500">Firmware:</span> {shellyResult.device_info.firmware}</div>
+                  </div>
+                )}
+                {shellyResult.current_energy && (
+                  <div className="mt-3 grid grid-cols-4 gap-3">
+                    {[
+                      ['Leistung', `${shellyResult.current_energy.power} W`],
+                      ['Energie', `${(shellyResult.current_energy.energy_wh / 1000).toFixed(2)} kWh`],
+                      ['Spannung', `${shellyResult.current_energy.voltage} V`],
+                      ['Strom', `${shellyResult.current_energy.current} A`],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-lg border bg-white p-2 text-center">
+                        <div className="text-sm font-semibold">{value}</div>
+                        <div className="text-xs text-gray-500">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Modbus */}
+        {deviceTestTab === 'modbus' && (
+          <div>
+            <p className="mb-3 text-sm text-gray-500">
+              Verbindung zu einem Modbus TCP-Gerät testen (z.B. Janitza, Siemens, ABB).
+            </p>
+            <div className="grid grid-cols-4 gap-3 mb-4">
+              <div>
+                <label className="label">Host / IP *</label>
+                <input type="text" className="input" placeholder="192.168.1.50" value={modbusHost} onChange={(e) => setModbusHost(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Port</label>
+                <input type="number" className="input" value={modbusPort} onChange={(e) => setModbusPort(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Unit-ID</label>
+                <input type="number" className="input" value={modbusUnitId} onChange={(e) => setModbusUnitId(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Test-Register</label>
+                <input type="number" className="input" value={modbusRegister} onChange={(e) => setModbusRegister(e.target.value)} />
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                if (!modbusHost) return;
+                setModbusTesting(true);
+                setModbusResult(null);
+                try {
+                  const params = new URLSearchParams({ host: modbusHost, port: modbusPort, unit_id: modbusUnitId, register: modbusRegister });
+                  const res = await apiClient.post<ConnectionTestResult>(`/api/v1/integrations/modbus/test?${params}`);
+                  setModbusResult(res.data);
+                } catch (err: unknown) {
+                  const error = err as { response?: { data?: { detail?: string } } };
+                  setModbusResult({ connected: false, error: error.response?.data?.detail || 'Verbindungsfehler' });
+                }
+                setModbusTesting(false);
+              }}
+              className="btn-primary text-sm"
+              disabled={modbusTesting || !modbusHost}
+            >
+              {modbusTesting ? 'Teste…' : 'Verbindung testen'}
+            </button>
+            {modbusResult && (
+              <div className={`mt-4 rounded-lg p-4 ${modbusResult.connected ? 'bg-green-50' : 'bg-red-50'}`}>
+                <div className="flex items-center gap-2">
+                  <div className={`h-2.5 w-2.5 rounded-full ${modbusResult.connected ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <span className={`font-medium ${modbusResult.connected ? 'text-green-700' : 'text-red-700'}`}>
+                    {modbusResult.connected ? 'Modbus-Gerät erreichbar' : 'Verbindung fehlgeschlagen'}
+                  </span>
+                </div>
+                {modbusResult.error && <p className="mt-1 text-sm text-red-600">{modbusResult.error}</p>}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* KNX */}
+        {deviceTestTab === 'knx' && (
+          <div>
+            <p className="mb-3 text-sm text-gray-500">
+              Verbindung zu einem KNX/IP-Gateway testen (Tunneling-Modus).
+            </p>
+            <div className="grid grid-cols-2 gap-3 mb-4 max-w-md">
+              <div>
+                <label className="label">Gateway-IP *</label>
+                <input type="text" className="input" placeholder="192.168.1.10" value={knxGatewayIp} onChange={(e) => setKnxGatewayIp(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Port</label>
+                <input type="number" className="input" value={knxPort} onChange={(e) => setKnxPort(e.target.value)} />
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                if (!knxGatewayIp) return;
+                setKnxTesting(true);
+                setKnxResult(null);
+                try {
+                  const params = new URLSearchParams({ gateway_ip: knxGatewayIp, gateway_port: knxPort });
+                  const res = await apiClient.post<ConnectionTestResult>(`/api/v1/integrations/knx/test?${params}`);
+                  setKnxResult(res.data);
+                } catch (err: unknown) {
+                  const error = err as { response?: { data?: { detail?: string } } };
+                  setKnxResult({ connected: false, error: error.response?.data?.detail || 'Verbindungsfehler' });
+                }
+                setKnxTesting(false);
+              }}
+              className="btn-primary text-sm"
+              disabled={knxTesting || !knxGatewayIp}
+            >
+              {knxTesting ? 'Teste…' : 'Verbindung testen'}
+            </button>
+            {knxResult && (
+              <div className={`mt-4 rounded-lg p-4 ${knxResult.connected ? 'bg-green-50' : 'bg-red-50'}`}>
+                <div className="flex items-center gap-2">
+                  <div className={`h-2.5 w-2.5 rounded-full ${knxResult.connected ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <span className={`font-medium ${knxResult.connected ? 'text-green-700' : 'text-red-700'}`}>
+                    {knxResult.connected ? 'KNX-Gateway erreichbar' : 'Verbindung fehlgeschlagen'}
+                  </span>
+                </div>
+                {knxResult.error && <p className="mt-1 text-sm text-red-600">{knxResult.error}</p>}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Manuelles Polling */}
+      <div className="border rounded-lg p-5">
+        <h3 className="text-base font-semibold text-gray-900 mb-1">Manuelles Polling</h3>
+        <p className="mb-4 text-sm text-gray-500">
+          Alle Zähler mit automatischer Datenquelle (Shelly, Modbus, KNX, Home Assistant) sofort abfragen.
+          Im Normalbetrieb erfolgt dies automatisch per Celery-Beat.
+        </p>
+
+        <button
+          onClick={async () => {
+            setPolling(true);
+            setPollResult(null);
+            try {
+              const res = await apiClient.post<PollResult>('/api/v1/integrations/poll');
+              setPollResult(res.data);
+            } catch {
+              setPollResult({ errors: 1, polled: 0, success: 0 });
+            }
+            setPolling(false);
+          }}
+          className="btn-primary text-sm"
+          disabled={polling}
+        >
+          {polling ? 'Polling läuft…' : 'Alle Zähler jetzt abfragen'}
+        </button>
+
+        {pollResult && (
+          <div className="mt-4">
+            <div className="grid grid-cols-3 gap-4 mb-4">
+              <div className="rounded-lg border bg-gray-50 p-3 text-center">
+                <div className="text-2xl font-bold">{pollResult.polled ?? 0}</div>
+                <div className="text-xs text-gray-500 mt-1">Abgefragt</div>
+              </div>
+              <div className="rounded-lg border bg-gray-50 p-3 text-center">
+                <div className="text-2xl font-bold text-green-600">{pollResult.success ?? 0}</div>
+                <div className="text-xs text-gray-500 mt-1">Erfolgreich</div>
+              </div>
+              <div className="rounded-lg border bg-gray-50 p-3 text-center">
+                <div className="text-2xl font-bold text-red-600">{pollResult.errors ?? 0}</div>
+                <div className="text-xs text-gray-500 mt-1">Fehler</div>
+              </div>
+            </div>
+
+            {pollResult.details && pollResult.details.length > 0 && (
+              <div className="overflow-hidden rounded-lg border">
+                <table className="w-full text-sm">
+                  <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Zähler</th>
+                      <th className="px-3 py-2 text-left">Status</th>
+                      <th className="px-3 py-2 text-right">Wert</th>
+                      <th className="px-3 py-2 text-right">Verbrauch</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {pollResult.details.map((d, idx) => (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="px-3 py-2">{(d.meter_name as string) || (d.meter_id as string)}</td>
+                        <td className="px-3 py-2">
+                          {d.success ? (
+                            <span className="text-green-600">{d.skipped ? 'Unverändert' : 'OK'}</span>
+                          ) : (
+                            <span className="text-red-600">{(d.error as string) || 'Fehler'}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono">
+                          {d.value != null ? (d.value as number).toLocaleString('de-DE', { minimumFractionDigits: 2 }) : '–'}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono">
+                          {d.consumption != null ? (d.consumption as number).toLocaleString('de-DE', { minimumFractionDigits: 2 }) : '–'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -23,7 +23,6 @@ const resources = {
       'nav.iso': 'ISO 50001',
       'nav.users': 'Benutzer',
       'nav.import': 'Import',
-      'nav.integrations': 'Integrationen',
       'nav.settings': 'Einstellungen',
       // Allgemein
       'common.save': 'Speichern',
@@ -66,7 +65,6 @@ const resources = {
       'nav.iso': 'ISO 50001',
       'nav.users': 'Users',
       'nav.import': 'Import',
-      'nav.integrations': 'Integrations',
       'nav.settings': 'Settings',
       'common.save': 'Save',
       'common.cancel': 'Cancel',
