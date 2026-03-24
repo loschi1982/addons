@@ -19,6 +19,7 @@ from app.api.v1 import (
     energy_review,
     imports,
     integrations,
+    invoices,
     iso,
     meters,
     readings,
@@ -45,6 +46,7 @@ api_router.include_router(meters.router, prefix="/meters", tags=["Zähler"])
 api_router.include_router(readings.router, prefix="/readings", tags=["Zählerstände"])
 api_router.include_router(consumers.router, prefix="/consumers", tags=["Verbraucher"])
 api_router.include_router(allocations.router, prefix="/allocations", tags=["Zähler-Zuordnungen"])
+api_router.include_router(invoices.router, tags=["Abrechnungen"])
 api_router.include_router(imports.router, prefix="/imports", tags=["Datenimport"])
 
 # Analysen und Berichte
