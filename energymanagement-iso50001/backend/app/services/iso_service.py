@@ -51,7 +51,9 @@ class ISOService:
 
     async def create_context(self, data: dict) -> OrganizationContext:
         """Organisationskontext erstmalig anlegen."""
-        ctx = OrganizationContext(**data, last_reviewed=data.get("last_reviewed", date.today()))
+        if "last_reviewed" not in data:
+            data["last_reviewed"] = date.today()
+        ctx = OrganizationContext(**data)
         self.db.add(ctx)
         await self.db.commit()
         await self.db.refresh(ctx)
