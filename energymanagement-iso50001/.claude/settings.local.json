@@ -20,7 +20,9 @@
       "Bash(ls /home/rico/addons/energymanagement-iso50001/backend/.env*)",
       "Bash(ls /home/rico/addons/energymanagement-iso50001/.env*)",
       "Bash(DATABASE_URL=\"postgresql+asyncpg://energy:energy@192.168.178.142:5432/energy_management\" PATH=\"/var/data/python/bin:$PATH\" alembic upgrade head)",
-      "Bash(DATABASE_URL=\"postgresql+asyncpg://energy:energy@192.168.178.142:5432/energy_management\" PATH=\"/var/data/python/bin:$PATH\" python3 -c \":*)"
+      "Bash(DATABASE_URL=\"postgresql+asyncpg://energy:energy@192.168.178.142:5432/energy_management\" PATH=\"/var/data/python/bin:$PATH\" python3 -c \":*)",
+      "Bash(DATABASE_URL=\"postgresql+asyncpg://energy:energy@192.168.178.142:5432/energy_management\" PATH=\"/var/data/python/bin:$PATH\" uvicorn app.main:create_app --factory --reload --host 0.0.0.0 --port 8099)",
+      "Bash(python3 -c \":*)"
     ]
   }
 }
