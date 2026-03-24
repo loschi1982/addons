@@ -20,7 +20,6 @@ import ReportsPage from '@/pages/ReportsPage';
 import ISOPage from '@/pages/ISOPage';
 import UsersPage from '@/pages/UsersPage';
 import ImportPage from '@/pages/ImportPage';
-import IntegrationsPage from '@/pages/IntegrationsPage';
 import AnalyticsPage from '@/pages/AnalyticsPage';
 import SettingsPage from '@/pages/SettingsPage';
 import MeterMapPage from '@/pages/MeterMapPage';
@@ -84,7 +83,7 @@ export default function App() {
         <Route path="iso/*" element={<ISOPage />} />
         <Route path="users" element={<UsersPage />} />
         <Route path="import" element={<ImportPage />} />
-        <Route path="integrations" element={<IntegrationsPage />} />
+        <Route path="integrations" element={<Navigate to="/settings" replace />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
     </Routes>
