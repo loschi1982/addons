@@ -7,7 +7,20 @@
       "Read(//home/rico/.nvm/versions/node/**)",
       "Read(//usr/local/bin/**)",
       "Bash(grep -r data_source /home/rico/addons/energymanagement-iso50001/backend/seed_data --include=*.json)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(python -m alembic upgrade head)",
+      "Bash(alembic upgrade:*)",
+      "Bash(python3 -c \"import alembic; print\\(alembic.__file__\\)\")",
+      "Bash(docker ps:*)",
+      "Bash(pip3 list:*)",
+      "Read(//home/rico/.local/bin/**)",
+      "Bash(ls /home/rico/addons/energymanagement-iso50001/backend/requirements*.txt)",
+      "Bash(pip3 install:*)",
+      "Bash(PATH=\"/var/data/python/bin:$PATH\" alembic upgrade head)",
+      "Bash(ls /home/rico/addons/energymanagement-iso50001/backend/.env*)",
+      "Bash(ls /home/rico/addons/energymanagement-iso50001/.env*)",
+      "Bash(DATABASE_URL=\"postgresql+asyncpg://energy:energy@192.168.178.142:5432/energy_management\" PATH=\"/var/data/python/bin:$PATH\" alembic upgrade head)",
+      "Bash(DATABASE_URL=\"postgresql+asyncpg://energy:energy@192.168.178.142:5432/energy_management\" PATH=\"/var/data/python/bin:$PATH\" python3 -c \":*)"
     ]
   }
 }
