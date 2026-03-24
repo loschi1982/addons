@@ -50,6 +50,7 @@ def _meter_to_response(meter) -> MeterResponse:
         tariff_info=meter.tariff_info,
         virtual_config=meter.virtual_config,
         notes=getattr(meter, 'notes', None),
+        schema_label=getattr(meter, 'schema_label', None),
         is_active=meter.is_active,
         created_at=meter.created_at,
     )
@@ -171,6 +172,27 @@ async def poll_all_meters(
 
     manager = PollingManager(db)
     return await manager.poll_all_meters()
+
+
+@router.get("/schema-roots")
+async def get_schema_roots(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Alle Zähler mit schema_label (Betrachtungspunkte) laden."""
+    service = MeterService(db)
+    return await service.get_schema_roots()
+
+
+@router.get("/{meter_id}/subtree")
+async def get_meter_subtree(
+    meter_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Zählerbaum ab einem bestimmten Zähler aufbauen."""
+    service = MeterService(db)
+    return await service.get_subtree(meter_id)
 
 
 @router.get("/{meter_id}", response_model=MeterDetailResponse)

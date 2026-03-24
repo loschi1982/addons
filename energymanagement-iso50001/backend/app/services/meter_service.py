@@ -108,6 +108,7 @@ class MeterService:
             is_virtual=data.get("is_virtual", False),
             is_feed_in=data.get("is_feed_in", False),
             virtual_config=data.get("virtual_config"),
+            schema_label=data.get("schema_label"),
         )
         self.db.add(meter)
         await self.db.commit()
@@ -142,6 +143,7 @@ class MeterService:
             "location", "cost_center", "tariff_info", "is_weather_corrected",
             "co2_factor_override", "is_active",
             "is_submeter", "is_virtual", "is_feed_in", "is_delivery_based", "virtual_config",
+            "schema_label",
         ]
 
         for field in updatable_fields:
@@ -206,3 +208,72 @@ class MeterService:
             )
         )
         return list(result.scalars().all())
+
+    async def get_schema_roots(self) -> list[dict]:
+        """Alle Zähler mit schema_label (Betrachtungspunkte) laden."""
+        result = await self.db.execute(
+            select(Meter).where(
+                Meter.schema_label.isnot(None),
+                Meter.is_active == True,  # noqa: E712
+            ).order_by(Meter.schema_label)
+        )
+        meters = result.scalars().all()
+
+        roots = []
+        for m in meters:
+            # Anzahl Unterzähler (direkt + rekursiv) zählen
+            count_result = await self.db.execute(
+                select(Meter.id).where(
+                    Meter.parent_meter_id == m.id,
+                    Meter.is_active == True,  # noqa: E712
+                )
+            )
+            child_count = len(count_result.scalars().all())
+            roots.append({
+                "id": m.id,
+                "name": m.name,
+                "schema_label": m.schema_label,
+                "energy_type": m.energy_type,
+                "unit": m.unit,
+                "child_count": child_count,
+            })
+        return roots
+
+    async def get_subtree(self, meter_id: uuid.UUID) -> dict:
+        """Zählerbaum ab einem bestimmten Zähler aufbauen."""
+        # Wurzel laden
+        root = await self.db.get(Meter, meter_id)
+        if not root:
+            raise MeterNotFoundException(str(meter_id))
+
+        # Alle aktiven Zähler laden und Index aufbauen
+        result = await self.db.execute(
+            select(Meter).where(Meter.is_active == True)  # noqa: E712
+        )
+        all_meters = result.scalars().all()
+
+        children_by_parent: dict[uuid.UUID | None, list[Meter]] = {}
+        for m in all_meters:
+            children_by_parent.setdefault(m.parent_meter_id, []).append(m)
+
+        def build_tree(parent_id: uuid.UUID) -> list[dict]:
+            nodes = []
+            for m in children_by_parent.get(parent_id, []):
+                nodes.append({
+                    "id": m.id,
+                    "name": m.name,
+                    "energy_type": m.energy_type,
+                    "unit": m.unit,
+                    "schema_label": m.schema_label,
+                    "children": build_tree(m.id),
+                })
+            return nodes
+
+        return {
+            "id": root.id,
+            "name": root.name,
+            "energy_type": root.energy_type,
+            "unit": root.unit,
+            "schema_label": root.schema_label,
+            "children": build_tree(root.id),
+        }
