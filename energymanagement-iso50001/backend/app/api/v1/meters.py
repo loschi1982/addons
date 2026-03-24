@@ -6,6 +6,7 @@ Die Baumansicht zeigt die Struktur visuell an.
 """
 
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -187,12 +188,14 @@ async def get_schema_roots(
 @router.get("/{meter_id}/subtree")
 async def get_meter_subtree(
     meter_id: uuid.UUID,
+    period_start: date | None = None,
+    period_end: date | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Zählerbaum ab einem bestimmten Zähler aufbauen."""
+    """Zählerbaum ab einem bestimmten Zähler mit Verbrauchsdaten aufbauen."""
     service = MeterService(db)
-    return await service.get_subtree(meter_id)
+    return await service.get_subtree(meter_id, period_start, period_end)
 
 
 @router.get("/{meter_id}", response_model=MeterDetailResponse)
