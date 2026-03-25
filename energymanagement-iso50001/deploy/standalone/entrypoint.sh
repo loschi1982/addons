@@ -40,7 +40,6 @@ celery -A app.tasks worker \
     --loglevel="${LOG_LEVEL:-info}" \
     --concurrency=2 \
     --pool=prefork \
-    -Q default,imports,reports,sync \
     &
 CELERY_WORKER_PID=$!
 

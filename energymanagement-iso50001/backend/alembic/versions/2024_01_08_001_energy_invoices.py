@@ -7,6 +7,7 @@ Create Date: 2024-01-08
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = "a8d001_invoices"
@@ -16,6 +17,11 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    insp = inspect(bind)
+    if "energy_invoices" in insp.get_table_names():
+        return
+
     op.create_table(
         "energy_invoices",
         sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),

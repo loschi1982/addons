@@ -6,6 +6,7 @@ Create Date: 2024-01-07
 """
 
 from alembic import op
+from sqlalchemy import inspect
 import sqlalchemy as sa
 
 revision = "a7d001_schema_label"
@@ -15,7 +16,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("meters", sa.Column("schema_label", sa.String(100), nullable=True))
+    bind = op.get_bind()
+    columns = [c["name"] for c in inspect(bind).get_columns("meters")]
+    if "schema_label" not in columns:
+        op.add_column("meters", sa.Column("schema_label", sa.String(100), nullable=True))
 
 
 def downgrade() -> None:
