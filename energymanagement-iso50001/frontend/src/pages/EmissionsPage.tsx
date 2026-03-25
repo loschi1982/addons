@@ -68,9 +68,9 @@ export default function EmissionsPage() {
   return (
     <div>
       <div>
-        <h1 className="page-title">CO\u2082-Emissionen</h1>
+        <h1 className="page-title">CO₂-Emissionen</h1>
         <p className="mt-1 text-sm text-gray-500">
-          CO\u2082-Bilanzierung, Emissionsfaktoren und Reduktionsziele
+          CO₂-Bilanzierung, Emissionsfaktoren und Reduktionsziele
         </p>
       </div>
 
@@ -149,7 +149,7 @@ function DashboardPanel() {
       {/* KPI-Kacheln */}
       <div className="grid grid-cols-4 gap-4">
         <KPICard
-          label="CO\u2082 Gesamt"
+          label="CO₂ Gesamt"
           value={current ? `${(Number(current.total_co2_kg) / 1000).toFixed(1)} t` : '0 t'}
           subtitle={current?.trend_vs_previous != null
             ? `${Number(current.trend_vs_previous) > 0 ? '+' : ''}${Number(current.trend_vs_previous).toFixed(1)} % vs. Vorjahr`
@@ -165,7 +165,7 @@ function DashboardPanel() {
           value={current ? `${Number(current.avg_co2_g_per_kwh).toFixed(0)} g/kWh` : '–'}
         />
         <KPICard
-          label="Vorjahr CO\u2082"
+          label="Vorjahr CO₂"
           value={previous ? `${(Number(previous.total_co2_kg) / 1000).toFixed(1)} t` : '–'}
           subtitle={`${year - 1}`}
         />
@@ -174,7 +174,7 @@ function DashboardPanel() {
       {/* Monatlicher Verlauf */}
       {dashboard.monthly_trend.length > 0 && (
         <div className="card">
-          <h3 className="mb-3 text-sm font-semibold">CO\u2082-Emissionen pro Monat ({year})</h3>
+          <h3 className="mb-3 text-sm font-semibold">CO₂-Emissionen pro Monat ({year})</h3>
           <div className="flex items-end gap-1 h-44">
             {dashboard.monthly_trend.map((m) => {
               const maxCO2 = Math.max(...dashboard.monthly_trend.map((d) => d.co2_kg), 1);
@@ -193,7 +193,7 @@ function DashboardPanel() {
               );
             })}
           </div>
-          <div className="mt-1 text-right text-[10px] text-gray-400">in Tonnen CO\u2082</div>
+          <div className="mt-1 text-right text-[10px] text-gray-400">in Tonnen CO₂</div>
         </div>
       )}
 
@@ -270,6 +270,26 @@ function FactorsPanel() {
   });
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [autoFilled, setAutoFilled] = useState(false);
+
+  // Auto-Vorausfüllung: Wenn Quelle+Energieträger+Jahr einen bekannten Faktor ergeben
+  const tryAutoFill = useCallback((sourceId: string, energyType: string, year: string) => {
+    if (!sourceId || !year) { setAutoFilled(false); return; }
+    const sourceName = sources.find(s => s.id === sourceId)?.name;
+    const match = factors.find(
+      f => f.source_name === sourceName && f.energy_type === energyType && f.year === parseInt(year)
+    );
+    if (match) {
+      setForm(prev => ({
+        ...prev,
+        co2_g_per_kwh: String(Number(match.co2_g_per_kwh)),
+        scope: match.scope || 'scope_2',
+      }));
+      setAutoFilled(true);
+    } else {
+      setAutoFilled(false);
+    }
+  }, [sources, factors]);
 
   const loadFactors = useCallback(async () => {
     setLoading(true);
@@ -365,7 +385,7 @@ function FactorsPanel() {
             <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
               <tr>
                 <th className="px-4 py-2 text-left">Energieträger</th>
-                <th className="px-4 py-2 text-right">g CO\u2082/kWh</th>
+                <th className="px-4 py-2 text-right">g CO₂/kWh</th>
                 <th className="px-4 py-2 text-center">Jahr</th>
                 <th className="px-4 py-2 text-left">Scope</th>
                 <th className="px-4 py-2 text-left">Quelle</th>
@@ -405,7 +425,11 @@ function FactorsPanel() {
               <div>
                 <label className="label">Quelle *</label>
                 <select className="input" required value={form.source_id}
-                  onChange={(e) => setForm({ ...form, source_id: e.target.value })}>
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setForm(prev => ({ ...prev, source_id: val }));
+                    tryAutoFill(val, form.energy_type, form.year);
+                  }}>
                   <option value="">– Quelle wählen –</option>
                   {sources.map((s) => (
                     <option key={s.id} value={s.id}>{s.name}</option>
@@ -417,7 +441,11 @@ function FactorsPanel() {
                 <div>
                   <label className="label">Energieträger *</label>
                   <select className="input" value={form.energy_type}
-                    onChange={(e) => setForm({ ...form, energy_type: e.target.value })}>
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setForm(prev => ({ ...prev, energy_type: val }));
+                      tryAutoFill(form.source_id, val, form.year);
+                    }}>
                     {Object.entries(ENERGY_TYPE_LABELS).map(([k, v]) => (
                       <option key={k} value={k}>{v}</option>
                     ))}
@@ -426,16 +454,29 @@ function FactorsPanel() {
                 <div>
                   <label className="label">Jahr *</label>
                   <input type="number" className="input" required value={form.year}
-                    onChange={(e) => setForm({ ...form, year: e.target.value })} />
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setForm(prev => ({ ...prev, year: val }));
+                      tryAutoFill(form.source_id, form.energy_type, val);
+                    }} />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="label">g CO\u2082/kWh *</label>
-                  <input type="text" className="input" required placeholder="z.B. 363"
+                  <label className="label">g CO₂/kWh *</label>
+                  <input type="text" className={`input ${autoFilled ? 'border-green-300 bg-green-50' : ''}`}
+                    required placeholder="z.B. 363"
                     value={form.co2_g_per_kwh}
-                    onChange={(e) => setForm({ ...form, co2_g_per_kwh: e.target.value })} />
+                    onChange={(e) => {
+                      setForm({ ...form, co2_g_per_kwh: e.target.value });
+                      setAutoFilled(false);
+                    }} />
+                  {autoFilled && (
+                    <p className="mt-1 text-xs text-green-600">
+                      Automatisch vorausgefüllt aus vorhandenen Daten
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="label">Scope</label>
@@ -491,9 +532,9 @@ function CalculatePanel() {
 
   return (
     <div className="card">
-      <h2 className="mb-3 text-base font-semibold">CO\u2082-Neuberechnung</h2>
+      <h2 className="mb-3 text-base font-semibold">CO₂-Neuberechnung</h2>
       <p className="mb-4 text-sm text-gray-500">
-        Berechnet die CO\u2082-Emissionen für alle aktiven Zähler im gewählten Zeitraum
+        Berechnet die CO₂-Emissionen für alle aktiven Zähler im gewählten Zeitraum
         basierend auf den hinterlegten Emissionsfaktoren.
       </p>
 
