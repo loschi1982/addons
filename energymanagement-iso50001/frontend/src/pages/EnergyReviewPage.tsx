@@ -7,6 +7,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
+import InfoTip from '@/components/ui/InfoTip';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine,
@@ -319,7 +320,12 @@ function SEUTab() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-gray-500">{total} wesentliche Energieeinsätze</p>
+        <p className="text-sm text-gray-500">
+          {total} wesentliche Energieeinsätze
+          <InfoTip title="SEU-Anteil" formula="SEU-Verbrauch ÷ Gesamt × 100">
+            Anteil des wesentlichen Energieeinsatzes am Gesamtverbrauch in Prozent.
+          </InfoTip>
+        </p>
         <div className="flex gap-2">
           <button onClick={handleRecalculate} className="btn-secondary text-sm">Anteile berechnen</button>
           <button onClick={handleSuggest} disabled={sugLoading} className="btn-secondary text-sm">
@@ -581,7 +587,12 @@ function EnPITab() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-gray-500">{enpis.length} Kennzahlen</p>
+        <p className="text-sm text-gray-500">
+          {enpis.length} Kennzahlen
+          <InfoTip title="EnPI" formula="Verbrauch_kWh ÷ Bezugsgröße">
+            Energieleistungskennzahl, z.B. kWh/m², kWh/Stück. Misst die Energieeffizienz bezogen auf eine relevante Variable.
+          </InfoTip>
+        </p>
         <button onClick={handleCreate} className="btn-primary">+ Neue Kennzahl</button>
       </div>
 
@@ -814,7 +825,12 @@ function BaselineTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-500">{baselines.length} Baselines</p>
+        <p className="text-sm text-gray-500">
+          {baselines.length} Baselines
+          <InfoTip title="Baseline-Abweichung" formula="(EnPI_aktuell − EnPI_basis) ÷ EnPI_basis × 100">
+            Prozentuale Abweichung der aktuellen Energieleistungskennzahl von der energetischen Ausgangsbasis.
+          </InfoTip>
+        </p>
         <button onClick={handleCreate} className="btn-primary">+ Neue Baseline</button>
       </div>
 

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '@/utils/api';
+import InfoTip from '@/components/ui/InfoTip';
 import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
 
 // ── Typen ──
@@ -155,14 +156,17 @@ function DashboardPanel() {
             ? `${Number(current.trend_vs_previous) > 0 ? '+' : ''}${Number(current.trend_vs_previous).toFixed(1)} % vs. Vorjahr`
             : undefined}
           trend={current?.trend_vs_previous ?? undefined}
+          info={{ formula: 'Σ (Verbrauch_kWh × Faktor_g/kWh) ÷ 1000', text: 'Summe aller Zähler im gewählten Jahr. Emissionsfaktor je Energieträger aus BAFA/UBA.' }}
         />
         <KPICard
           label="Verbrauch gesamt"
           value={current ? `${(Number(current.total_consumption_kwh) / 1000).toFixed(0)} MWh` : '0 MWh'}
+          info={{ formula: 'Σ Verbrauch aller Zähler', text: 'Gesamtverbrauch aller aktiven Hauptzähler im Jahr, umgerechnet in MWh.' }}
         />
         <KPICard
           label="Durchschn. Faktor"
           value={current ? `${Number(current.avg_co2_g_per_kwh).toFixed(0)} g/kWh` : '–'}
+          info={{ formula: 'CO₂_gesamt_g ÷ Verbrauch_gesamt_kWh', text: 'Gewichteter Durchschnitt über alle Energieträger. Niedrigerer Wert = sauberer Energiemix.' }}
         />
         <KPICard
           label="Vorjahr CO₂"
@@ -578,16 +582,23 @@ function KPICard({
   value,
   subtitle,
   trend,
+  info,
 }: {
   label: string;
   value: string;
   subtitle?: string;
   trend?: number;
+  info?: { formula: string; text: string };
 }) {
   return (
     <div className="card text-center">
       <div className="text-2xl font-bold">{value}</div>
-      <div className="text-xs text-gray-500 mt-1">{label}</div>
+      <div className="text-xs text-gray-500 mt-1">
+        {label}
+        {info && (
+          <InfoTip title={label} formula={info.formula}>{info.text}</InfoTip>
+        )}
+      </div>
       {subtitle && (
         <div className={`text-xs mt-1 ${
           trend != null

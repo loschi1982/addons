@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '@/utils/api';
+import InfoTip from '@/components/ui/InfoTip';
 
 // ── Typen ──
 
@@ -364,11 +365,21 @@ function DegreeDaysPanel({
           <div className="grid grid-cols-2 gap-4">
             <div className="card text-center">
               <div className="text-3xl font-bold text-orange-600">{Number(data.total_hdd).toFixed(0)}</div>
-              <div className="text-sm text-gray-500 mt-1">Heizgradtage (Gt20/15)</div>
+              <div className="text-sm text-gray-500 mt-1">
+                Heizgradtage (Gt20/15)
+                <InfoTip title="Heizgradtage (HDD)" formula="Σ max(0, 15 − T_avg) pro Tag">
+                  Maß für den Heizenergiebedarf. Referenz: 15 °C Heizgrenze. Je höher der Wert, desto kälter die Periode.
+                </InfoTip>
+              </div>
             </div>
             <div className="card text-center">
               <div className="text-3xl font-bold text-blue-600">{Number(data.total_cdd).toFixed(0)}</div>
-              <div className="text-sm text-gray-500 mt-1">Kühlgradtage</div>
+              <div className="text-sm text-gray-500 mt-1">
+                Kühlgradtage
+                <InfoTip title="Kühlgradtage (CDD)" formula="Σ max(0, T_avg − 24) pro Tag">
+                  Maß für den Kühlbedarf. Referenz: 24 °C. Je höher der Wert, desto wärmer die Periode.
+                </InfoTip>
+              </div>
             </div>
           </div>
 
@@ -471,7 +482,12 @@ function CorrectionPanel() {
 
   return (
     <div className="card">
-      <h2 className="mb-3 text-base font-semibold">Witterungskorrektur-Konfigurationen</h2>
+      <h2 className="mb-3 text-base font-semibold">
+        Witterungskorrektur-Konfigurationen
+        <InfoTip title="Witterungskorrektur" formula="Korr. = Grundlast + (V − Grundlast) × HDD_ref ÷ HDD_ist">
+          VDI 3807: Normalisiert den Heizenergieverbrauch auf ein Referenzklima, um witterungsbedingte Schwankungen auszugleichen.
+        </InfoTip>
+      </h2>
       <p className="mb-4 text-sm text-gray-500">
         Witterungskorrektur normalisiert den Heizenergieverbrauch auf ein Referenzklima (VDI 3807).
         Ein milder Winter braucht weniger Heizenergie – ohne Korrektur sieht das fälschlich nach Einsparung aus.

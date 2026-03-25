@@ -8,6 +8,7 @@ import {
   Zap, Leaf, Euro, Gauge, Sun, BatteryCharging,
 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
+import InfoTip from '@/components/ui/InfoTip';
 import { ENERGY_TYPE_LABELS, ENERGY_TYPE_COLORS } from '@/types';
 
 /* ── Typen ── */
@@ -86,6 +87,29 @@ const KPI_ICONS: Record<string, React.ElementType> = {
   'Autarkiegrad': BatteryCharging,
 };
 
+const KPI_INFO: Record<string, { formula: string; text: string }> = {
+  'Gesamtverbrauch': {
+    formula: 'Σ Zählerstand × Umrechnungsfaktor',
+    text: 'Summe aller aktiven Hauptzähler, umgerechnet in kWh (m³×10.3, l×9.8, kg×4.8, MWh×1000).',
+  },
+  'CO₂-Emissionen': {
+    formula: 'Σ (Verbrauch_kWh × Faktor_g/kWh) ÷ 1000',
+    text: 'Emissionsfaktor je Energieträger und Jahr (Quelle: BAFA/UBA). Ergebnis in kg CO₂.',
+  },
+  'Energiekosten': {
+    formula: 'Σ (Verbrauch_kWh × Tarif_€/kWh)',
+    text: 'Tarif aus Zähler-Einstellung (Fixpreis) oder effektiver Preis aus Abrechnungsdaten.',
+  },
+  'Eigenproduktion': {
+    formula: 'Σ Einspeisezähler im Zeitraum',
+    text: 'Summe aller Zähler mit Einspeise-Kennzeichnung (z.B. PV-Anlage).',
+  },
+  'Autarkiegrad': {
+    formula: 'Eigenproduktion ÷ (Eigen + Netzbezug) × 100',
+    text: 'Anteil selbst erzeugter Energie am Gesamtverbrauch in Prozent.',
+  },
+};
+
 const PIE_COLORS = [
   '#1B5E7B', '#F59E0B', '#3B82F6', '#10B981',
   '#8B5CF6', '#F97316', '#EC4899', '#84CC16',
@@ -106,7 +130,14 @@ function KPICardComponent({ card }: { card: KPICard }) {
     <div className="card">
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-sm text-gray-500">{card.label}</p>
+          <p className="text-sm text-gray-500">
+            {card.label}
+            {KPI_INFO[card.label] && (
+              <InfoTip title={card.label} formula={KPI_INFO[card.label].formula}>
+                {KPI_INFO[card.label].text}
+              </InfoTip>
+            )}
+          </p>
           <p className="mt-1 text-2xl font-bold text-gray-900">
             {formatNumber(card.value)}
             <span className="ml-1 text-sm font-normal text-gray-500">{card.unit}</span>
