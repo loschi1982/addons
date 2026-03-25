@@ -34,11 +34,25 @@ cd /app/backend
 python3 -m alembic upgrade head 2>&1 || echo "WARNUNG: Migrationen fehlgeschlagen."
 echo "Migrationen abgeschlossen."
 
+# ── Redis: Alte Task-Queue und Task-Ergebnisse bereinigen ──
+echo "Bereinige Redis-Queue..."
+python3 -c "
+import redis, os
+r = redis.from_url(os.environ.get('REDIS_URL', 'redis://redis:6379/0'))
+purged = r.delete('celery')
+# Alte Task-Meta-Ergebnisse löschen
+meta_keys = r.keys('celery-task-meta-*')
+if meta_keys:
+    r.delete(*meta_keys)
+    print(f'  {len(meta_keys)} alte Task-Ergebnisse gelöscht')
+print(f'  Queue bereinigt (purged={purged})')
+" 2>&1 || echo "WARNUNG: Redis-Bereinigung fehlgeschlagen."
+
 # ── Celery Worker starten ──
 echo "Starte Celery Worker..."
 celery -A app.tasks worker \
     --loglevel="${LOG_LEVEL:-info}" \
-    --concurrency=2 \
+    --concurrency=1 \
     --pool=prefork \
     &
 CELERY_WORKER_PID=$!

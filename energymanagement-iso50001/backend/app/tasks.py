@@ -7,12 +7,18 @@ Celery wird für zeitgesteuerte und rechenintensive Aufgaben verwendet:
 - CO₂-Neuberechnung
 - PDF-Berichtserstellung
 - Witterungskorrektur-Berechnung
+
+Wichtig: Jeder Task erstellt eine eigene DB-Engine + Session,
+weil Celery prefork-Worker die globale Engine nicht sicher teilen können
+(asyncpg erlaubt keine parallelen Operationen auf einer Verbindung).
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import date, timedelta
 
 from celery import Celery
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
 
@@ -30,6 +36,8 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="Europe/Berlin",
     enable_utc=True,
+    # Worker: max 1 Task gleichzeitig pro Prozess (keine Race Conditions)
+    worker_concurrency=1,
     # Beat-Schedule: periodische Tasks
     beat_schedule={
         "poll-meters-every-5-min": {
@@ -61,21 +69,35 @@ def _run_async(coro):
         loop.close()
 
 
-async def _get_db_session():
-    """Neue DB-Session für Celery-Tasks erstellen."""
-    from app.core.database import async_session_factory
-    async with async_session_factory() as session:
-        yield session
+@asynccontextmanager
+async def _task_db_session():
+    """Eigene Engine + Session pro Task (sicher für prefork-Worker)."""
+    engine = create_async_engine(
+        settings.database_url,
+        echo=False,
+        pool_size=2,
+        max_overflow=3,
+        pool_recycle=1800,
+    )
+    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with session_factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await engine.dispose()
 
 
 @celery_app.task(name="app.tasks.poll_all_meters")
 def poll_all_meters():
     """Alle konfigurierten Zähler automatisch abfragen."""
     async def _run():
-        from app.core.database import async_session_factory
         from app.integrations.polling_manager import PollingManager
 
-        async with async_session_factory() as db:
+        async with _task_db_session() as db:
             manager = PollingManager(db)
             return await manager.poll_all_meters()
 
@@ -86,10 +108,9 @@ def poll_all_meters():
 def fetch_weather_data():
     """Wetterdaten vom DWD abrufen und Gradtagszahlen berechnen."""
     async def _run():
-        from app.core.database import async_session_factory
         from app.services.weather_service import WeatherService
 
-        async with async_session_factory() as db:
+        async with _task_db_session() as db:
             service = WeatherService(db)
             return await service.fetch_all_active_stations()
 
@@ -100,13 +121,12 @@ def fetch_weather_data():
 def recalculate_co2():
     """CO₂-Emissionen für den aktuellen Monat neu berechnen."""
     async def _run():
-        from app.core.database import async_session_factory
         from app.services.co2_service import CO2Service
 
         today = date.today()
         start = date(today.year, today.month, 1)
 
-        async with async_session_factory() as db:
+        async with _task_db_session() as db:
             service = CO2Service(db)
             return await service.calculate_all_meters(start, today)
 
@@ -117,10 +137,9 @@ def recalculate_co2():
 def poll_climate_sensors():
     """HA-Klimasensoren (Temperatur, Feuchte) automatisch abfragen."""
     async def _run():
-        from app.core.database import async_session_factory
         from app.services.climate_service import ClimateService
 
-        async with async_session_factory() as db:
+        async with _task_db_session() as db:
             service = ClimateService(db)
             return await service.poll_ha_sensors()
 
@@ -133,10 +152,9 @@ def generate_report_pdf(self, report_id: str):
     import uuid
 
     async def _run():
-        from app.core.database import async_session_factory
         from app.services.report_service import ReportService
 
-        async with async_session_factory() as db:
+        async with _task_db_session() as db:
             service = ReportService(db)
             return await service.generate_pdf(uuid.UUID(report_id))
 
@@ -149,10 +167,9 @@ def calculate_weather_correction(meter_id: str, start_date: str, end_date: str):
     import uuid
 
     async def _run():
-        from app.core.database import async_session_factory
         from app.services.weather_service import WeatherCorrectionService
 
-        async with async_session_factory() as db:
+        async with _task_db_session() as db:
             service = WeatherCorrectionService(db)
             return await service.calculate_correction(
                 uuid.UUID(meter_id),
