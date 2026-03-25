@@ -61,10 +61,12 @@ class ImportService:
         1. Format erkennen (CSV vs XLSX)
         2. Trennzeichen und Encoding erkennen (CSV)
         3. Spalten und erste Zeilen als Vorschau liefern
-        4. ImportBatch-Eintrag anlegen
+        4. Multi-Meter-Erkennung (>1 Wert-Spalte)
+        5. ImportBatch-Eintrag anlegen
 
         Returns:
-            Dict mit batch_id, filename, detected_columns, preview_rows, row_count
+            Dict mit batch_id, filename, detected_columns, preview_rows, row_count,
+            is_multi_meter, meter_columns
         """
         file_type = self._detect_file_type(filename)
 
@@ -74,6 +76,18 @@ class ImportService:
             columns, rows, total_rows = self._parse_excel(content)
         else:
             raise ImportFormatError(f"Nicht unterstütztes Dateiformat: {filename}")
+
+        # Multi-Meter-Erkennung: Spalte 0 = Datum, Spalten 1..N = Werte
+        is_multi_meter = len(columns) > 2
+        meter_columns = None
+
+        if is_multi_meter:
+            # Spalten ab Index 1 als potenzielle Zähler-Spalten
+            meter_columns = [
+                {"column_index": i, "column_name": col}
+                for i, col in enumerate(columns)
+                if i > 0
+            ]
 
         # ImportBatch anlegen
         batch = ImportBatch(
@@ -99,6 +113,8 @@ class ImportService:
             "detected_columns": columns,
             "preview_rows": preview,
             "row_count": total_rows,
+            "is_multi_meter": is_multi_meter,
+            "meter_columns": meter_columns,
         }
 
     async def process_import(
@@ -111,6 +127,7 @@ class ImportService:
         meter_id: uuid.UUID | None = None,
         save_as_profile: str | None = None,
         user_id: uuid.UUID | None = None,
+        meter_column_mapping: dict[int, uuid.UUID] | None = None,
     ) -> dict:
         """
         Import mit bestätigter Spaltenzuordnung durchführen.
@@ -146,6 +163,10 @@ class ImportService:
             "decimal_separator": decimal_separator,
             "skip_duplicates": skip_duplicates,
         }
+        if meter_column_mapping:
+            batch.meter_mapping = {
+                str(k): str(v) for k, v in meter_column_mapping.items()
+            }
         batch.status = "processing"
 
         # Auto-detect Datumsformat wenn nicht angegeben
@@ -435,6 +456,188 @@ class ImportService:
             await self.db.delete(profile)
             await self.db.commit()
 
+    async def match_columns_to_meters(
+        self, column_names: list[str],
+    ) -> list[dict]:
+        """
+        Auto-Matching: Spalten-Header gegen bestehende Zähler abgleichen.
+
+        Matching-Strategien (in Reihenfolge):
+        1. Exakter Match auf meter.name oder meter.meter_number
+        2. Teilstring-Match (Spaltenname enthält meter_number oder umgekehrt)
+        """
+        result = await self.db.execute(select(Meter))
+        all_meters = result.scalars().all()
+
+        matched = []
+        for col_name in column_names:
+            col_lower = col_name.lower().strip()
+            match = None
+
+            for meter in all_meters:
+                # Exakter Match
+                if meter.name and meter.name.lower() == col_lower:
+                    match = meter
+                    break
+                if meter.meter_number and meter.meter_number.lower() == col_lower:
+                    match = meter
+                    break
+
+            # Teilstring-Match
+            if not match:
+                for meter in all_meters:
+                    if meter.meter_number and meter.meter_number.lower() in col_lower:
+                        match = meter
+                        break
+                    if meter.name and meter.name.lower() in col_lower:
+                        match = meter
+                        break
+                    # Umgekehrt: Spaltenname in Zählername
+                    if meter.name and col_lower in meter.name.lower():
+                        match = meter
+                        break
+
+            matched.append({
+                "column_name": col_name,
+                "matched_meter_id": str(match.id) if match else None,
+                "matched_meter_name": match.name if match else None,
+            })
+
+        return matched
+
+    async def import_multi_meter_rows(
+        self,
+        rows: list[dict],
+        meter_column_mapping: dict[int, uuid.UUID],
+        timestamp_column: str,
+        batch_id: uuid.UUID,
+        date_format: str | None = None,
+        decimal_separator: str = ",",
+        skip_duplicates: bool = True,
+    ) -> dict:
+        """
+        Multi-Meter Import: Mehrere Zähler-Spalten gleichzeitig importieren.
+
+        meter_column_mapping: {Spalten-Index → Meter-UUID}
+        """
+        columns = list(rows[0].keys()) if rows else []
+        imported = 0
+        skipped = 0
+        errors = []
+        affected_meters: set[uuid.UUID] = set()
+        meter_details: dict[str, dict] = {}  # meter_id → {name, imported, errors}
+
+        for i, row in enumerate(rows):
+            # Datum parsen
+            raw_ts = row.get(timestamp_column, "")
+            timestamp = self._parse_date(str(raw_ts), date_format)
+            if not timestamp:
+                errors.append({"row": i + 1, "error": f"Ungültiges Datum: {raw_ts}"})
+                continue
+
+            # Jede gemappte Spalte verarbeiten
+            for col_idx_str, meter_id in meter_column_mapping.items():
+                col_idx = int(col_idx_str) if isinstance(col_idx_str, str) else col_idx_str
+                if col_idx >= len(columns):
+                    continue
+
+                col_name = columns[col_idx]
+                raw_val = row.get(col_name, "")
+
+                # Leere Zellen überspringen
+                if raw_val is None or str(raw_val).strip() == "":
+                    continue
+
+                value = self._parse_decimal(str(raw_val), decimal_separator)
+                if value is None:
+                    errors.append({
+                        "row": i + 1,
+                        "error": f"Ungültiger Wert in Spalte '{col_name}': {raw_val}",
+                    })
+                    continue
+
+                try:
+                    # Duplikat-Prüfung
+                    if skip_duplicates:
+                        existing = await self.db.execute(
+                            select(MeterReading).where(
+                                MeterReading.meter_id == meter_id,
+                                MeterReading.timestamp == timestamp,
+                            ).limit(1)
+                        )
+                        if existing.scalar_one_or_none():
+                            skipped += 1
+                            continue
+
+                    # Verbrauch berechnen
+                    prev = await self.db.execute(
+                        select(MeterReading)
+                        .where(
+                            MeterReading.meter_id == meter_id,
+                            MeterReading.timestamp < timestamp,
+                        )
+                        .order_by(MeterReading.timestamp.desc())
+                        .limit(1)
+                    )
+                    prev_reading = prev.scalar_one_or_none()
+                    consumption = None
+                    if prev_reading:
+                        diff = value - prev_reading.value
+                        consumption = diff if diff >= 0 else None
+
+                    reading = MeterReading(
+                        meter_id=meter_id,
+                        timestamp=timestamp,
+                        value=value,
+                        consumption=consumption,
+                        source="import",
+                        quality="measured",
+                        import_batch_id=batch_id,
+                    )
+                    self.db.add(reading)
+                    imported += 1
+                    affected_meters.add(meter_id)
+
+                    # Zähler-Details tracken
+                    mid_str = str(meter_id)
+                    if mid_str not in meter_details:
+                        meter_details[mid_str] = {"imported": 0, "errors": 0}
+                    meter_details[mid_str]["imported"] += 1
+
+                except Exception as e:
+                    errors.append({"row": i + 1, "error": str(e)})
+                    mid_str = str(meter_id)
+                    if mid_str not in meter_details:
+                        meter_details[mid_str] = {"imported": 0, "errors": 0}
+                    meter_details[mid_str]["errors"] += 1
+
+        # Batch aktualisieren
+        batch = await self.db.get(ImportBatch, batch_id)
+        if batch:
+            batch.imported_count = imported
+            batch.skipped_count = skipped
+            batch.error_count = len(errors)
+            batch.error_details = errors[:100]
+            batch.affected_meter_ids = [str(m) for m in affected_meters]
+            batch.status = "completed"
+            batch.completed_at = datetime.now(timezone.utc)
+
+        await self.db.commit()
+
+        return {
+            "batch_id": batch_id,
+            "status": "completed",
+            "total_rows": len(rows),
+            "imported_count": imported,
+            "skipped_count": skipped,
+            "error_count": len(errors),
+            "errors": errors[:20],
+            "meter_details": [
+                {"meter_id": mid, **details}
+                for mid, details in meter_details.items()
+            ],
+        }
+
     # ── Interne Hilfsmethoden ──
 
     def _detect_file_type(self, filename: str) -> str:
@@ -453,8 +656,8 @@ class ImportService:
         CSV-Datei parsen mit automatischer Erkennung von
         Trennzeichen und Encoding.
         """
-        # Encoding erkennen (UTF-8, dann Latin-1 als Fallback)
-        for encoding in ("utf-8", "utf-8-sig", "iso-8859-1", "windows-1252"):
+        # Encoding erkennen (UTF-7, UTF-8, dann Latin-1 als Fallback)
+        for encoding in ("utf-8", "utf-8-sig", "utf-7", "iso-8859-1", "windows-1252"):
             try:
                 text = content.decode(encoding)
                 break
