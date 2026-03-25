@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell, Monitor, Download, CheckCircle, AlertTriangle, XCircle, Plug2 } from 'lucide-react';
+import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell, Monitor, Download, CheckCircle, AlertTriangle, XCircle, Plug2, HeartPulse, Database, Server, Clock, HardDrive, Play, RotateCcw, Wifi, WifiOff } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 
 interface SettingEntry {
@@ -11,6 +11,7 @@ interface SettingEntry {
 type AllSettings = Record<string, SettingEntry>;
 
 const TABS = [
+  { id: 'status', label: 'Status', icon: HeartPulse },
   { id: 'organization', label: 'Organisation', icon: Building2 },
   { id: 'branding', label: 'Branding', icon: Palette },
   { id: 'report_defaults', label: 'Berichte', icon: FileText },
@@ -22,7 +23,7 @@ const TABS = [
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<AllSettings>({});
-  const [activeTab, setActiveTab] = useState('organization');
+  const [activeTab, setActiveTab] = useState('status');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -90,7 +91,7 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="page-title">Einstellungen</h1>
-        {activeTab !== 'system' && activeTab !== 'integrations' && (
+        {activeTab !== 'system' && activeTab !== 'integrations' && activeTab !== 'status' && (
           <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2">
             <Save className="w-4 h-4" />
             {saving ? 'Speichern...' : saved ? 'Gespeichert!' : 'Speichern'}
@@ -127,6 +128,7 @@ export default function SettingsPage() {
           </p>
         )}
 
+        {activeTab === 'status' && <StatusPanel />}
         {activeTab === 'organization' && (
           <OrganizationForm values={editValues} onChange={updateField} />
         )}
@@ -144,6 +146,303 @@ export default function SettingsPage() {
         )}
         {activeTab === 'integrations' && <IntegrationsPanel />}
         {activeTab === 'system' && <SystemPanel />}
+      </div>
+    </div>
+  );
+}
+
+/* ── Status-Panel (Dienste-Übersicht mit Ampelsystem) ── */
+
+interface ServiceStatus {
+  name: string;
+  status: 'running' | 'stopped' | 'error' | 'warning' | 'unknown' | 'not_configured';
+  latency_ms?: number;
+  error?: string;
+  details?: Record<string, unknown>;
+}
+
+interface SystemInfo {
+  hostname: string;
+  platform: string;
+  python: string;
+  deployment_mode: string;
+  version: string;
+  uptime_seconds: number | null;
+  disk_total_gb: number;
+  disk_used_gb: number;
+  disk_free_gb: number;
+  disk_usage_percent: number;
+}
+
+interface SystemStatusResponse {
+  overall: 'healthy' | 'warning' | 'error';
+  services: ServiceStatus[];
+  system: SystemInfo;
+  timestamp: string;
+}
+
+function formatUptime(seconds: number | null): string {
+  if (!seconds) return '–';
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h ${mins}m`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
+}
+
+const STATUS_CONFIG: Record<string, { color: string; bg: string; border: string; label: string; Icon: typeof CheckCircle }> = {
+  running: { color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-200', label: 'Läuft', Icon: CheckCircle },
+  warning: { color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200', label: 'Warnung', Icon: AlertTriangle },
+  stopped: { color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200', label: 'Gestoppt', Icon: XCircle },
+  error: { color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200', label: 'Fehler', Icon: XCircle },
+  unknown: { color: 'text-gray-500', bg: 'bg-gray-50', border: 'border-gray-200', label: 'Unbekannt', Icon: AlertTriangle },
+  not_configured: { color: 'text-gray-400', bg: 'bg-gray-50', border: 'border-gray-200', label: 'Nicht konfiguriert', Icon: WifiOff },
+};
+
+const SERVICE_ICONS: Record<string, typeof Database> = {
+  'PostgreSQL / TimescaleDB': Database,
+  'Redis': Server,
+  'Celery Worker': Activity,
+  'Celery Beat (Scheduler)': Clock,
+  'Home Assistant': Wifi,
+};
+
+function StatusPanel() {
+  const [data, setData] = useState<SystemStatusResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [restarting, setRestarting] = useState<string | null>(null);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+
+  const loadStatus = useCallback(async (showSpinner = true) => {
+    try {
+      if (showSpinner) setRefreshing(true);
+      const res = await apiClient.get('/api/v1/system/status');
+      setData(res.data);
+      setLastRefresh(new Date());
+    } catch {
+      console.error('Systemstatus konnte nicht geladen werden');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadStatus(false);
+    // Auto-Refresh alle 30 Sekunden
+    const interval = setInterval(() => loadStatus(false), 30000);
+    return () => clearInterval(interval);
+  }, [loadStatus]);
+
+  const restartService = async (serviceName: string) => {
+    try {
+      setRestarting(serviceName);
+      await apiClient.post(`/api/v1/system/services/${serviceName}/restart`);
+      // Nach 3 Sekunden Status aktualisieren
+      setTimeout(() => loadStatus(true), 3000);
+    } catch {
+      console.error('Neustart fehlgeschlagen');
+    } finally {
+      setRestarting(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-48">
+        <RefreshCw className="w-6 h-6 animate-spin text-primary-500" />
+      </div>
+    );
+  }
+
+  if (!data) {
+    return <p className="text-gray-500">Status konnte nicht geladen werden.</p>;
+  }
+
+  const overallConfig = data.overall === 'healthy'
+    ? { color: 'text-green-600', bg: 'bg-green-100', label: 'Alle Systeme laufen' }
+    : data.overall === 'warning'
+    ? { color: 'text-amber-600', bg: 'bg-amber-100', label: 'Eingeschränkt' }
+    : { color: 'text-red-600', bg: 'bg-red-100', label: 'Störung' };
+
+  return (
+    <div className="space-y-6">
+      {/* Gesamtstatus-Banner */}
+      <div className={`flex items-center justify-between rounded-lg ${overallConfig.bg} px-5 py-4`}>
+        <div className="flex items-center gap-3">
+          <div className={`w-3 h-3 rounded-full ${
+            data.overall === 'healthy' ? 'bg-green-500' : data.overall === 'warning' ? 'bg-amber-500' : 'bg-red-500'
+          } animate-pulse`} />
+          <span className={`text-lg font-semibold ${overallConfig.color}`}>
+            {overallConfig.label}
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          {lastRefresh && (
+            <span className="text-xs text-gray-500">
+              Aktualisiert: {lastRefresh.toLocaleTimeString('de-DE')}
+            </span>
+          )}
+          <button
+            onClick={() => loadStatus(true)}
+            disabled={refreshing}
+            className="btn-secondary flex items-center gap-2 text-sm"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            Aktualisieren
+          </button>
+        </div>
+      </div>
+
+      {/* Dienste-Karten */}
+      <div>
+        <h3 className="text-base font-semibold text-gray-900 mb-3">Dienste</h3>
+        <div className="grid grid-cols-1 gap-3">
+          {data.services.map((service) => {
+            const cfg = STATUS_CONFIG[service.status] || STATUS_CONFIG.unknown;
+            const ServiceIcon = SERVICE_ICONS[service.name] || Server;
+            const canRestart = service.name === 'Celery Worker' || service.name === 'Celery Beat (Scheduler)';
+            const restartKey = service.name === 'Celery Worker' ? 'celery_worker' : 'celery_beat';
+
+            return (
+              <div
+                key={service.name}
+                className={`rounded-lg border ${cfg.border} ${cfg.bg} p-4`}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-start gap-3 flex-1">
+                    <ServiceIcon className={`w-5 h-5 mt-0.5 ${cfg.color}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900">{service.name}</span>
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.color} ${cfg.bg}`}>
+                          <cfg.Icon className="w-3 h-3" />
+                          {cfg.label}
+                        </span>
+                        {service.latency_ms != null && (
+                          <span className="text-xs text-gray-400">{service.latency_ms} ms</span>
+                        )}
+                      </div>
+
+                      {/* Details */}
+                      {service.details && (
+                        <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
+                          {Object.entries(service.details).map(([key, value]) => (
+                            <span key={key} className="text-xs text-gray-600">
+                              <span className="text-gray-400">{
+                                key === 'version' ? 'Version' :
+                                key === 'timescaledb' ? 'TimescaleDB' :
+                                key === 'database_size' ? 'Größe' :
+                                key === 'tables' ? 'Tabellen' :
+                                key === 'active_connections' ? 'Verbindungen' :
+                                key === 'memory_used' ? 'Speicher' :
+                                key === 'pending_tasks' ? 'Wart. Tasks' :
+                                key === 'worker_count' ? 'Worker' :
+                                key === 'workers' ? '' :
+                                key === 'minutes_ago' ? 'Letzter Task' :
+                                key === 'last_task_execution' ? '' :
+                                key === 'base_url' ? 'URL' :
+                                key
+                              }: </span>
+                              {key === 'workers' ? '' :
+                               key === 'last_task_execution' ? '' :
+                               key === 'minutes_ago' ? `vor ${value} Min.` :
+                               String(value)}
+                            </span>
+                          )).filter(el => {
+                            const key = el.key as string;
+                            return key !== 'workers' && key !== 'last_task_execution';
+                          })}
+                        </div>
+                      )}
+
+                      {/* Fehlermeldung */}
+                      {service.error && (
+                        <p className="mt-1 text-xs text-red-600">{service.error}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Restart-Button */}
+                  {canRestart && (service.status === 'stopped' || service.status === 'error') && (
+                    <button
+                      onClick={() => restartService(restartKey)}
+                      disabled={restarting === restartKey}
+                      className="ml-3 btn-primary flex items-center gap-1.5 text-sm px-3 py-1.5 shrink-0"
+                    >
+                      {restarting === restartKey ? (
+                        <RotateCcw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Play className="w-3.5 h-3.5" />
+                      )}
+                      {restarting === restartKey ? 'Startet...' : 'Starten'}
+                    </button>
+                  )}
+                  {canRestart && service.status === 'running' && (
+                    <button
+                      onClick={() => restartService(restartKey)}
+                      disabled={restarting === restartKey}
+                      className="ml-3 btn-secondary flex items-center gap-1.5 text-xs px-2.5 py-1 shrink-0"
+                    >
+                      <RotateCcw className={`w-3 h-3 ${restarting === restartKey ? 'animate-spin' : ''}`} />
+                      Neustart
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* System-Ressourcen */}
+      <div>
+        <h3 className="text-base font-semibold text-gray-900 mb-3">System-Ressourcen</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="rounded-lg border border-gray-200 p-4">
+            <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide">
+              <Server className="w-3.5 h-3.5" />
+              Hostname
+            </div>
+            <p className="mt-1 text-sm font-semibold text-gray-900 truncate">{data.system.hostname}</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 p-4">
+            <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide">
+              <Clock className="w-3.5 h-3.5" />
+              Uptime
+            </div>
+            <p className="mt-1 text-sm font-semibold text-gray-900">{formatUptime(data.system.uptime_seconds)}</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 p-4">
+            <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide">
+              <HardDrive className="w-3.5 h-3.5" />
+              Festplatte
+            </div>
+            <p className="mt-1 text-sm font-semibold text-gray-900">
+              {data.system.disk_used_gb} / {data.system.disk_total_gb} GB
+            </p>
+            <div className="mt-1.5 w-full bg-gray-200 rounded-full h-1.5">
+              <div
+                className={`h-1.5 rounded-full ${
+                  data.system.disk_usage_percent > 90 ? 'bg-red-500' :
+                  data.system.disk_usage_percent > 75 ? 'bg-amber-500' : 'bg-green-500'
+                }`}
+                style={{ width: `${data.system.disk_usage_percent}%` }}
+              />
+            </div>
+            <p className="mt-0.5 text-xs text-gray-400">{data.system.disk_free_gb} GB frei ({data.system.disk_usage_percent}% belegt)</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 p-4">
+            <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide">
+              <Monitor className="w-3.5 h-3.5" />
+              Version
+            </div>
+            <p className="mt-1 text-sm font-semibold text-gray-900">v{data.system.version}</p>
+            <p className="mt-0.5 text-xs text-gray-400">Python {data.system.python}</p>
+          </div>
+        </div>
       </div>
     </div>
   );
