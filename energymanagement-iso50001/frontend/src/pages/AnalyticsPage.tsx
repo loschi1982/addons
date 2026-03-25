@@ -6,6 +6,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { RefreshCw } from 'lucide-react';
+import InfoTip from '@/components/ui/InfoTip';
 import SankeyDiagram from '@/components/charts/SankeyDiagram';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS } from '@/types';
@@ -912,7 +913,12 @@ function AnomaliesTab() {
     <div>
       <div className="flex flex-wrap gap-3 items-end mb-6">
         <div>
-          <label className="label">Schwellwert (σ)</label>
+          <label className="label">
+            Schwellwert (σ)
+            <InfoTip title="Anomalie-Erkennung" formula="σ = (Wert − Ø) ÷ Standardabw.">
+              Werte mit einer Abweichung größer als der gewählte Schwellwert (in Standardabweichungen) werden als Anomalie markiert.
+            </InfoTip>
+          </label>
           <input type="number" step="0.5" min="1" max="5" className="input w-24" value={threshold} onChange={(e) => setThreshold(Number(e.target.value))} />
         </div>
         <div>
@@ -1111,7 +1117,12 @@ function DurationCurveTab({ meters }: { meters: Meter[] }) {
       </div>
 
       <div className="card">
-        <h2 className="mb-4 text-lg font-semibold">Jahresdauerlinie</h2>
+        <h2 className="mb-4 text-lg font-semibold">
+          Jahresdauerlinie
+          <InfoTip title="Dauerlinie" formula="Verbrauchswerte absteigend sortiert">
+            Zeigt das Verhältnis von Grund- und Spitzenlast. Flache Bereiche deuten auf konstante Grundlast hin, steile Abschnitte auf Lastspitzen.
+          </InfoTip>
+        </h2>
         {loading ? (
           <div className="flex h-80 items-center justify-center">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />

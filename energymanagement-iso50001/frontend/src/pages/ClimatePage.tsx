@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '@/utils/api';
 import { type PaginatedResponse } from '@/types';
 import DiscoveryModal from '@/components/DiscoveryModal';
+import InfoTip from '@/components/ui/InfoTip';
 
 // ── Typen ──
 
@@ -463,7 +464,12 @@ function ReadingsPanel() {
                       <th className="px-3 py-2 text-left">Zeitpunkt</th>
                       <th className="px-3 py-2 text-right">Temperatur</th>
                       <th className="px-3 py-2 text-right">Feuchte</th>
-                      <th className="px-3 py-2 text-right">Taupunkt</th>
+                      <th className="px-3 py-2 text-right">
+                        Taupunkt
+                        <InfoTip title="Taupunkt" formula="τ = b×γ/(a−γ), γ = a×T/(b+T) + ln(RH/100)">
+                          Magnus-Formel (a=17.271, b=237.7). Temperatur, ab der Kondenswasser entsteht.
+                        </InfoTip>
+                      </th>
                       <th className="px-3 py-2 text-left">Quelle</th>
                     </tr>
                   </thead>
@@ -577,7 +583,12 @@ function ComfortPanel() {
                 <th className="px-4 py-2 text-right">T_min</th>
                 <th className="px-4 py-2 text-right">T_max</th>
                 <th className="px-4 py-2 text-right">RH_avg</th>
-                <th className="px-4 py-2 text-right">Komfort</th>
+                <th className="px-4 py-2 text-right">
+                  Komfort
+                  <InfoTip title="Komfort-Score" formula="Score = T_score × 0.6 + RH_score × 0.4">
+                    100 = optimal. Pro 1 °C Abweichung vom Sollbereich −15 Punkte, pro 1 % rLF Abweichung −5 Punkte.
+                  </InfoTip>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y">

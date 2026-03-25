@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS } from '@/types';
+import InfoTip from '@/components/ui/InfoTip';
 
 /* ── Typen ── */
 
@@ -368,6 +369,20 @@ function TreeView({
             Zurück
           </button>
           <h2 className="font-semibold text-gray-900">{label}</h2>
+          <div className="flex items-center gap-2 ml-3 text-xs text-gray-400">
+            <InfoTip title="Verbrauch" formula="Σ Ablesungen im Zeitraum">
+              Summe aller Meter-Readings des Zählers im gewählten Zeitraum.
+            </InfoTip>
+            <InfoTip title="Anteil (%)" formula="Knoten ÷ Wurzel × 100">
+              Prozentanteil des Knotens am Verbrauch des Hauptzählers.
+            </InfoTip>
+            <InfoTip title="Nicht zugeordnet (Δ)" formula="Eltern − Σ Kinder">
+              Verbrauch des Elternzählers, der keinem Unterzähler zugeordnet ist.
+            </InfoTip>
+            <InfoTip title="Kosten" formula="Verbrauch × Tarif">
+              Berechnet aus Fix-Tarif oder effektivem Preis aus der Abrechnung.
+            </InfoTip>
+          </div>
         </div>
 
         {/* Periodenfilter */}
