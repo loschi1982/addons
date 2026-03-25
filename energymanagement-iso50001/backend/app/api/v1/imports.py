@@ -19,6 +19,7 @@ from app.core.dependencies import get_current_user, require_permission
 from app.models.user import User
 from app.schemas.common import MessageResponse, PaginatedResponse
 from app.schemas.reading import (
+    DetectedMeterColumn,
     ImportMappingProfileResponse,
     ImportMappingRequest,
     ImportResultResponse,
@@ -43,6 +44,15 @@ async def upload_file(
         content=content,
         user_id=current_user.id,
     )
+
+    # Multi-Meter: Auto-Matching gegen bestehende Zähler
+    if result.get("is_multi_meter") and result.get("meter_columns"):
+        col_names = [mc["column_name"] for mc in result["meter_columns"]]
+        matches = await service.match_columns_to_meters(col_names)
+        for i, mc in enumerate(result["meter_columns"]):
+            mc["matched_meter_id"] = matches[i]["matched_meter_id"]
+            mc["matched_meter_name"] = matches[i]["matched_meter_name"]
+
     return ImportUploadResponse(**result)
 
 
@@ -53,16 +63,44 @@ async def process_import(
     db: AsyncSession = Depends(get_db),
 ):
     """Import mit bestätigter Spaltenzuordnung starten."""
+    import uuid as _uuid
+
     service = ImportService(db)
-    result = await service.process_import(
-        batch_id=request.batch_id,
-        column_mapping=request.column_mapping,
-        date_format=request.date_format,
-        decimal_separator=request.decimal_separator,
-        skip_duplicates=request.skip_duplicates,
-        save_as_profile=request.save_as_profile,
-        user_id=current_user.id,
-    )
+
+    # Multi-Meter Import
+    if request.meter_column_mapping:
+        # Batch laden um Datei-Infos zu holen
+        batch = await service.get_import_result(request.batch_id)
+
+        # meter_column_mapping konvertieren: str-Index → UUID
+        mcm = {
+            int(k): _uuid.UUID(v)
+            for k, v in request.meter_column_mapping.items()
+        }
+
+        # Batch-Daten erneut laden (Datei muss nochmal geparst werden)
+        # Da wir die Datei nicht speichern, nutzen wir process_import als Fallback
+        # und der eigentliche Multi-Meter-Import passiert über die Rows-API
+        result = await service.process_import(
+            batch_id=request.batch_id,
+            column_mapping=request.column_mapping,
+            date_format=request.date_format,
+            decimal_separator=request.decimal_separator,
+            skip_duplicates=request.skip_duplicates,
+            save_as_profile=request.save_as_profile,
+            user_id=current_user.id,
+            meter_column_mapping=mcm,
+        )
+    else:
+        result = await service.process_import(
+            batch_id=request.batch_id,
+            column_mapping=request.column_mapping,
+            date_format=request.date_format,
+            decimal_separator=request.decimal_separator,
+            skip_duplicates=request.skip_duplicates,
+            save_as_profile=request.save_as_profile,
+            user_id=current_user.id,
+        )
     return ImportResultResponse(**result)
 
 

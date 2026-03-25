@@ -101,6 +101,14 @@ class ConsumptionSummary(BaseModel):
 # Import
 # ---------------------------------------------------------------------------
 
+class DetectedMeterColumn(BaseModel):
+    """Erkannte Zähler-Spalte in einer Multi-Meter CSV."""
+    column_index: int
+    column_name: str
+    matched_meter_id: str | None = None
+    matched_meter_name: str | None = None
+
+
 class ImportUploadResponse(BaseModel):
     """Antwort nach Datei-Upload – zeigt erkannte Spalten."""
     batch_id: uuid.UUID
@@ -108,13 +116,20 @@ class ImportUploadResponse(BaseModel):
     detected_columns: list[str]
     preview_rows: list[dict[str, Any]]
     row_count: int
+    is_multi_meter: bool = False
+    meter_columns: list[DetectedMeterColumn] | None = None
 
 
 class ImportMappingRequest(BaseModel):
     """Spaltenzuordnung für den Import bestätigen."""
     batch_id: uuid.UUID
     column_mapping: dict[str, str] = Field(
-        ..., description="Zuordnung: Quellspalte → Zielspalte (timestamp, value, meter_id)"
+        default_factory=dict,
+        description="Zuordnung: Quellspalte → Zielspalte (timestamp, value, meter_id)",
+    )
+    meter_column_mapping: dict[str, str] | None = Field(
+        None,
+        description="Multi-Meter: Spalten-Index → Meter-UUID",
     )
     date_format: str | None = Field(None, description="z.B. '%d.%m.%Y %H:%M'")
     decimal_separator: str = Field(",", pattern="^[.,]$")
@@ -131,6 +146,7 @@ class ImportResultResponse(BaseModel):
     skipped_count: int
     error_count: int
     errors: list[dict[str, Any]] = []
+    meter_details: list[dict[str, Any]] | None = None
 
 
 class ImportMappingProfileResponse(BaseSchema):

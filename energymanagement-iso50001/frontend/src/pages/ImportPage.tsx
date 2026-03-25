@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
+import { Info } from 'lucide-react';
 
 // ── Typen ──
 
@@ -12,12 +13,21 @@ interface Meter {
   unit: string;
 }
 
+interface DetectedMeterColumn {
+  column_index: number;
+  column_name: string;
+  matched_meter_id: string | null;
+  matched_meter_name: string | null;
+}
+
 interface UploadResult {
   batch_id: string;
   filename: string;
   detected_columns: string[];
   preview_rows: Record<string, string>[];
   row_count: number;
+  is_multi_meter: boolean;
+  meter_columns: DetectedMeterColumn[] | null;
 }
 
 interface ImportResult {
@@ -28,6 +38,7 @@ interface ImportResult {
   skipped_count: number;
   error_count: number;
   errors: Array<{ row?: number; error?: string }>;
+  meter_details?: Array<{ meter_id: string; imported: number; errors: number }>;
 }
 
 interface MappingProfile {
@@ -71,7 +82,7 @@ export default function ImportPage() {
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Mapping
+  // Single-Meter Mapping
   const [columnMapping, setColumnMapping] = useState<Record<string, string>>({});
   const [selectedMeterId, setSelectedMeterId] = useState('');
   const [dateFormat, setDateFormat] = useState('');
@@ -82,12 +93,18 @@ export default function ImportPage() {
   const [processing, setProcessing] = useState(false);
   const [mappingError, setMappingError] = useState<string | null>(null);
 
+  // Multi-Meter Mapping
+  const [meterColumnMapping, setMeterColumnMapping] = useState<Record<string, string>>({});
+
   // Result
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
 
   // History
   const [history, setHistory] = useState<ImportBatch[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  // Format-Hinweis
+  const [showFormatHint, setShowFormatHint] = useState(false);
 
   // Zähler laden
   useEffect(() => {
@@ -133,19 +150,31 @@ export default function ImportPage() {
       });
       setUploadResult(res.data);
 
-      // Auto-Mapping versuchen
-      const autoMapping: Record<string, string> = {};
-      for (const col of res.data.detected_columns) {
-        const lower = col.toLowerCase();
-        if (lower.includes('datum') || lower.includes('date') || lower.includes('zeit') || lower.includes('time')) {
-          autoMapping[col] = 'timestamp';
-        } else if (lower.includes('stand') || lower.includes('value') || lower.includes('wert') || lower.includes('kwh') || lower.includes('mwh')) {
-          autoMapping[col] = 'value';
-        } else if (lower.includes('notiz') || lower.includes('note') || lower.includes('bemerkung')) {
-          autoMapping[col] = 'notes';
+      if (res.data.is_multi_meter && res.data.meter_columns) {
+        // Multi-Meter: Auto-Matching übernehmen
+        const autoMapping: Record<string, string> = {};
+        for (const mc of res.data.meter_columns) {
+          if (mc.matched_meter_id) {
+            autoMapping[String(mc.column_index)] = mc.matched_meter_id;
+          }
         }
+        setMeterColumnMapping(autoMapping);
+      } else {
+        // Single-Meter: bisherige Auto-Erkennung
+        const autoMapping: Record<string, string> = {};
+        for (const col of res.data.detected_columns) {
+          const lower = col.toLowerCase();
+          if (lower.includes('datum') || lower.includes('date') || lower.includes('zeit') || lower.includes('time')) {
+            autoMapping[col] = 'timestamp';
+          } else if (lower.includes('stand') || lower.includes('value') || lower.includes('wert') || lower.includes('kwh') || lower.includes('mwh')) {
+            autoMapping[col] = 'value';
+          } else if (lower.includes('notiz') || lower.includes('note') || lower.includes('bemerkung')) {
+            autoMapping[col] = 'notes';
+          }
+        }
+        setColumnMapping(autoMapping);
       }
-      setColumnMapping(autoMapping);
+
       setStep('mapping');
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } };
@@ -161,48 +190,75 @@ export default function ImportPage() {
     setDecimalSeparator(profile.decimal_separator);
   };
 
-  // ── Schritt 2: Mapping bestätigen & Import ──
+  // ── Schritt 2: Import starten ──
 
   const handleProcess = async () => {
     setMappingError(null);
 
-    // Validierung: timestamp und value müssen zugeordnet sein
-    const mapped = Object.values(columnMapping);
-    if (!mapped.includes('timestamp')) {
-      setMappingError('Bitte ordnen Sie eine Spalte als "Zeitstempel" zu.');
-      return;
-    }
-    if (!mapped.includes('value')) {
-      setMappingError('Bitte ordnen Sie eine Spalte als "Zählerstand" zu.');
-      return;
-    }
-
-    // Wenn kein meter_id in Mapping → muss ein Zähler ausgewählt sein
-    if (!mapped.includes('meter_id') && !selectedMeterId) {
-      setMappingError('Bitte wählen Sie einen Zähler aus oder ordnen Sie eine meter_id-Spalte zu.');
-      return;
+    if (uploadResult?.is_multi_meter) {
+      // Multi-Meter Validierung
+      const assignedCount = Object.values(meterColumnMapping).filter(v => v).length;
+      if (assignedCount === 0) {
+        setMappingError('Bitte ordnen Sie mindestens eine Spalte einem Zähler zu.');
+        return;
+      }
+    } else {
+      // Single-Meter Validierung
+      const mapped = Object.values(columnMapping);
+      if (!mapped.includes('timestamp')) {
+        setMappingError('Bitte ordnen Sie eine Spalte als "Zeitstempel" zu.');
+        return;
+      }
+      if (!mapped.includes('value')) {
+        setMappingError('Bitte ordnen Sie eine Spalte als "Zählerstand" zu.');
+        return;
+      }
+      if (!mapped.includes('meter_id') && !selectedMeterId) {
+        setMappingError('Bitte wählen Sie einen Zähler aus oder ordnen Sie eine meter_id-Spalte zu.');
+        return;
+      }
     }
 
     setProcessing(true);
 
-    // Column-Mapping für API: Quellspalte → Zielspalte
-    const finalMapping = { ...columnMapping };
-
-    // Wenn kein meter_id im Mapping, als festen Wert setzen
-    if (!mapped.includes('meter_id') && selectedMeterId) {
-      finalMapping['__meter_id__'] = selectedMeterId;
-    }
-
     try {
-      const res = await apiClient.post<ImportResult>('/api/v1/imports/process', {
-        batch_id: uploadResult!.batch_id,
-        column_mapping: finalMapping,
-        date_format: dateFormat || null,
-        decimal_separator: decimalSeparator,
-        skip_duplicates: skipDuplicates,
-        save_as_profile: profileName || null,
-      });
-      setImportResult(res.data);
+      if (uploadResult?.is_multi_meter) {
+        // Multi-Meter: meter_column_mapping senden
+        const filteredMapping: Record<string, string> = {};
+        for (const [colIdx, meterId] of Object.entries(meterColumnMapping)) {
+          if (meterId) {
+            filteredMapping[colIdx] = meterId;
+          }
+        }
+
+        const res = await apiClient.post<ImportResult>('/api/v1/imports/process', {
+          batch_id: uploadResult!.batch_id,
+          column_mapping: {},
+          meter_column_mapping: filteredMapping,
+          date_format: dateFormat || null,
+          decimal_separator: decimalSeparator,
+          skip_duplicates: skipDuplicates,
+          save_as_profile: profileName || null,
+        });
+        setImportResult(res.data);
+      } else {
+        // Single-Meter: bisheriger Flow
+        const finalMapping = { ...columnMapping };
+        const mapped = Object.values(columnMapping);
+        if (!mapped.includes('meter_id') && selectedMeterId) {
+          finalMapping['__meter_id__'] = selectedMeterId;
+        }
+
+        const res = await apiClient.post<ImportResult>('/api/v1/imports/process', {
+          batch_id: uploadResult!.batch_id,
+          column_mapping: finalMapping,
+          date_format: dateFormat || null,
+          decimal_separator: decimalSeparator,
+          skip_duplicates: skipDuplicates,
+          save_as_profile: profileName || null,
+        });
+        setImportResult(res.data);
+      }
       setStep('result');
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } };
@@ -218,6 +274,7 @@ export default function ImportPage() {
     setStep('upload');
     setUploadResult(null);
     setColumnMapping({});
+    setMeterColumnMapping({});
     setSelectedMeterId('');
     setDateFormat('');
     setDecimalSeparator(',');
@@ -255,6 +312,20 @@ export default function ImportPage() {
       // Interceptor handled
     }
   };
+
+  // ── Hilfsfunktionen ──
+
+  // Für Multi-Meter: welche Meter-IDs sind bereits vergeben
+  const assignedMeterIds = new Set(Object.values(meterColumnMapping).filter(Boolean));
+
+  // Zähler-Name finden
+  const getMeterLabel = (meterId: string) => {
+    const m = meters.find(m => m.id === meterId);
+    return m ? `${m.name} (${ENERGY_TYPE_LABELS[m.energy_type as EnergyType] || m.energy_type})` : meterId;
+  };
+
+  // Multi-Meter: Anzahl zugeordneter Spalten
+  const assignedColumnCount = Object.values(meterColumnMapping).filter(Boolean).length;
 
   return (
     <div>
@@ -298,34 +369,72 @@ export default function ImportPage() {
 
           {/* ── Schritt 1: Upload ── */}
           {step === 'upload' && (
-            <div className="card">
-              <h2 className="mb-4 text-base font-semibold">Datei hochladen</h2>
-              <p className="mb-4 text-sm text-gray-500">
-                Unterstützte Formate: CSV (.csv), Excel (.xlsx, .xls).
-                Die Spalten werden automatisch erkannt.
-              </p>
-
-              {uploadError && (
-                <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{uploadError}</div>
-              )}
-
-              <div className="flex items-end gap-4">
-                <div className="flex-1">
-                  <label className="label">Datei auswählen *</label>
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    accept=".csv,.xlsx,.xls"
-                    className="input"
-                  />
-                </div>
+            <div className="space-y-4">
+              {/* Format-Hinweis */}
+              <div className="card border-blue-200 bg-blue-50/50">
                 <button
-                  onClick={handleUpload}
-                  className="btn-primary"
-                  disabled={uploading}
+                  onClick={() => setShowFormatHint(!showFormatHint)}
+                  className="flex items-center gap-2 text-sm font-semibold text-blue-800 w-full text-left"
                 >
-                  {uploading ? 'Wird hochgeladen...' : 'Hochladen'}
+                  <Info className="w-4 h-4" />
+                  CSV-Format-Vorgabe
+                  <span className="ml-auto text-xs text-blue-600">{showFormatHint ? 'Ausblenden' : 'Anzeigen'}</span>
                 </button>
+                {showFormatHint && (
+                  <div className="mt-3 space-y-2 text-sm text-blue-900">
+                    <p className="font-medium">Einzelzähler-CSV:</p>
+                    <div className="rounded bg-white/70 px-3 py-2 font-mono text-xs border border-blue-200">
+                      Zeitstempel;Zählerstand<br />
+                      01.01.2025;16600,49<br />
+                      02.01.2025;22302,95
+                    </div>
+                    <p className="font-medium mt-3">Multi-Zähler-CSV:</p>
+                    <div className="rounded bg-white/70 px-3 py-2 font-mono text-xs border border-blue-200">
+                      Datum;Zähler A;Zähler B;Zähler C<br />
+                      01.01.2025;16600,49;0;0,82<br />
+                      02.01.2025;22302,95;0;0,19
+                    </div>
+                    <ul className="list-disc list-inside text-xs space-y-1 mt-2 text-blue-800">
+                      <li><strong>1. Spalte:</strong> Zeitstempel (TT.MM.JJJJ oder JJJJ-MM-TT)</li>
+                      <li><strong>Ab Spalte 2:</strong> Je ein Zählerwert pro Spalte</li>
+                      <li><strong>1. Zeile:</strong> Spaltenüberschriften (Name/Kennung des Zählers)</li>
+                      <li><strong>Trennzeichen:</strong> Semikolon oder Komma (automatisch erkannt)</li>
+                      <li><strong>Dezimalformat:</strong> Komma (1.234,56) oder Punkt (1,234.56)</li>
+                      <li>Keine Messstatus-, Einheiten- oder sonstige Zusatzspalten</li>
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              <div className="card">
+                <h2 className="mb-4 text-base font-semibold">Datei hochladen</h2>
+                <p className="mb-4 text-sm text-gray-500">
+                  Unterstützte Formate: CSV (.csv), Excel (.xlsx, .xls).
+                  Die Spalten werden automatisch erkannt.
+                </p>
+
+                {uploadError && (
+                  <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{uploadError}</div>
+                )}
+
+                <div className="flex items-end gap-4">
+                  <div className="flex-1">
+                    <label className="label">Datei auswählen *</label>
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      accept=".csv,.xlsx,.xls"
+                      className="input"
+                    />
+                  </div>
+                  <button
+                    onClick={handleUpload}
+                    className="btn-primary"
+                    disabled={uploading}
+                  >
+                    {uploading ? 'Wird hochgeladen...' : 'Hochladen'}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -336,9 +445,14 @@ export default function ImportPage() {
               <div className="card">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h2 className="text-base font-semibold">Spaltenzuordnung</h2>
+                    <h2 className="text-base font-semibold">
+                      {uploadResult.is_multi_meter ? 'Zähler-Zuordnung' : 'Spaltenzuordnung'}
+                    </h2>
                     <p className="text-sm text-gray-500">
-                      {uploadResult.filename} – {uploadResult.row_count} Zeilen erkannt, {uploadResult.detected_columns.length} Spalten
+                      {uploadResult.filename} – {uploadResult.row_count} Zeilen,{' '}
+                      {uploadResult.is_multi_meter
+                        ? `${uploadResult.meter_columns?.length || 0} Zähler-Spalten erkannt`
+                        : `${uploadResult.detected_columns.length} Spalten erkannt`}
                     </p>
                   </div>
                   <button onClick={handleReset} className="btn-secondary text-sm">
@@ -350,63 +464,131 @@ export default function ImportPage() {
                   <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{mappingError}</div>
                 )}
 
-                {/* Profil laden */}
-                {profiles.length > 0 && (
-                  <div className="mb-4">
-                    <label className="label">Gespeichertes Profil laden</label>
-                    <div className="flex gap-2">
-                      {profiles.map((p) => (
-                        <button
-                          key={p.id}
-                          onClick={() => applyProfile(p)}
-                          className="btn-secondary text-xs"
-                        >
-                          {p.name}
-                        </button>
-                      ))}
+                {/* ── Multi-Meter Mapping ── */}
+                {uploadResult.is_multi_meter && uploadResult.meter_columns ? (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-3">
+                      Ordnen Sie jede CSV-Spalte einem bestehenden Zähler zu.
+                      Automatisch erkannte Zuordnungen sind vorausgewählt.
+                    </p>
+                    <div className="space-y-2">
+                      {uploadResult.meter_columns.map((mc) => {
+                        const currentMeter = meterColumnMapping[String(mc.column_index)];
+                        const isAutoMatched = mc.matched_meter_id && currentMeter === mc.matched_meter_id;
+                        return (
+                          <div
+                            key={mc.column_index}
+                            className={`flex items-center gap-4 rounded-lg border p-3 ${
+                              currentMeter
+                                ? isAutoMatched
+                                  ? 'border-green-200 bg-green-50/50'
+                                  : 'border-primary-200 bg-primary-50/30'
+                                : 'border-gray-200'
+                            }`}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium truncate" title={mc.column_name}>
+                                {mc.column_name}
+                              </div>
+                              {mc.matched_meter_name && isAutoMatched && (
+                                <div className="text-xs text-green-600 mt-0.5">
+                                  Automatisch erkannt
+                                </div>
+                              )}
+                            </div>
+                            <span className="text-gray-300 flex-shrink-0">→</span>
+                            <select
+                              className="input w-72 flex-shrink-0"
+                              value={currentMeter || ''}
+                              onChange={(e) => {
+                                setMeterColumnMapping({
+                                  ...meterColumnMapping,
+                                  [String(mc.column_index)]: e.target.value,
+                                });
+                              }}
+                            >
+                              <option value="">– Nicht importieren –</option>
+                              {meters.map((m) => (
+                                <option
+                                  key={m.id}
+                                  value={m.id}
+                                  disabled={assignedMeterIds.has(m.id) && currentMeter !== m.id}
+                                >
+                                  {m.name} ({ENERGY_TYPE_LABELS[m.energy_type as EnergyType] || m.energy_type} – {m.unit})
+                                  {assignedMeterIds.has(m.id) && currentMeter !== m.id ? ' ✓' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 text-sm text-gray-500">
+                      {assignedColumnCount} von {uploadResult.meter_columns.length} Spalten zugeordnet
                     </div>
                   </div>
-                )}
+                ) : (
+                  /* ── Single-Meter Mapping (bisheriger Flow) ── */
+                  <div>
+                    {/* Profil laden */}
+                    {profiles.length > 0 && (
+                      <div className="mb-4">
+                        <label className="label">Gespeichertes Profil laden</label>
+                        <div className="flex gap-2">
+                          {profiles.map((p) => (
+                            <button
+                              key={p.id}
+                              onClick={() => applyProfile(p)}
+                              className="btn-secondary text-xs"
+                            >
+                              {p.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
-                {/* Spalten-Zuordnung */}
-                <div className="space-y-2">
-                  {uploadResult.detected_columns.map((col) => (
-                    <div key={col} className="flex items-center gap-4">
-                      <span className="w-40 truncate text-sm font-medium" title={col}>
-                        {col}
-                      </span>
-                      <span className="text-gray-300">→</span>
-                      <select
-                        className="input w-48"
-                        value={columnMapping[col] || ''}
-                        onChange={(e) =>
-                          setColumnMapping({ ...columnMapping, [col]: e.target.value })
-                        }
-                      >
-                        {Object.entries(TARGET_COLUMNS).map(([val, label]) => (
-                          <option key={val} value={val}>{label}</option>
-                        ))}
-                      </select>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Zähler-Auswahl (wenn keine meter_id-Spalte) */}
-                {!Object.values(columnMapping).includes('meter_id') && (
-                  <div className="mt-4 border-t pt-4">
-                    <label className="label">Zähler für alle Zeilen *</label>
-                    <select
-                      className="input max-w-md"
-                      value={selectedMeterId}
-                      onChange={(e) => setSelectedMeterId(e.target.value)}
-                    >
-                      <option value="">– Zähler wählen –</option>
-                      {meters.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name} ({ENERGY_TYPE_LABELS[m.energy_type as EnergyType] || m.energy_type} – {m.unit})
-                        </option>
+                    {/* Spalten-Zuordnung */}
+                    <div className="space-y-2">
+                      {uploadResult.detected_columns.map((col) => (
+                        <div key={col} className="flex items-center gap-4">
+                          <span className="w-40 truncate text-sm font-medium" title={col}>
+                            {col}
+                          </span>
+                          <span className="text-gray-300">→</span>
+                          <select
+                            className="input w-48"
+                            value={columnMapping[col] || ''}
+                            onChange={(e) =>
+                              setColumnMapping({ ...columnMapping, [col]: e.target.value })
+                            }
+                          >
+                            {Object.entries(TARGET_COLUMNS).map(([val, label]) => (
+                              <option key={val} value={val}>{label}</option>
+                            ))}
+                          </select>
+                        </div>
                       ))}
-                    </select>
+                    </div>
+
+                    {/* Zähler-Auswahl */}
+                    {!Object.values(columnMapping).includes('meter_id') && (
+                      <div className="mt-4 border-t pt-4">
+                        <label className="label">Zähler für alle Zeilen *</label>
+                        <select
+                          className="input max-w-md"
+                          value={selectedMeterId}
+                          onChange={(e) => setSelectedMeterId(e.target.value)}
+                        >
+                          <option value="">– Zähler wählen –</option>
+                          {meters.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name} ({ENERGY_TYPE_LABELS[m.energy_type as EnergyType] || m.energy_type} – {m.unit})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -468,20 +650,37 @@ export default function ImportPage() {
                   <table className="w-full text-sm">
                     <thead className="border-b bg-gray-50 text-xs text-gray-500">
                       <tr>
-                        {uploadResult.detected_columns.map((col) => (
-                          <th key={col} className="px-3 py-2 text-left whitespace-nowrap">
-                            {col}
-                            {columnMapping[col] && (
-                              <span className="ml-1 text-primary-600">
-                                ({TARGET_COLUMNS[columnMapping[col]]})
-                              </span>
-                            )}
-                          </th>
-                        ))}
+                        {uploadResult.detected_columns.map((col, idx) => {
+                          if (uploadResult.is_multi_meter && idx > 0) {
+                            // Multi-Meter: Zähler-Name anzeigen wenn zugeordnet
+                            const meterId = meterColumnMapping[String(idx)];
+                            const meter = meterId ? meters.find(m => m.id === meterId) : null;
+                            return (
+                              <th key={col} className="px-3 py-2 text-left whitespace-nowrap">
+                                <span className="truncate block max-w-[150px]" title={col}>
+                                  {meter ? meter.name : col.length > 25 ? col.slice(0, 25) + '…' : col}
+                                </span>
+                                {meter && (
+                                  <span className="text-green-600 text-[10px] block">zugeordnet</span>
+                                )}
+                              </th>
+                            );
+                          }
+                          return (
+                            <th key={col} className="px-3 py-2 text-left whitespace-nowrap">
+                              {col}
+                              {!uploadResult.is_multi_meter && columnMapping[col] && (
+                                <span className="ml-1 text-primary-600">
+                                  ({TARGET_COLUMNS[columnMapping[col]]})
+                                </span>
+                              )}
+                            </th>
+                          );
+                        })}
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {uploadResult.preview_rows.map((row, idx) => (
+                      {uploadResult.preview_rows.slice(0, 5).map((row, idx) => (
                         <tr key={idx} className="hover:bg-gray-50">
                           {uploadResult.detected_columns.map((col) => (
                             <td key={col} className="px-3 py-1.5 whitespace-nowrap text-gray-600">
@@ -505,7 +704,11 @@ export default function ImportPage() {
                   className="btn-primary"
                   disabled={processing}
                 >
-                  {processing ? 'Importiere...' : `${uploadResult.row_count} Zeilen importieren`}
+                  {processing
+                    ? 'Importiere...'
+                    : uploadResult.is_multi_meter
+                      ? `${uploadResult.row_count} Zeilen × ${assignedColumnCount} Zähler importieren`
+                      : `${uploadResult.row_count} Zeilen importieren`}
                 </button>
               </div>
             </div>
@@ -522,6 +725,33 @@ export default function ImportPage() {
                 <StatBox label="Übersprungen" value={importResult.skipped_count} color="text-yellow-600" />
                 <StatBox label="Fehler" value={importResult.error_count} color="text-red-600" />
               </div>
+
+              {/* Multi-Meter: Details pro Zähler */}
+              {importResult.meter_details && importResult.meter_details.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="mb-2 text-sm font-semibold">Details pro Zähler</h3>
+                  <div className="rounded-lg border overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-xs text-gray-500">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Zähler</th>
+                          <th className="px-3 py-2 text-right">Importiert</th>
+                          <th className="px-3 py-2 text-right">Fehler</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {importResult.meter_details.map((md) => (
+                          <tr key={md.meter_id}>
+                            <td className="px-3 py-2 font-medium">{getMeterLabel(md.meter_id)}</td>
+                            <td className="px-3 py-2 text-right text-green-600 font-mono">{md.imported}</td>
+                            <td className="px-3 py-2 text-right text-red-600 font-mono">{md.errors}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               {importResult.error_count > 0 && (
                 <div className="mb-4">
@@ -617,7 +847,7 @@ function StepIndicator({ label, active, done }: { label: string; active: boolean
             : 'bg-gray-100 text-gray-500'
       }`}
     >
-      {done ? '\u2713 ' : ''}{label}
+      {done ? '✓ ' : ''}{label}
     </span>
   );
 }
