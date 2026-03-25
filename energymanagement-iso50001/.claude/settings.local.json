@@ -24,7 +24,16 @@
       "Bash(DATABASE_URL=\"postgresql+asyncpg://energy:energy@192.168.178.142:5432/energy_management\" PATH=\"/var/data/python/bin:$PATH\" uvicorn app.main:create_app --factory --reload --host 0.0.0.0 --port 8099)",
       "Bash(python3 -c \":*)",
       "Bash(export PATH=\"/home/rico/.nvm/versions/node/v20.20.1/bin:/usr/bin:$PATH\")",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(curl -s http://192.168.178.142:8099/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"\"\"\"username\"\"\"\":\"\"\"\"admin\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"4711lolo\"\"\"\"}')",
+      "Bash(python3 -m json.tool)",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1ZTIxZGZjOC0xOWUwLTRkYTktYWJlNy04YjUxNWRjZmNmODIiLCJyb2xlIjoiYWRtaW4iLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzc0NDU1MTY2LCJleHAiOjE3NzQ0NTY5NjZ9.3ZOSUVpuFY7rZxU-MJDZA6aLZRrVF6aV_pXnqS1YbWg\")",
+      "Bash(curl -s http://192.168.178.142:8099/api/v1/climate/sensors -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(curl -s http://192.168.178.142:8099/api/v1/climate/readings -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(export PATH=\"/usr/bin:/bin:/home/rico/.nvm/versions/node/v20.20.1/bin:$PATH\")",
+      "Bash(export PATH=\"/usr/bin:/bin:$PATH\")",
+      "Bash(export DATABASE_URL=\"postgresql+asyncpg://energy:energy@192.168.178.142:5432/energy_management\")",
+      "Bash(export REDIS_URL=\"redis://192.168.178.142:6379/0\")"
     ]
   }
 }
