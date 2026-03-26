@@ -9,7 +9,7 @@ import { RefreshCw } from 'lucide-react';
 import InfoTip from '@/components/ui/InfoTip';
 import SankeyDiagram from '@/components/charts/SankeyDiagram';
 import { apiClient } from '@/utils/api';
-import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
+import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
 
 /* ── Typen ── */
 
@@ -179,7 +179,7 @@ export default function AnalyticsPage() {
         {tab === 'distribution' && <DistributionTab />}
         {tab === 'self_consumption' && <SelfConsumptionTab />}
         {tab === 'heatmap' && <HeatmapTab meters={meters} />}
-        {tab === 'sankey' && <SankeyTab />}
+        {tab === 'sankey' && <SankeyTab meters={meters} />}
         {tab === 'duration_curve' && <DurationCurveTab meters={meters} />}
         {tab === 'cumulative' && <CumulativeTab meters={meters} />}
         {tab === 'weather' && <WeatherCorrectionTab meters={meters} />}
@@ -665,29 +665,22 @@ function HeatmapTab({ meters }: { meters: Meter[] }) {
 
 /* ── Tab: Sankey ── */
 
-function SankeyTab() {
+function SankeyTab({ meters }: { meters: Meter[] }) {
   const [data, setData] = useState<SankeyData | null>(null);
   const [startDate, setStartDate] = useState(yearStart());
   const [endDate, setEndDate] = useState(today());
   const [energyType, setEnergyType] = useState('');
-  const [availableTypes, setAvailableTypes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Verfügbare Energiearten aus Zählern laden
+  // Verfügbare Energiearten aus übergebenen Zählern ableiten
+  const availableTypes = [...new Set(meters.map((m) => m.energy_type))].sort();
+
+  // Erste Energieart vorauswählen sobald Zähler verfügbar
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await apiClient.get<PaginatedResponse<{ energy_type: string }>>(
-          '/api/v1/meters?page_size=200'
-        );
-        const types = [...new Set(res.data.items.map((m) => m.energy_type))];
-        types.sort();
-        setAvailableTypes(types);
-        // Erste Energieart vorauswählen
-        if (types.length > 0) setEnergyType(types[0]);
-      } catch { /* leer */ }
-    })();
-  }, []);
+    if (availableTypes.length > 0 && !energyType) {
+      setEnergyType(availableTypes[0]);
+    }
+  }, [availableTypes.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchData = useCallback(async () => {
     setLoading(true);
