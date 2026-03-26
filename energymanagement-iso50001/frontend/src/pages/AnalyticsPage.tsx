@@ -9,7 +9,7 @@ import { RefreshCw } from 'lucide-react';
 import InfoTip from '@/components/ui/InfoTip';
 import SankeyDiagram from '@/components/charts/SankeyDiagram';
 import { apiClient } from '@/utils/api';
-import { ENERGY_TYPE_LABELS } from '@/types';
+import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
 
 /* ── Typen ── */
 
@@ -669,24 +669,60 @@ function SankeyTab() {
   const [data, setData] = useState<SankeyData | null>(null);
   const [startDate, setStartDate] = useState(yearStart());
   const [endDate, setEndDate] = useState(today());
+  const [energyType, setEnergyType] = useState('');
+  const [availableTypes, setAvailableTypes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Verfügbare Energiearten aus Zählern laden
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await apiClient.get<PaginatedResponse<{ energy_type: string }>>(
+          '/api/v1/meters?page_size=200'
+        );
+        const types = [...new Set(res.data.items.map((m) => m.energy_type))];
+        types.sort();
+        setAvailableTypes(types);
+        // Erste Energieart vorauswählen
+        if (types.length > 0) setEnergyType(types[0]);
+      } catch { /* leer */ }
+    })();
+  }, []);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get('/api/v1/analytics/sankey', {
-        params: { start_date: startDate, end_date: endDate },
-      });
+      const params: Record<string, string> = {
+        start_date: startDate,
+        end_date: endDate,
+      };
+      if (energyType) params.energy_type = energyType;
+      const res = await apiClient.get('/api/v1/analytics/sankey', { params });
       setData(res.data);
     } catch { /* leer */ }
     setLoading(false);
-  }, [startDate, endDate]);
+  }, [startDate, endDate, energyType]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   return (
     <div>
       <div className="flex flex-wrap gap-3 items-end mb-6">
+        <div>
+          <label className="label">Energieart</label>
+          <select
+            className="input w-48"
+            value={energyType}
+            onChange={(e) => setEnergyType(e.target.value)}
+          >
+            <option value="">Alle Energiearten</option>
+            {availableTypes.map((t) => (
+              <option key={t} value={t}>
+                {ENERGY_TYPE_LABELS[t as EnergyType] || t}
+              </option>
+            ))}
+          </select>
+        </div>
         <div>
           <label className="label">Von</label>
           <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
@@ -698,7 +734,14 @@ function SankeyTab() {
       </div>
 
       <div className="card">
-        <h2 className="mb-4 text-lg font-semibold">Energieflussdiagramm</h2>
+        <h2 className="mb-4 text-lg font-semibold">
+          Energieflussdiagramm
+          {energyType && (
+            <span className="ml-2 text-base font-normal text-gray-500">
+              – {ENERGY_TYPE_LABELS[energyType as EnergyType] || energyType}
+            </span>
+          )}
+        </h2>
         {loading ? (
           <div className="flex h-80 items-center justify-center">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />

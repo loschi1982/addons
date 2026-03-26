@@ -330,18 +330,23 @@ class AnalyticsService:
         self,
         start_date: date,
         end_date: date,
+        energy_type: str | None = None,
     ) -> dict:
         """
         Sankey-Daten: Energiefluss von Hauptzählern → Unterzähler → Verbraucher.
 
         Generiert Knoten (nodes) und Verbindungen (links).
+        Optional nach Energieart filtern.
         """
         # Alle aktiven Zähler mit Hierarchie laden
-        meters_result = await self.db.execute(
+        query = (
             select(Meter)
             .where(Meter.is_active == True)  # noqa: E712
             .options(selectinload(Meter.consumers))
         )
+        if energy_type:
+            query = query.where(Meter.energy_type == energy_type)
+        meters_result = await self.db.execute(query)
         meters = list(meters_result.scalars().all())
 
         # Verbrauch pro Zähler im Zeitraum
