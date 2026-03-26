@@ -16,14 +16,18 @@ from enum import Enum
 
 class EnergyType(str, Enum):
     """Arten von Energieträgern, die das System erfassen kann."""
-    ELECTRICITY = "electricity"       # Strom
-    GAS = "gas"                       # Erdgas
-    WATER = "water"                   # Wasser
-    HEAT = "heat"                     # Wärme (Fernwärme, Heizung)
-    COOLING = "cooling"               # Kälte (Klimaanlage)
-    COMPRESSED_AIR = "compressed_air" # Druckluft
-    STEAM = "steam"                   # Dampf
-    OTHER = "other"                   # Sonstige
+    ELECTRICITY = "electricity"             # Strom
+    NATURAL_GAS = "natural_gas"             # Erdgas
+    HEATING_OIL = "heating_oil"             # Heizöl
+    DISTRICT_HEATING = "district_heating"   # Fernwärme
+    DISTRICT_COOLING = "district_cooling"   # Kälte (Fernkälte, Klimaanlage)
+    WATER = "water"                         # Wasser
+    SOLAR = "solar"                         # Solar (Eigenproduktion)
+    LPG = "lpg"                             # Flüssiggas
+    WOOD_PELLETS = "wood_pellets"           # Holzpellets
+    COMPRESSED_AIR = "compressed_air"       # Druckluft
+    STEAM = "steam"                         # Dampf
+    OTHER = "other"                         # Sonstige
 
 
 class DataSource(str, Enum):
