@@ -24,6 +24,7 @@ export type EnergyType =
   | 'natural_gas'
   | 'heating_oil'
   | 'district_heating'
+  | 'district_cooling'
   | 'water'
   | 'solar'
   | 'lpg'
@@ -34,6 +35,7 @@ export const ENERGY_TYPE_LABELS: Record<EnergyType, string> = {
   natural_gas: 'Erdgas',
   heating_oil: 'Heizöl',
   district_heating: 'Fernwärme',
+  district_cooling: 'Kälte',
   water: 'Wasser',
   solar: 'Solar',
   lpg: 'Flüssiggas',
@@ -45,6 +47,7 @@ export const ENERGY_TYPE_COLORS: Record<EnergyType, string> = {
   natural_gas: '#3B82F6',
   heating_oil: '#8B5CF6',
   district_heating: '#F97316',
+  district_cooling: '#0EA5E9',
   water: '#06B6D4',
   solar: '#10B981',
   lpg: '#EC4899',
