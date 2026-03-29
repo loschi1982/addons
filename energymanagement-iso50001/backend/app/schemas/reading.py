@@ -154,6 +154,7 @@ class ImportMappingProfileResponse(BaseSchema):
     id: uuid.UUID
     name: str
     column_mapping: dict[str, str]
+    meter_mapping: dict[str, str] | None = None
     date_format: str | None
     decimal_separator: str
     created_at: datetime
