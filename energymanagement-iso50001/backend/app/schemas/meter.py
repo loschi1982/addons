@@ -116,6 +116,14 @@ class ConsumerBase(BaseModel):
     priority: str = Field("normal", max_length=20)
     usage_unit_id: uuid.UUID | None = None
     description: str | None = None
+    # Gerätedaten
+    manufacturer: str | None = None
+    model: str | None = None
+    serial_number: str | None = None
+    # Lebenszyklus
+    commissioned_at: date | None = None
+    decommissioned_at: date | None = None
+    replaced_by_id: uuid.UUID | None = None
 
 
 class ConsumerCreate(ConsumerBase):
@@ -134,12 +142,19 @@ class ConsumerUpdate(BaseModel):
     usage_unit_id: uuid.UUID | None = None
     description: str | None = None
     meter_ids: list[uuid.UUID] | None = None
+    manufacturer: str | None = None
+    model: str | None = None
+    serial_number: str | None = None
+    commissioned_at: date | None = None
+    decommissioned_at: date | None = None
+    replaced_by_id: uuid.UUID | None = None
 
 
 class ConsumerResponse(ConsumerBase, BaseSchema):
     """Verbraucher in API-Responses."""
     id: uuid.UUID
     meter_ids: list[uuid.UUID] = []
+    replaced_by_name: str | None = None
     created_at: datetime
 
 

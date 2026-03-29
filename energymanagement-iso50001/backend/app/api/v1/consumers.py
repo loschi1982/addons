@@ -6,6 +6,7 @@ Lüftungsanlage), die einem oder mehreren Zählern zugeordnet werden.
 """
 
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_, select
@@ -32,6 +33,29 @@ def _priority_to_str(val: int | None) -> str:
     return _PRIORITY_TO_STR.get(val or 0, "normal")
 
 
+def _consumer_to_response(c: Consumer, replaced_by_name: str | None = None) -> ConsumerResponse:
+    """Consumer-Modell → ConsumerResponse."""
+    return ConsumerResponse(
+        id=c.id,
+        name=c.name,
+        category=c.category,
+        rated_power_kw=c.rated_power,
+        operating_hours_per_year=int(c.operating_hours) if c.operating_hours else None,
+        priority=_priority_to_str(c.priority),
+        usage_unit_id=c.usage_unit_id,
+        description=c.notes,
+        meter_ids=[m.id for m in c.meters] if c.meters else [],
+        manufacturer=c.manufacturer,
+        model=c.model,
+        serial_number=c.serial_number,
+        commissioned_at=c.commissioned_at,
+        decommissioned_at=c.decommissioned_at,
+        replaced_by_id=c.replaced_by_id,
+        replaced_by_name=replaced_by_name,
+        created_at=c.created_at,
+    )
+
+
 @router.get("", response_model=PaginatedResponse[ConsumerResponse])
 async def list_consumers(
     page: int = Query(1, ge=1),
@@ -39,11 +63,24 @@ async def list_consumers(
     category: str | None = None,
     usage_unit_id: uuid.UUID | None = None,
     search: str | None = None,
+    status: str | None = Query(None, description="active, decommissioned, all"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Alle Verbraucher auflisten."""
-    query = select(Consumer).where(Consumer.is_active == True)  # noqa: E712
+    query = select(Consumer)
+
+    # Status-Filter
+    if status == "decommissioned":
+        query = query.where(Consumer.decommissioned_at.isnot(None))
+    elif status == "all":
+        pass  # keine Einschränkung
+    else:
+        # Standard: nur aktive (nicht dekommissioniert und is_active)
+        query = query.where(
+            Consumer.is_active == True,  # noqa: E712
+            Consumer.decommissioned_at.is_(None),
+        )
 
     if category:
         query = query.where(Consumer.category == category)
@@ -55,6 +92,9 @@ async def list_consumers(
             or_(
                 Consumer.name.ilike(pattern),
                 Consumer.notes.ilike(pattern),
+                Consumer.manufacturer.ilike(pattern),
+                Consumer.model.ilike(pattern),
+                Consumer.serial_number.ilike(pattern),
             )
         )
 
@@ -65,22 +105,15 @@ async def list_consumers(
     query = (
         query.offset(offset).limit(page_size).order_by(Consumer.name)
         .options(selectinload(Consumer.meters))
+        .options(selectinload(Consumer.replaced_by))
     )
     result = await db.execute(query)
     consumers = result.scalars().all()
 
     items = [
-        ConsumerResponse(
-            id=c.id,
-            name=c.name,
-            category=c.category,
-            rated_power_kw=c.rated_power,
-            operating_hours_per_year=int(c.operating_hours) if c.operating_hours else None,
-            priority=_priority_to_str(c.priority),
-            usage_unit_id=c.usage_unit_id,
-            description=c.notes,
-            meter_ids=[m.id for m in c.meters],
-            created_at=c.created_at,
+        _consumer_to_response(
+            c,
+            replaced_by_name=c.replaced_by.name if c.replaced_by else None,
         )
         for c in consumers
     ]
@@ -111,12 +144,17 @@ async def create_consumer(
         priority=priority_val,
         usage_unit_id=request.usage_unit_id,
         notes=request.description,
+        manufacturer=request.manufacturer,
+        model=request.model,
+        serial_number=request.serial_number,
+        commissioned_at=request.commissioned_at,
+        decommissioned_at=request.decommissioned_at,
+        replaced_by_id=request.replaced_by_id,
     )
     db.add(consumer)
     await db.flush()
 
-    # Zähler-Zuordnungen speichern (direkt in Junction-Table)
-    meter_ids_list: list[uuid.UUID] = []
+    # Zähler-Zuordnungen speichern
     if request.meter_ids:
         for mid in request.meter_ids:
             meter = await db.get(Meter, mid)
@@ -126,22 +164,17 @@ async def create_consumer(
                         meter_id=mid, consumer_id=consumer.id
                     )
                 )
-                meter_ids_list.append(mid)
 
     await db.commit()
 
-    return ConsumerResponse(
-        id=consumer.id,
-        name=consumer.name,
-        category=consumer.category,
-        rated_power_kw=consumer.rated_power,
-        operating_hours_per_year=int(consumer.operating_hours) if consumer.operating_hours else None,
-        priority=_priority_to_str(consumer.priority),
-        usage_unit_id=consumer.usage_unit_id,
-        description=consumer.notes,
-        meter_ids=meter_ids_list,
-        created_at=consumer.created_at,
+    # Meters laden für Response
+    result = await db.execute(
+        select(Consumer).where(Consumer.id == consumer.id)
+        .options(selectinload(Consumer.meters))
     )
+    consumer = result.scalar_one()
+
+    return _consumer_to_response(consumer)
 
 
 @router.get("/{consumer_id}", response_model=ConsumerResponse)
@@ -155,6 +188,7 @@ async def get_consumer(
         select(Consumer)
         .where(Consumer.id == consumer_id)
         .options(selectinload(Consumer.meters))
+        .options(selectinload(Consumer.replaced_by))
     )
     consumer = result.scalar_one_or_none()
     if not consumer:
@@ -165,17 +199,9 @@ async def get_consumer(
             status_code=404,
         )
 
-    return ConsumerResponse(
-        id=consumer.id,
-        name=consumer.name,
-        category=consumer.category,
-        rated_power_kw=consumer.rated_power,
-        operating_hours_per_year=int(consumer.operating_hours) if consumer.operating_hours else None,
-        priority=_priority_to_str(consumer.priority),
-        usage_unit_id=consumer.usage_unit_id,
-        description=consumer.notes,
-        meter_ids=[m.id for m in consumer.meters],
-        created_at=consumer.created_at,
+    return _consumer_to_response(
+        consumer,
+        replaced_by_name=consumer.replaced_by.name if consumer.replaced_by else None,
     )
 
 
@@ -205,6 +231,12 @@ async def update_consumer(
         "priority": "priority",
         "usage_unit_id": "usage_unit_id",
         "description": "notes",
+        "manufacturer": "manufacturer",
+        "model": "model",
+        "serial_number": "serial_number",
+        "commissioned_at": "commissioned_at",
+        "decommissioned_at": "decommissioned_at",
+        "replaced_by_id": "replaced_by_id",
     }
     for schema_field, model_field in field_map.items():
         if schema_field in data:
@@ -214,9 +246,7 @@ async def update_consumer(
             setattr(consumer, model_field, value)
 
     # Zähler-Zuordnungen aktualisieren
-    meter_ids_list: list[uuid.UUID] = []
     if "meter_ids" in data:
-        # Alte Zuordnungen laden und ersetzen
         await db.execute(
             meter_consumer.delete().where(meter_consumer.c.consumer_id == consumer_id)
         )
@@ -227,22 +257,86 @@ async def update_consumer(
                     await db.execute(
                         meter_consumer.insert().values(meter_id=mid, consumer_id=consumer_id)
                     )
-                    meter_ids_list.append(mid)
 
     await db.commit()
 
-    return ConsumerResponse(
-        id=consumer.id,
-        name=consumer.name,
-        category=consumer.category,
-        rated_power_kw=consumer.rated_power,
-        operating_hours_per_year=int(consumer.operating_hours) if consumer.operating_hours else None,
-        priority=_priority_to_str(consumer.priority),
-        usage_unit_id=consumer.usage_unit_id,
-        description=consumer.notes,
-        meter_ids=meter_ids_list,
-        created_at=consumer.created_at,
+    # Neu laden mit Beziehungen
+    result = await db.execute(
+        select(Consumer).where(Consumer.id == consumer_id)
+        .options(selectinload(Consumer.meters))
+        .options(selectinload(Consumer.replaced_by))
     )
+    consumer = result.scalar_one()
+
+    return _consumer_to_response(
+        consumer,
+        replaced_by_name=consumer.replaced_by.name if consumer.replaced_by else None,
+    )
+
+
+@router.post("/{consumer_id}/replace", response_model=ConsumerResponse, status_code=201)
+async def replace_consumer(
+    consumer_id: uuid.UUID,
+    request: ConsumerCreate,
+    current_user: User = Depends(require_permission("consumers", "update")),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Verbraucher ersetzen: Alten deaktivieren, neuen anlegen und verknüpfen.
+
+    Der alte Verbraucher bekommt decommissioned_at (heute) und replaced_by_id.
+    Der neue Verbraucher wird mit den übergebenen Daten erstellt.
+    """
+    old_consumer = await db.get(Consumer, consumer_id)
+    if not old_consumer:
+        from app.core.exceptions import EnergyManagementError
+        raise EnergyManagementError(
+            "Verbraucher nicht gefunden",
+            error_code="CONSUMER_NOT_FOUND",
+            status_code=404,
+        )
+
+    # Neuen Verbraucher anlegen
+    priority_val = _PRIORITY_TO_INT.get(request.priority, 1)
+    new_consumer = Consumer(
+        name=request.name,
+        category=request.category,
+        rated_power=request.rated_power_kw,
+        operating_hours=request.operating_hours_per_year,
+        priority=priority_val,
+        usage_unit_id=request.usage_unit_id or old_consumer.usage_unit_id,
+        notes=request.description,
+        manufacturer=request.manufacturer,
+        model=request.model,
+        serial_number=request.serial_number,
+        commissioned_at=request.commissioned_at or date.today(),
+    )
+    db.add(new_consumer)
+    await db.flush()
+
+    # Zähler-Zuordnungen
+    if request.meter_ids:
+        for mid in request.meter_ids:
+            meter = await db.get(Meter, mid)
+            if meter:
+                await db.execute(
+                    meter_consumer.insert().values(meter_id=mid, consumer_id=new_consumer.id)
+                )
+
+    # Alten Verbraucher deaktivieren
+    old_consumer.decommissioned_at = old_consumer.decommissioned_at or date.today()
+    old_consumer.replaced_by_id = new_consumer.id
+
+    await db.commit()
+
+    # Neu laden
+    result = await db.execute(
+        select(Consumer).where(Consumer.id == new_consumer.id)
+        .options(selectinload(Consumer.meters))
+    )
+    new_consumer = result.scalar_one()
+
+    return _consumer_to_response(new_consumer)
 
 
 @router.delete("/{consumer_id}", response_model=DeleteResponse)

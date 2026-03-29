@@ -7,9 +7,10 @@ Verbraucher werden Zählern zugeordnet, um den Energiefluss abzubilden.
 """
 
 import uuid
+from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, Numeric, String, Table, Text
+from sqlalchemy import Boolean, Column, Date, ForeignKey, Integer, Numeric, String, Table, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -51,5 +52,18 @@ class Consumer(Base, UUIDMixin, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Gerätedaten
+    manufacturer: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    serial_number: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Lebenszyklus (ISO 50001: Nachverfolgung von Energiesparmaßnahmen)
+    commissioned_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    decommissioned_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    replaced_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("consumers.id"), nullable=True
+    )
+
     meters = relationship("Meter", secondary=meter_consumer, back_populates="consumers")
     usage_unit = relationship("UsageUnit", back_populates="consumers")
+    replaced_by = relationship("Consumer", remote_side="Consumer.id", foreign_keys=[replaced_by_id])
