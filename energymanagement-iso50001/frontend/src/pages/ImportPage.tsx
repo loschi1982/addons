@@ -45,6 +45,7 @@ interface MappingProfile {
   id: string;
   name: string;
   column_mapping: Record<string, string>;
+  meter_mapping: Record<string, string> | null;
   date_format: string | null;
   decimal_separator: string;
   created_at: string;
@@ -188,6 +189,11 @@ export default function ImportPage() {
     setColumnMapping(profile.column_mapping);
     setDateFormat(profile.date_format || '');
     setDecimalSeparator(profile.decimal_separator);
+
+    // Multi-Meter: Spalten-Index → Meter-UUID aus Profil übernehmen
+    if (profile.meter_mapping) {
+      setMeterColumnMapping(profile.meter_mapping);
+    }
   };
 
   // ── Schritt 2: Import starten ──
@@ -467,6 +473,23 @@ export default function ImportPage() {
                 {/* ── Multi-Meter Mapping ── */}
                 {uploadResult.is_multi_meter && uploadResult.meter_columns ? (
                   <div>
+                    {/* Gespeicherte Vorlagen */}
+                    {profiles.filter(p => p.meter_mapping).length > 0 && (
+                      <div className="mb-4">
+                        <label className="label">Gespeicherte Vorlage laden</label>
+                        <div className="flex flex-wrap gap-2">
+                          {profiles.filter(p => p.meter_mapping).map((p) => (
+                            <button
+                              key={p.id}
+                              onClick={() => applyProfile(p)}
+                              className="btn-secondary text-xs"
+                            >
+                              {p.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <p className="text-sm text-gray-500 mb-3">
                       Ordnen Sie jede CSV-Spalte einem bestehenden Zähler zu.
                       Automatisch erkannte Zuordnungen sind vorausgewählt.

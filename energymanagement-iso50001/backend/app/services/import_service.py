@@ -215,9 +215,16 @@ class ImportService:
 
         # Profil speichern wenn gewünscht
         if save_as_profile and user_id:
+            # Multi-Meter: Spaltenname → Meter-UUID Mapping speichern
+            profile_meter_mapping = None
+            if meter_column_mapping:
+                profile_meter_mapping = {
+                    str(k): str(v) for k, v in meter_column_mapping.items()
+                }
             await self._save_profile(
                 save_as_profile, batch.file_type, column_mapping,
                 batch.import_settings, user_id,
+                meter_mapping=profile_meter_mapping,
             )
 
         await self.db.commit()
@@ -442,6 +449,7 @@ class ImportService:
                 "id": p.id,
                 "name": p.name,
                 "column_mapping": p.column_mapping,
+                "meter_mapping": p.meter_mapping,
                 "date_format": p.import_settings.get("date_format"),
                 "decimal_separator": p.import_settings.get("decimal_separator", ","),
                 "created_at": p.created_at,
@@ -764,7 +772,8 @@ class ImportService:
 
     async def _save_profile(
         self, name: str, file_type: str, column_mapping: dict,
-        import_settings: dict, user_id: uuid.UUID
+        import_settings: dict, user_id: uuid.UUID,
+        meter_mapping: dict | None = None,
     ) -> None:
         """Import-Mapping als Profil speichern."""
         # Prüfen ob Name bereits existiert
@@ -777,6 +786,7 @@ class ImportService:
             # Bestehendes Profil aktualisieren
             profile.column_mapping = column_mapping
             profile.import_settings = import_settings
+            profile.meter_mapping = meter_mapping
             profile.use_count += 1
             profile.last_used = datetime.now(timezone.utc)
         else:
@@ -785,6 +795,7 @@ class ImportService:
                 file_type=file_type,
                 column_mapping=column_mapping,
                 import_settings=import_settings,
+                meter_mapping=meter_mapping,
                 created_by=user_id,
                 use_count=1,
                 last_used=datetime.now(timezone.utc),
