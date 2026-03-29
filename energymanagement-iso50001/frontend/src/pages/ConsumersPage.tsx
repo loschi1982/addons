@@ -16,6 +16,13 @@ interface Consumer {
   usage_unit_id: string | null;
   description: string | null;
   meter_ids: string[];
+  manufacturer: string | null;
+  model: string | null;
+  serial_number: string | null;
+  commissioned_at: string | null;
+  decommissioned_at: string | null;
+  replaced_by_id: string | null;
+  replaced_by_name: string | null;
   created_at: string;
 }
 
@@ -33,6 +40,12 @@ interface ConsumerForm {
   priority: string;
   description: string;
   meter_ids: string[];
+  manufacturer: string;
+  model: string;
+  serial_number: string;
+  commissioned_at: string;
+  decommissioned_at: string;
+  replaced_by_id: string;
 }
 
 const emptyForm: ConsumerForm = {
@@ -43,6 +56,12 @@ const emptyForm: ConsumerForm = {
   priority: 'normal',
   description: '',
   meter_ids: [],
+  manufacturer: '',
+  model: '',
+  serial_number: '',
+  commissioned_at: '',
+  decommissioned_at: '',
+  replaced_by_id: '',
 };
 
 const CATEGORIES: Record<string, string> = {
@@ -77,6 +96,7 @@ export default function ConsumersPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
+  const [filterStatus, setFilterStatus] = useState('active');
   const [loading, setLoading] = useState(true);
 
   // Modal-State
@@ -86,6 +106,11 @@ export default function ConsumersPage() {
   const [form, setForm] = useState<ConsumerForm>(emptyForm);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Ersetzen-Modal
+  const [showReplaceModal, setShowReplaceModal] = useState(false);
+  const [replacingConsumer, setReplacingConsumer] = useState<Consumer | null>(null);
+  const [replaceForm, setReplaceForm] = useState<ConsumerForm>(emptyForm);
 
   const pageSize = 25;
 
@@ -98,6 +123,7 @@ export default function ConsumersPage() {
       });
       if (search) params.append('search', search);
       if (filterCategory) params.append('category', filterCategory);
+      if (filterStatus) params.append('status', filterStatus);
 
       const response = await apiClient.get<PaginatedResponse<Consumer>>(
         `/api/v1/consumers?${params}`
@@ -109,7 +135,7 @@ export default function ConsumersPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, filterCategory]);
+  }, [page, search, filterCategory, filterStatus]);
 
   useEffect(() => {
     loadConsumers();
@@ -134,9 +160,37 @@ export default function ConsumersPage() {
       priority: consumer.priority || 'normal',
       description: consumer.description || '',
       meter_ids: consumer.meter_ids || [],
+      manufacturer: consumer.manufacturer || '',
+      model: consumer.model || '',
+      serial_number: consumer.serial_number || '',
+      commissioned_at: consumer.commissioned_at || '',
+      decommissioned_at: consumer.decommissioned_at || '',
+      replaced_by_id: consumer.replaced_by_id || '',
     });
     setFormError(null);
     setShowModal(true);
+  };
+
+  const handleReplace = (consumer: Consumer) => {
+    setReplacingConsumer(consumer);
+    setReplaceForm({
+      ...emptyForm,
+      name: consumer.name + ' (Nachfolger)',
+      category: consumer.category,
+      rated_power_kw: consumer.rated_power_kw?.toString() || '',
+      operating_hours_per_year: consumer.operating_hours_per_year?.toString() || '',
+      priority: consumer.priority || 'normal',
+      description: '',
+      meter_ids: consumer.meter_ids || [],
+      manufacturer: '',
+      model: '',
+      serial_number: '',
+      commissioned_at: new Date().toISOString().split('T')[0],
+      decommissioned_at: '',
+      replaced_by_id: '',
+    });
+    setFormError(null);
+    setShowReplaceModal(true);
   };
 
   const handleDelete = async (consumer: Consumer) => {
@@ -164,6 +218,12 @@ export default function ConsumersPage() {
     if (form.rated_power_kw) payload.rated_power_kw = parseFloat(form.rated_power_kw);
     if (form.operating_hours_per_year) payload.operating_hours_per_year = parseInt(form.operating_hours_per_year, 10);
     if (form.description) payload.description = form.description;
+    if (form.manufacturer) payload.manufacturer = form.manufacturer;
+    if (form.model) payload.model = form.model;
+    if (form.serial_number) payload.serial_number = form.serial_number;
+    if (form.commissioned_at) payload.commissioned_at = form.commissioned_at;
+    if (form.decommissioned_at) payload.decommissioned_at = form.decommissioned_at;
+    if (form.replaced_by_id) payload.replaced_by_id = form.replaced_by_id;
 
     try {
       if (editingId) {
@@ -181,7 +241,45 @@ export default function ConsumersPage() {
     }
   };
 
+  const handleReplaceSubmit = async (e: React.FormEvent, unitId: string, meterIds: string[]) => {
+    e.preventDefault();
+    if (!replacingConsumer) return;
+    setFormError(null);
+    setSaving(true);
+
+    const payload: Record<string, unknown> = {
+      name: replaceForm.name,
+      category: replaceForm.category,
+      priority: replaceForm.priority,
+      usage_unit_id: unitId || replacingConsumer.usage_unit_id || null,
+      meter_ids: meterIds,
+    };
+    if (replaceForm.rated_power_kw) payload.rated_power_kw = parseFloat(replaceForm.rated_power_kw);
+    if (replaceForm.operating_hours_per_year) payload.operating_hours_per_year = parseInt(replaceForm.operating_hours_per_year, 10);
+    if (replaceForm.description) payload.description = replaceForm.description;
+    if (replaceForm.manufacturer) payload.manufacturer = replaceForm.manufacturer;
+    if (replaceForm.model) payload.model = replaceForm.model;
+    if (replaceForm.serial_number) payload.serial_number = replaceForm.serial_number;
+    if (replaceForm.commissioned_at) payload.commissioned_at = replaceForm.commissioned_at;
+
+    try {
+      await apiClient.post(`/api/v1/consumers/${replacingConsumer.id}/replace`, payload);
+      setShowReplaceModal(false);
+      loadConsumers();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setFormError(error.response?.data?.detail || 'Fehler beim Ersetzen');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const totalPages = Math.ceil(total / pageSize);
+
+  const formatDate = (d: string | null) => {
+    if (!d) return null;
+    return new Date(d).toLocaleDateString('de-DE');
+  };
 
   return (
     <div>
@@ -202,7 +300,7 @@ export default function ConsumersPage() {
         <input
           type="text"
           className="input flex-1"
-          placeholder="Suche nach Name oder Beschreibung..."
+          placeholder="Suche nach Name, Beschreibung, Hersteller, Modell..."
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
         />
@@ -215,6 +313,15 @@ export default function ConsumersPage() {
           {Object.entries(CATEGORIES).map(([key, label]) => (
             <option key={key} value={key}>{label}</option>
           ))}
+        </select>
+        <select
+          className="input w-48"
+          value={filterStatus}
+          onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}
+        >
+          <option value="active">Nur aktive</option>
+          <option value="decommissioned">Außer Betrieb</option>
+          <option value="all">Alle</option>
         </select>
       </div>
 
@@ -235,56 +342,101 @@ export default function ConsumersPage() {
                 <th className="px-4 py-3 text-right">Nennleistung</th>
                 <th className="px-4 py-3 text-right">Betriebsstunden/a</th>
                 <th className="px-4 py-3">Priorität</th>
+                <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3 text-right">Aktionen</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {consumers.map((consumer) => (
-                <tr key={consumer.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{consumer.name}</div>
-                    {consumer.description && (
-                      <div className="text-xs text-gray-400 truncate max-w-xs">
-                        {consumer.description}
+              {consumers.map((consumer) => {
+                const isDecommissioned = !!consumer.decommissioned_at;
+                return (
+                  <tr
+                    key={consumer.id}
+                    className={isDecommissioned ? 'bg-gray-50 text-gray-400' : 'hover:bg-gray-50'}
+                  >
+                    <td className="px-4 py-3">
+                      <div className={`font-medium ${isDecommissioned ? 'line-through text-gray-400' : ''}`}>
+                        {consumer.name}
                       </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
-                      {CATEGORIES[consumer.category] || consumer.category}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-500">
-                    {consumer.rated_power_kw != null
-                      ? `${consumer.rated_power_kw} kW`
-                      : '–'}
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-500">
-                    {consumer.operating_hours_per_year != null
-                      ? consumer.operating_hours_per_year.toLocaleString('de-DE')
-                      : '–'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_COLORS[consumer.priority] || PRIORITY_COLORS.normal}`}>
-                      {PRIORITIES[consumer.priority] || consumer.priority}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => handleEdit(consumer)}
-                      className="mr-2 text-primary-600 hover:text-primary-800"
-                    >
-                      Bearbeiten
-                    </button>
-                    <button
-                      onClick={() => handleDelete(consumer)}
-                      className="text-red-500 hover:text-red-700"
-                    >
-                      Löschen
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                      {consumer.manufacturer && (
+                        <div className="text-xs text-gray-400">
+                          {consumer.manufacturer}
+                          {consumer.model ? ` – ${consumer.model}` : ''}
+                        </div>
+                      )}
+                      {consumer.description && !consumer.manufacturer && (
+                        <div className="text-xs text-gray-400 truncate max-w-xs">
+                          {consumer.description}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
+                        {CATEGORIES[consumer.category] || consumer.category}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right text-gray-500">
+                      {consumer.rated_power_kw != null
+                        ? `${consumer.rated_power_kw} kW`
+                        : '–'}
+                    </td>
+                    <td className="px-4 py-3 text-right text-gray-500">
+                      {consumer.operating_hours_per_year != null
+                        ? consumer.operating_hours_per_year.toLocaleString('de-DE')
+                        : '–'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_COLORS[consumer.priority] || PRIORITY_COLORS.normal}`}>
+                        {PRIORITIES[consumer.priority] || consumer.priority}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {isDecommissioned ? (
+                        <div>
+                          <span className="inline-flex items-center rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700">
+                            Außer Betrieb
+                          </span>
+                          <div className="text-xs text-gray-400 mt-0.5">
+                            {formatDate(consumer.decommissioned_at)}
+                          </div>
+                          {consumer.replaced_by_name && (
+                            <div className="text-xs text-gray-400 mt-0.5">
+                              Ersetzt durch: {consumer.replaced_by_name}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
+                          Aktiv
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <button
+                        onClick={() => handleEdit(consumer)}
+                        className="mr-2 text-primary-600 hover:text-primary-800"
+                      >
+                        Bearbeiten
+                      </button>
+                      {!isDecommissioned && (
+                        <button
+                          onClick={() => handleReplace(consumer)}
+                          className="mr-2 text-amber-600 hover:text-amber-800"
+                          title="Durch neuen Verbraucher ersetzen"
+                        >
+                          Ersetzen
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDelete(consumer)}
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        Löschen
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -328,6 +480,23 @@ export default function ConsumersPage() {
           onClose={() => setShowModal(false)}
         />
       )}
+
+      {/* Modal: Verbraucher ersetzen */}
+      {showReplaceModal && replacingConsumer && (
+        <ConsumerModal
+          editingId={null}
+          editingConsumer={null}
+          form={replaceForm}
+          setForm={setReplaceForm}
+          formError={formError}
+          saving={saving}
+          onSubmit={handleReplaceSubmit}
+          onClose={() => setShowReplaceModal(false)}
+          replaceMode
+          replacingName={replacingConsumer.name}
+          replacingUnitId={replacingConsumer.usage_unit_id}
+        />
+      )}
     </div>
   );
 }
@@ -343,6 +512,9 @@ function ConsumerModal({
   saving,
   onSubmit,
   onClose,
+  replaceMode = false,
+  replacingName,
+  replacingUnitId,
 }: {
   editingId: string | null;
   editingConsumer: Consumer | null;
@@ -352,10 +524,14 @@ function ConsumerModal({
   saving: boolean;
   onSubmit: (e: React.FormEvent, unitId: string, meterIds: string[]) => void;
   onClose: () => void;
+  replaceMode?: boolean;
+  replacingName?: string;
+  replacingUnitId?: string | null;
 }) {
-  const hierarchy = useSiteHierarchy(editingConsumer?.usage_unit_id);
+  const hierarchy = useSiteHierarchy(editingConsumer?.usage_unit_id || replacingUnitId || undefined);
   const [meters, setMeters] = useState<MeterOption[]>([]);
   const [selectedMeterIds, setSelectedMeterIds] = useState<string[]>(form.meter_ids || []);
+  const [allConsumers, setAllConsumers] = useState<{ id: string; name: string }[]>([]);
 
   // Zähler-Liste laden
   useEffect(() => {
@@ -375,18 +551,48 @@ function ConsumerModal({
     })();
   }, []);
 
+  // Aktive Verbraucher laden (für "Ersetzt durch"-Dropdown)
+  useEffect(() => {
+    if (!editingId) return;
+    (async () => {
+      try {
+        const res = await apiClient.get<PaginatedResponse<Consumer>>(
+          '/api/v1/consumers?page_size=200&status=active'
+        );
+        setAllConsumers(
+          (res.data.items || [])
+            .filter((c: Consumer) => c.id !== editingId)
+            .map((c: Consumer) => ({ id: c.id, name: c.name }))
+        );
+      } catch {
+        // ignore
+      }
+    })();
+  }, [editingId]);
+
   const toggleMeter = (id: string) => {
     setSelectedMeterIds((prev) =>
       prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]
     );
   };
 
+  const title = replaceMode
+    ? `Verbraucher ersetzen: ${replacingName}`
+    : editingId
+      ? 'Verbraucher bearbeiten'
+      : 'Neuer Verbraucher';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
-        <h2 className="mb-4 text-lg font-bold">
-          {editingId ? 'Verbraucher bearbeiten' : 'Neuer Verbraucher'}
-        </h2>
+        <h2 className="mb-4 text-lg font-bold">{title}</h2>
+
+        {replaceMode && (
+          <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+            Der bisherige Verbraucher <strong>{replacingName}</strong> wird außer Betrieb genommen
+            und durch den neuen Verbraucher ersetzt.
+          </div>
+        )}
 
         <form onSubmit={(e) => onSubmit(e, hierarchy.selectedUnitId, selectedMeterIds)} className="space-y-4">
           {formError && (
@@ -467,6 +673,86 @@ function ConsumerModal({
               onChange={(e) => setForm({ ...form, description: e.target.value })}
               placeholder="Optionale Beschreibung der Anlage..."
             />
+          </div>
+
+          {/* Gerätedaten */}
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <p className="text-sm font-medium text-gray-700 mb-3">Gerätedaten (optional)</p>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="label">Hersteller</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={form.manufacturer}
+                  onChange={(e) => setForm({ ...form, manufacturer: e.target.value })}
+                  placeholder="z.B. Viessmann"
+                />
+              </div>
+              <div>
+                <label className="label">Modell / Typ</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={form.model}
+                  onChange={(e) => setForm({ ...form, model: e.target.value })}
+                  placeholder="z.B. Vitocrossal 300"
+                />
+              </div>
+              <div>
+                <label className="label">Seriennummer</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={form.serial_number}
+                  onChange={(e) => setForm({ ...form, serial_number: e.target.value })}
+                  placeholder="z.B. SN-12345"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Lebenszyklus */}
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <p className="text-sm font-medium text-gray-700 mb-3">Lebenszyklus</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label">Inbetriebnahme</label>
+                <input
+                  type="date"
+                  className="input"
+                  value={form.commissioned_at}
+                  onChange={(e) => setForm({ ...form, commissioned_at: e.target.value })}
+                />
+              </div>
+              {!replaceMode && (
+                <div>
+                  <label className="label">Außerbetriebnahme</label>
+                  <input
+                    type="date"
+                    className="input"
+                    value={form.decommissioned_at}
+                    onChange={(e) => setForm({ ...form, decommissioned_at: e.target.value })}
+                  />
+                </div>
+              )}
+            </div>
+            {/* "Ersetzt durch"-Dropdown nur im Bearbeitungsmodus und wenn decommissioned_at gesetzt */}
+            {editingId && form.decommissioned_at && allConsumers.length > 0 && (
+              <div className="mt-4">
+                <label className="label">Ersetzt durch</label>
+                <select
+                  className="input"
+                  value={form.replaced_by_id}
+                  onChange={(e) => setForm({ ...form, replaced_by_id: e.target.value })}
+                >
+                  <option value="">– Kein Nachfolger –</option>
+                  {allConsumers.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Zuordnung: Standort → Gebäude → Nutzungseinheit */}
@@ -551,7 +837,13 @@ function ConsumerModal({
               Abbrechen
             </button>
             <button type="submit" className="btn-primary" disabled={saving}>
-              {saving ? 'Speichern...' : editingId ? 'Speichern' : 'Anlegen'}
+              {saving
+                ? 'Speichern...'
+                : replaceMode
+                  ? 'Ersetzen'
+                  : editingId
+                    ? 'Speichern'
+                    : 'Anlegen'}
             </button>
           </div>
         </form>
