@@ -12,7 +12,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.emission import CO2Calculation, EmissionFactor
@@ -253,6 +253,8 @@ class ReportService:
         # Bezugsgröße für Energieintensität
         reference_value = data.pop("reference_value", None)
         reference_unit = data.pop("reference_unit", "m²") or "m²"
+        # Analyse-Kommentar (optionaler Nutzer-Hinweis)
+        analysis_comment = data.pop("analysis_comment", None)
         # Perioden-Felder entfernen (werden berechnet)
         year = data.pop("year", None)
         quarter = data.pop("quarter", None)
@@ -316,6 +318,14 @@ class ReportService:
         cost_summary = await self._create_cost_summary(period_start, period_end, meter_ids)
         if cost_summary.get("available"):
             snapshot["cost_summary"] = cost_summary
+
+        # Witterungsanalyse + Verbrauchs-Narrativ
+        weather_analysis = await self._create_weather_analysis(period_start, period_end)
+        analysis = await self._create_analysis_narrative(
+            snapshot, weather_analysis, analysis_comment
+        )
+        if analysis.get("bullets"):
+            snapshot["analysis"] = analysis
 
         # Ergebnisse und Empfehlungen generieren
         findings = await self._generate_findings(snapshot, co2_summary)
@@ -708,8 +718,42 @@ class ReportService:
             <div class="label">Erfasste Zähler</div>
         </div>"""
 
+        # ── Analyse-Narrativ ──
+        analysis = snapshot.get("analysis", {})
+        analysis_bullets = analysis.get("bullets", [])
+        analysis_html = ""
+        if analysis_bullets:
+            li_items = "".join(f"<li>{b}</li>" for b in analysis_bullets)
+            analysis_html = f"""
+<h2>Ursachenanalyse</h2>
+<ul class="summary-bullets">{li_items}</ul>"""
+
+        # ── Witterungs-KPI (wenn Daten vorhanden) ──
+        weather = analysis.get("weather") or {}
+        weather_kpi = ""
+        if weather.get("actual_hdd"):
+            hdd_dev = weather.get("hdd_deviation_pct")
+            dev_str = ""
+            if hdd_dev is not None:
+                dev_color = "#DC2626" if hdd_dev > 5 else "#16A34A" if hdd_dev < -5 else "#374151"
+                dev_str = f' <span style="color:{dev_color};font-size:8pt">({hdd_dev:+.0f}% vs. LTM)</span>'
+            weather_kpi = f"""
+<div class="kpi-row" style="margin-top:8pt">
+    <div class="kpi-card">
+        <div class="value">{weather['actual_hdd']:.0f}</div>
+        <div class="unit">HDD{dev_str}</div>
+        <div class="label">Heizgradtage{' / ' + weather['station_name'] if weather.get('station_name') else ''}</div>
+    </div>
+    <div class="kpi-card">
+        <div class="value">{weather['avg_temp']:.1f}°C</div>
+        <div class="unit">&nbsp;</div>
+        <div class="label">Mittlere Temperatur</div>
+    </div>
+    {f'<div class="kpi-card"><div class="value">{weather["heating_days"]}</div><div class="unit">Tage</div><div class="label">Heiztage</div></div>' if weather.get('heating_days') else ''}
+</div>"""
+
         # ── Optionale Sektionen ──
-        analyse_section = ""
+        analyse_section = analysis_html + weather_kpi
         if yoy_svg:
             analyse_section += f"""
 <h2>Jahresvergleich</h2>
@@ -1059,6 +1103,177 @@ p {{ margin: 5pt 0; }}
                 if reference_value and reference_value > 0 else None
             ),
         }
+
+    async def _create_weather_analysis(self, start: date, end: date) -> dict | None:
+        """Witterungsanalyse: Heizgradtage Ist vs. Langzeitdurchschnitt."""
+        from app.models.weather import MonthlyDegreeDays, WeatherStation
+
+        # Erste aktive Wetterstation verwenden
+        station_result = await self.db.execute(
+            select(WeatherStation).where(WeatherStation.is_active == True).limit(1)  # noqa: E712
+        )
+        station = station_result.scalar_one_or_none()
+        if not station:
+            return None
+
+        # Monatliche Gradtagszahlen für Berichtszeitraum
+        monthly_result = await self.db.execute(
+            select(MonthlyDegreeDays)
+            .where(
+                MonthlyDegreeDays.station_id == station.id,
+                and_(
+                    MonthlyDegreeDays.year * 100 + MonthlyDegreeDays.month
+                    >= start.year * 100 + start.month,
+                    MonthlyDegreeDays.year * 100 + MonthlyDegreeDays.month
+                    <= end.year * 100 + end.month,
+                ),
+            )
+            .order_by(MonthlyDegreeDays.year, MonthlyDegreeDays.month)
+        )
+        monthly = list(monthly_result.scalars().all())
+        if not monthly:
+            return None
+
+        actual_hdd = sum(float(m.heating_degree_days) for m in monthly)
+        # Langjähriges Mittel: wenn vorhanden, sonst actual_hdd (kein Vergleich möglich)
+        has_ltm = any(m.long_term_avg_hdd is not None for m in monthly)
+        reference_hdd = sum(
+            float(m.long_term_avg_hdd if m.long_term_avg_hdd is not None else m.heating_degree_days)
+            for m in monthly
+        )
+        avg_temp = sum(float(m.avg_temperature) for m in monthly) / len(monthly)
+        total_heating_days = sum(m.heating_days for m in monthly)
+
+        hdd_deviation_pct = (
+            round((actual_hdd - reference_hdd) / reference_hdd * 100, 1)
+            if reference_hdd > 0 and has_ltm else None
+        )
+
+        return {
+            "station_name": station.name,
+            "actual_hdd": round(actual_hdd, 1),
+            "reference_hdd": round(reference_hdd, 1) if has_ltm else None,
+            "hdd_deviation_pct": hdd_deviation_pct,
+            "avg_temp": round(avg_temp, 1),
+            "heating_days": total_heating_days,
+            "has_ltm": has_ltm,
+            "monthly_data": [
+                {
+                    "year": m.year,
+                    "month": m.month,
+                    "hdd": float(m.heating_degree_days),
+                    "ltm_hdd": float(m.long_term_avg_hdd) if m.long_term_avg_hdd else None,
+                    "avg_temp": float(m.avg_temperature),
+                }
+                for m in monthly
+            ],
+        }
+
+    async def _create_analysis_narrative(
+        self,
+        snapshot: dict,
+        weather_analysis: dict | None,
+        analysis_comment: str | None,
+    ) -> dict:
+        """Analyse-Narrativ aus Witterung, Zähler-Treibern und Monatspeaks."""
+        MONTH_NAMES = [
+            "Januar", "Februar", "März", "April", "Mai", "Juni",
+            "Juli", "August", "September", "Oktober", "November", "Dezember",
+        ]
+        bullets: list[str] = []
+
+        # ── 1. Witterungsanalyse ──
+        if weather_analysis:
+            hdd_dev = weather_analysis.get("hdd_deviation_pct")
+            actual_hdd = weather_analysis["actual_hdd"]
+            ref_hdd = weather_analysis.get("reference_hdd")
+            station = weather_analysis["station_name"]
+            avg_temp = weather_analysis["avg_temp"]
+            heating_days = weather_analysis.get("heating_days", 0)
+
+            if hdd_dev is not None and abs(hdd_dev) > 3:
+                direction = "kälter" if hdd_dev > 0 else "wärmer"
+                bullets.append(
+                    f"Witterung: Der Berichtszeitraum war <strong>{abs(hdd_dev):.0f}%</strong> {direction} "
+                    f"als der Langzeitdurchschnitt ({actual_hdd:.0f}&nbsp;HDD ist vs. {ref_hdd:.0f}&nbsp;HDD "
+                    f"Referenz, Station {station}, Ø&nbsp;{avg_temp:.1f}°C, {heating_days}&nbsp;Heiztage). "
+                    + ("Ein erhöhter Heizenergieverbrauch ist daher witterungsbedingt plausibel."
+                       if hdd_dev > 3 else
+                       "Ein reduzierter Heizenergieverbrauch ist daher witterungsbedingt plausibel.")
+                )
+            elif actual_hdd > 0:
+                bullets.append(
+                    f"Witterung: Der Berichtszeitraum entsprach weitgehend dem Langzeitdurchschnitt "
+                    f"({actual_hdd:.0f}&nbsp;HDD, Ø&nbsp;{avg_temp:.1f}°C, Station {station}). "
+                    f"Witterungseinflüsse erklären Verbrauchsabweichungen nur in geringem Maße."
+                )
+
+        # ── 2. Zähler-Treiber aus YoY-Vergleich ──
+        charts = snapshot.get("charts", {})
+        yoy_data = charts.get("yoy_comparison", {})
+        if yoy_data:
+            p1_data = yoy_data.get("period1", {}).get("data", {})
+            p2_data = yoy_data.get("period2", {}).get("data", {})
+
+            # Meter-IDs aus beiden Perioden zusammenführen
+            all_meter_ids = set(list(p1_data.keys()) + list(p2_data.keys()))
+
+            # Meter-Namen aus Snapshot (top_consumers) und ggf. DB nachschlagen
+            tc_map = {str(t["meter_id"]): t["name"] for t in snapshot.get("top_consumers", [])}
+
+            # Delta pro Zähler berechnen
+            meter_deltas: list[dict] = []
+            for meter_id in all_meter_ids:
+                p1_sum = sum(e.get("value", 0) for e in p1_data.get(meter_id, []))
+                p2_sum = sum(e.get("value", 0) for e in p2_data.get(meter_id, []))
+                delta = p2_sum - p1_sum
+                if abs(delta) < 1:
+                    continue
+                # Name aus top_consumers oder DB
+                if meter_id in tc_map:
+                    name = tc_map[meter_id]
+                else:
+                    try:
+                        import uuid as _uuid
+                        m = await self.db.get(Meter, _uuid.UUID(meter_id))
+                        name = m.name if m else f"Zähler {meter_id[:8]}"
+                    except Exception:
+                        name = f"Zähler {meter_id[:8]}"
+                meter_deltas.append({"name": name, "delta": delta})
+
+            meter_deltas.sort(key=lambda x: abs(x["delta"]), reverse=True)
+            top3 = meter_deltas[:3]
+            if top3:
+                parts = [
+                    f"{d['name']} ({'+' if d['delta'] > 0 else ''}{d['delta']:,.0f}&nbsp;kWh)"
+                    for d in top3
+                ]
+                bullets.append(
+                    f"Haupttreiber (Jahresvergleich): {', '.join(parts)}."
+                )
+
+        # ── 3. Monatliche Peaks ──
+        monthly_trend = [m for m in snapshot.get("monthly_trend", []) if m.get("consumption_kwh", 0) > 0]
+        if len(monthly_trend) >= 2:
+            peak = max(monthly_trend, key=lambda m: m["consumption_kwh"])
+            low = min(monthly_trend, key=lambda m: m["consumption_kwh"])
+            avg = sum(m["consumption_kwh"] for m in monthly_trend) / len(monthly_trend)
+            peak_name = MONTH_NAMES[peak["month"] - 1]
+            low_name = MONTH_NAMES[low["month"] - 1]
+            peak_dev = (peak["consumption_kwh"] / avg - 1) * 100
+            low_dev = (low["consumption_kwh"] / avg - 1) * 100
+            bullets.append(
+                f"Monatliche Verteilung: Spitzenmonat <strong>{peak_name}</strong> mit "
+                f"{peak['consumption_kwh']:,.0f}&nbsp;kWh ({peak_dev:+.0f}%&nbsp;vs.&nbsp;Ø), "
+                f"Niedrigstmonat <strong>{low_name}</strong> mit "
+                f"{low['consumption_kwh']:,.0f}&nbsp;kWh ({low_dev:+.0f}%&nbsp;vs.&nbsp;Ø)."
+            )
+
+        # ── 4. Nutzer-Kommentar ──
+        if analysis_comment and analysis_comment.strip():
+            bullets.append(f"Hinweis: <em>{analysis_comment.strip()}</em>")
+
+        return {"bullets": bullets, "weather": weather_analysis}
 
     async def _create_co2_summary(self, start: date, end: date) -> dict:
         """CO₂-Zusammenfassung für den Berichtszeitraum."""
