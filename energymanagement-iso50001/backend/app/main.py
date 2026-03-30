@@ -52,22 +52,23 @@ async def lifespan(app: FastAPI):
         print(f"⚠ Datenbank nicht verfügbar: {e}")
         print("⚠ App startet ohne DB – nur Health-Check verfügbar")
 
-    # Alembic-Migrationen automatisch anwenden
+    # Alembic-Migrationen automatisch anwenden (im Thread-Executor,
+    # damit asyncio.run() im env.py einen eigenen Loop starten kann)
     if db_available:
         try:
+            import asyncio
             from alembic.config import Config
             from alembic import command
-            import os
-            alembic_cfg = Config()
-            alembic_cfg.set_main_option(
-                "script_location",
-                str(Path(__file__).resolve().parent.parent / "alembic"),
-            )
-            alembic_cfg.set_main_option(
-                "sqlalchemy.url",
-                get_settings().database_url.replace("+asyncpg", ""),
-            )
-            command.upgrade(alembic_cfg, "head")
+
+            alembic_dir = Path(__file__).resolve().parent.parent / "alembic"
+
+            def _run_alembic():
+                cfg = Config()
+                cfg.set_main_option("script_location", str(alembic_dir))
+                command.upgrade(cfg, "head")
+
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _run_alembic)
             print("✓ Datenbankmigrationen angewendet")
         except Exception as e:
             print(f"⚠ Datenbankmigrationen fehlgeschlagen: {e}")
