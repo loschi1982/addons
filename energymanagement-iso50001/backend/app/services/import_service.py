@@ -219,11 +219,29 @@ class ImportService:
         # Max-Wert für NUMERIC(16,4): 999999999999.9999
         MAX_VALUE = Decimal("999999999999.9999")
 
+        # Zukunftswerte überspringen (ab morgen)
+        now = datetime.now(timezone.utc)
+
         if meter_column_mapping:
             # Multi-Meter-Import: Spalte 0 = Zeitstempel, übrige Spalten = Zählerwerte
             ts_col_name = columns[0] if columns else None
             if not ts_col_name:
                 raise ImportValidationError("Keine Zeitstempel-Spalte gefunden")
+
+            # Vorherige Werte pro Zähler im Speicher mitführen, damit
+            # consumption auch ohne DB-Flush berechnet werden kann.
+            # Zuerst den letzten bekannten Wert aus der DB laden.
+            prev_values: dict[uuid.UUID, Decimal] = {}
+            for _mid in meter_column_mapping.values():
+                prev = await self.db.execute(
+                    select(MeterReading.value)
+                    .where(MeterReading.meter_id == _mid)
+                    .order_by(MeterReading.timestamp.desc())
+                    .limit(1)
+                )
+                row_val = prev.scalar_one_or_none()
+                if row_val is not None:
+                    prev_values[_mid] = row_val
 
             with self.db.no_autoflush:
                 for i, row in enumerate(rows):
@@ -232,6 +250,11 @@ class ImportService:
                         timestamp = self._parse_date(str(raw_ts), date_format)
                         if not timestamp:
                             errors.append({"row": i + 1, "error": f"Ungültiges Datum: {raw_ts}"})
+                            continue
+
+                        # Zukunftswerte überspringen
+                        if timestamp > now:
+                            skipped += 1
                             continue
 
                         for col_idx, meter_id in meter_column_mapping.items():
@@ -261,22 +284,17 @@ class ImportService:
                                     skipped += 1
                                     continue
 
-                            prev = await self.db.execute(
-                                select(MeterReading)
-                                .where(
-                                    MeterReading.meter_id == meter_id,
-                                    MeterReading.timestamp < timestamp,
-                                )
-                                .order_by(MeterReading.timestamp.desc())
-                                .limit(1)
-                            )
-                            prev_reading = prev.scalar_one_or_none()
+                            # Consumption aus In-Memory-Wert berechnen
                             consumption = None
-                            if prev_reading:
-                                diff = value - prev_reading.value
+                            prev_val = prev_values.get(meter_id)
+                            if prev_val is not None:
+                                diff = value - prev_val
                                 consumption = diff if diff >= 0 else None
                                 if consumption and abs(consumption) > MAX_VALUE:
                                     consumption = None
+
+                            # Wert für nächste Iteration merken
+                            prev_values[meter_id] = value
 
                             reading = MeterReading(
                                 meter_id=meter_id,
@@ -304,6 +322,19 @@ class ImportService:
                 except (ValueError, AttributeError):
                     pass
 
+            # Vorherige Werte im Speicher mitführen
+            prev_values: dict[uuid.UUID, Decimal] = {}
+            if default_meter_id:
+                prev = await self.db.execute(
+                    select(MeterReading.value)
+                    .where(MeterReading.meter_id == default_meter_id)
+                    .order_by(MeterReading.timestamp.desc())
+                    .limit(1)
+                )
+                row_val = prev.scalar_one_or_none()
+                if row_val is not None:
+                    prev_values[default_meter_id] = row_val
+
             with self.db.no_autoflush:
                 for i, row in enumerate(rows):
                     try:
@@ -311,6 +342,11 @@ class ImportService:
                         timestamp = self._parse_date(str(raw_ts), date_format)
                         if not timestamp:
                             errors.append({"row": i + 1, "error": f"Ungültiges Datum: {raw_ts}"})
+                            continue
+
+                        # Zukunftswerte überspringen
+                        if timestamp > now:
+                            skipped += 1
                             continue
 
                         raw_val = row.get(val_col)
@@ -347,22 +383,15 @@ class ImportService:
                                 skipped += 1
                                 continue
 
-                        prev = await self.db.execute(
-                            select(MeterReading)
-                            .where(
-                                MeterReading.meter_id == row_meter_id,
-                                MeterReading.timestamp < timestamp,
-                            )
-                            .order_by(MeterReading.timestamp.desc())
-                            .limit(1)
-                        )
-                        prev_reading = prev.scalar_one_or_none()
+                        # Consumption aus In-Memory-Wert berechnen
                         consumption = None
-                        if prev_reading:
-                            diff = value - prev_reading.value
+                        prev_val = prev_values.get(row_meter_id)
+                        if prev_val is not None:
+                            diff = value - prev_val
                             consumption = diff if diff >= 0 else None
                             if consumption and abs(consumption) > MAX_VALUE:
                                 consumption = None
+                        prev_values[row_meter_id] = value
 
                         reading = MeterReading(
                             meter_id=row_meter_id,
