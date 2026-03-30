@@ -132,11 +132,19 @@ def register_exception_handlers(app: FastAPI):
 
     @app.exception_handler(EnergyManagementError)
     async def energy_management_error_handler(request: Request, exc: EnergyManagementError):
+        # Fehler ≥ 500 in den Log-Puffer schreiben
+        if exc.status_code >= 500:
+            from app.core import log_buffer
+            log_buffer.write(
+                level="ERROR",
+                source=request.url.path,
+                message=exc.detail,
+                details={"error_code": exc.error_code},
+            )
         content = {
             "detail": exc.detail,
             "error_code": exc.error_code,
         }
-        # Import-Validierungsfehler enthalten zusätzliche Fehlerdetails
         if hasattr(exc, "errors") and exc.errors:
             content["errors"] = exc.errors
         return JSONResponse(status_code=exc.status_code, content=content)
@@ -144,9 +152,17 @@ def register_exception_handlers(app: FastAPI):
     @app.exception_handler(Exception)
     async def general_error_handler(request: Request, exc: Exception):
         """Fängt alle unerwarteten Fehler ab und gibt eine generische Meldung zurück."""
+        import traceback
         import structlog
+        from app.core import log_buffer
         logger = structlog.get_logger()
         logger.error("unhandled_exception", error=str(exc), path=request.url.path)
+        log_buffer.write(
+            level="ERROR",
+            source=request.url.path,
+            message=str(exc),
+            details={"traceback": traceback.format_exc()[-2000:]},
+        )
         return JSONResponse(
             status_code=500,
             content={

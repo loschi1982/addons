@@ -194,7 +194,8 @@ class ImportService:
             elif target == "notes":
                 notes_col = src_col
 
-        if not ts_col or not val_col:
+        # Bei Multi-Meter-Import (meter_column_mapping) wird kein val_col benötigt
+        if not ts_col or (not val_col and not meter_column_mapping):
             raise ImportValidationError(
                 "Spalten-Mapping unvollständig: 'timestamp' und 'value' sind Pflicht"
             )

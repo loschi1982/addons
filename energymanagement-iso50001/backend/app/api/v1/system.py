@@ -395,3 +395,23 @@ async def get_update_log(
     """Gibt den Log des letzten Updates zurück."""
     service = UpdateService()
     return await service.get_update_log()
+
+
+@router.get("/logs")
+async def get_system_logs(
+    limit: int = 100,
+    current_user=Depends(get_current_user),
+):
+    """Gibt die letzten Anwendungs-Logs zurück (Fehler und Warnungen)."""
+    from app.core import log_buffer
+    return {"entries": log_buffer.get_entries(limit=limit)}
+
+
+@router.delete("/logs")
+async def clear_system_logs(
+    current_user=Depends(require_permission("settings", "update")),
+):
+    """Löscht den Log-Puffer."""
+    from app.core import log_buffer
+    log_buffer.clear()
+    return {"cleared": True}
