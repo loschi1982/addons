@@ -156,12 +156,22 @@ class ReportService:
             except Exception as e:
                 logger.warning("chart_sankey_failed", error=str(e))
 
-        if scope_config.get("include_heatmap") and meter_ids:
+        if scope_config.get("include_heatmap"):
             try:
-                # Heatmap für den ersten (Haupt-)Zähler
-                charts["heatmap"] = await analytics.get_heatmap(
-                    meter_ids[0], period_start, period_end
-                )
+                heatmap_meter_id = meter_ids[0] if meter_ids else None
+                if not heatmap_meter_id:
+                    first_result = await self.db.execute(
+                        select(Meter.id).where(
+                            Meter.is_active == True,  # noqa: E712
+                            Meter.parent_meter_id.is_(None),
+                        ).limit(1)
+                    )
+                    row = first_result.first()
+                    heatmap_meter_id = row[0] if row else None
+                if heatmap_meter_id:
+                    charts["heatmap"] = await analytics.get_heatmap(
+                        heatmap_meter_id, period_start, period_end
+                    )
             except Exception as e:
                 logger.warning("chart_heatmap_failed", error=str(e))
 
@@ -169,8 +179,19 @@ class ReportService:
             try:
                 prev_start = date(period_start.year - 1, period_start.month, period_start.day)
                 prev_end = date(period_end.year - 1, period_end.month, period_end.day)
+                # get_comparison bricht bei meter_ids=None früh ab → alle Root-Zähler laden
+                yoy_meter_ids = meter_ids
+                if not yoy_meter_ids:
+                    root_result = await self.db.execute(
+                        select(Meter.id).where(
+                            Meter.is_active == True,  # noqa: E712
+                            Meter.is_feed_in != True,
+                            Meter.parent_meter_id.is_(None),
+                        )
+                    )
+                    yoy_meter_ids = [row[0] for row in root_result.all()]
                 charts["yoy_comparison"] = await analytics.get_comparison(
-                    meter_ids=meter_ids,
+                    meter_ids=yoy_meter_ids,
                     period1_start=prev_start,
                     period1_end=prev_end,
                     period2_start=period_start,
