@@ -34,7 +34,8 @@
       "Bash(export PATH=\"/usr/bin:/bin:$PATH\")",
       "Bash(export DATABASE_URL=\"postgresql+asyncpg://energy:energy@192.168.178.142:5432/energy_management\")",
       "Bash(export REDIS_URL=\"redis://192.168.178.142:6379/0\")",
-      "Bash(node_modules/.bin/tsc --noEmit)"
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(curl -s -X POST \"http://192.168.178.142:8099/api/v1/auth/login\" -H \"Content-Type: application/json\" -d '{\"\"\"\"username\"\"\"\":\"\"\"\"admin\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"4711lolo\"\"\"\"}')"
     ]
   }
 }
