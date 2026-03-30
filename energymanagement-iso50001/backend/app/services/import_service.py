@@ -100,6 +100,7 @@ class ImportService:
             total_rows=total_rows,
             status="uploaded",
             imported_by=user_id,
+            file_content=content,
         )
         self.db.add(batch)
         await self.db.commit()
@@ -202,16 +203,171 @@ class ImportService:
                     "Spalten-Mapping unvollständig: 'timestamp' und 'value' sind Pflicht"
                 )
 
-        # TODO: Datei aus Storage laden – für Phase 2 erwarten wir,
-        # dass die Daten im Batch gespeichert wurden. Für jetzt
-        # setzen wir den Status auf completed und geben die Statistik zurück.
-        # In einer vollständigen Implementierung würde hier die Datei
-        # erneut gelesen und Zeile für Zeile verarbeitet.
+        # Datei erneut parsen (Inhalt wurde beim Upload gespeichert)
+        if not batch.file_content:
+            raise EnergyManagementError(
+                "Dateiinhalt nicht mehr verfügbar – bitte Datei erneut hochladen",
+                error_code="FILE_CONTENT_MISSING",
+                status_code=400,
+            )
+
+        if batch.file_type == "csv":
+            columns, rows, _ = self._parse_csv(batch.file_content)
+        else:
+            columns, rows, _ = self._parse_excel(batch.file_content)
+
+        if meter_column_mapping:
+            # Multi-Meter-Import: Spalte 0 = Zeitstempel, übrige Spalten = Zählerwerte
+            ts_col_name = columns[0] if columns else None
+            if not ts_col_name:
+                raise ImportValidationError("Keine Zeitstempel-Spalte gefunden")
+
+            for i, row in enumerate(rows):
+                try:
+                    raw_ts = row.get(ts_col_name, "")
+                    timestamp = self._parse_date(str(raw_ts), date_format)
+                    if not timestamp:
+                        errors.append({"row": i + 1, "error": f"Ungültiges Datum: {raw_ts}"})
+                        continue
+
+                    for col_idx, meter_id in meter_column_mapping.items():
+                        col_name = columns[col_idx] if col_idx < len(columns) else None
+                        if not col_name:
+                            continue
+                        raw_val = row.get(col_name, "")
+                        if raw_val == "" or raw_val is None:
+                            continue
+                        value = self._parse_decimal(str(raw_val), decimal_separator)
+                        if value is None:
+                            errors.append({"row": i + 1, "error": f"Ungültiger Wert in Spalte '{col_name}': {raw_val}"})
+                            continue
+
+                        if skip_duplicates:
+                            existing = await self.db.execute(
+                                select(MeterReading).where(
+                                    MeterReading.meter_id == meter_id,
+                                    MeterReading.timestamp == timestamp,
+                                ).limit(1)
+                            )
+                            if existing.scalar_one_or_none():
+                                skipped += 1
+                                continue
+
+                        prev = await self.db.execute(
+                            select(MeterReading)
+                            .where(
+                                MeterReading.meter_id == meter_id,
+                                MeterReading.timestamp < timestamp,
+                            )
+                            .order_by(MeterReading.timestamp.desc())
+                            .limit(1)
+                        )
+                        prev_reading = prev.scalar_one_or_none()
+                        consumption = None
+                        if prev_reading:
+                            diff = value - prev_reading.value
+                            consumption = diff if diff >= 0 else None
+
+                        reading = MeterReading(
+                            meter_id=meter_id,
+                            timestamp=timestamp,
+                            value=value,
+                            consumption=consumption,
+                            source="import",
+                            quality="measured",
+                            import_batch_id=batch.id,
+                        )
+                        self.db.add(reading)
+                        imported += 1
+                        affected_meters.add(meter_id)
+
+                except Exception as e:
+                    errors.append({"row": i + 1, "error": str(e)})
+        else:
+            # Single-Meter-Import
+            default_meter_id = None
+            meter_col_val = column_mapping.get("__meter_id__")
+            if meter_col_val:
+                # meter_id wurde als fester Wert übergeben (aus Dropdown-Auswahl im Frontend)
+                try:
+                    default_meter_id = uuid.UUID(meter_col_val)
+                except (ValueError, AttributeError):
+                    pass
+
+            for i, row in enumerate(rows):
+                try:
+                    raw_ts = row.get(ts_col, "")
+                    timestamp = self._parse_date(str(raw_ts), date_format)
+                    if not timestamp:
+                        errors.append({"row": i + 1, "error": f"Ungültiges Datum: {raw_ts}"})
+                        continue
+
+                    raw_val = row.get(val_col, "")
+                    value = self._parse_decimal(str(raw_val), decimal_separator)
+                    if value is None:
+                        errors.append({"row": i + 1, "error": f"Ungültiger Wert: {raw_val}"})
+                        continue
+
+                    row_meter_id = default_meter_id
+                    if meter_col and not row_meter_id:
+                        raw_mid = row.get(meter_col, "")
+                        try:
+                            row_meter_id = uuid.UUID(str(raw_mid))
+                        except (ValueError, AttributeError):
+                            errors.append({"row": i + 1, "error": f"Ungültige Zähler-ID: {raw_mid}"})
+                            continue
+
+                    if not row_meter_id:
+                        errors.append({"row": i + 1, "error": "Kein Zähler zugeordnet"})
+                        continue
+
+                    if skip_duplicates:
+                        existing = await self.db.execute(
+                            select(MeterReading).where(
+                                MeterReading.meter_id == row_meter_id,
+                                MeterReading.timestamp == timestamp,
+                            ).limit(1)
+                        )
+                        if existing.scalar_one_or_none():
+                            skipped += 1
+                            continue
+
+                    prev = await self.db.execute(
+                        select(MeterReading)
+                        .where(
+                            MeterReading.meter_id == row_meter_id,
+                            MeterReading.timestamp < timestamp,
+                        )
+                        .order_by(MeterReading.timestamp.desc())
+                        .limit(1)
+                    )
+                    prev_reading = prev.scalar_one_or_none()
+                    consumption = None
+                    if prev_reading:
+                        diff = value - prev_reading.value
+                        consumption = diff if diff >= 0 else None
+
+                    reading = MeterReading(
+                        meter_id=row_meter_id,
+                        timestamp=timestamp,
+                        value=value,
+                        consumption=consumption,
+                        source="import",
+                        quality="measured",
+                        notes=row.get(notes_col) if notes_col else None,
+                        import_batch_id=batch.id,
+                    )
+                    self.db.add(reading)
+                    imported += 1
+                    affected_meters.add(row_meter_id)
+
+                except Exception as e:
+                    errors.append({"row": i + 1, "error": str(e)})
 
         batch.imported_count = imported
         batch.skipped_count = skipped
         batch.error_count = len(errors)
-        batch.error_details = errors[:100]  # Max 100 Fehler speichern
+        batch.error_details = errors[:100]
         batch.affected_meter_ids = [str(m) for m in affected_meters]
         batch.status = "completed"
         batch.completed_at = datetime.now(timezone.utc)
