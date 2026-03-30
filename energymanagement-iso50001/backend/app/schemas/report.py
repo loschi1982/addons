@@ -27,15 +27,34 @@ class ReportBase(BaseModel):
     period_end: date
 
 
-class ReportCreate(ReportBase):
+class ReportCreate(BaseModel):
     """Neuen Bericht erstellen."""
+    title: str = Field(..., max_length=255)
+    report_type: str = Field(..., max_length=50)
+    # Perioden-Felder: Entweder year/quarter/month ODER period_start/period_end (custom)
+    period_start: date | None = None
+    period_end: date | None = None
+    year: int | None = None
+    quarter: int | None = None  # 1-4, nur bei quarterly
+    month: int | None = None    # 1-12, nur bei monthly
+    # Scope-Filter
+    site_id: uuid.UUID | None = None
+    root_meter_id: uuid.UUID | None = None
     meter_ids: list[uuid.UUID] | None = None
+    # Inhalts-Toggles
     include_co2: bool = True
     include_weather_correction: bool = False
     include_benchmarks: bool = False
     include_seu: bool = True
     include_enpi: bool = True
     include_anomalies: bool = True
+    # Diagramm-Toggles
+    include_meter_tree: bool = False
+    include_heatmap: bool = False
+    include_sankey: bool = True
+    include_cost_flow: bool = False
+    include_yoy_comparison: bool = True
+    include_cost_overview: bool = False
     sections: list[str] | None = None
     template: str = "default"
     language: str = "de"

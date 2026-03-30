@@ -76,30 +76,208 @@ class ReportService:
             "total_pages": max(1, (total + page_size - 1) // page_size),
         }
 
+    @staticmethod
+    def _compute_period(data: dict) -> tuple[date, date]:
+        """Berichtszeitraum aus year/quarter/month oder period_start/period_end berechnen."""
+        import calendar
+        report_type = data.get("report_type", "custom")
+        year = data.get("year")
+        quarter = data.get("quarter")
+        month = data.get("month")
+
+        if report_type == "annual" and year:
+            return date(year, 1, 1), date(year, 12, 31)
+        elif report_type == "quarterly" and year and quarter:
+            q_start_month = (quarter - 1) * 3 + 1
+            q_end_month = q_start_month + 2
+            last_day = calendar.monthrange(year, q_end_month)[1]
+            return date(year, q_start_month, 1), date(year, q_end_month, last_day)
+        elif report_type == "monthly" and year and month:
+            last_day = calendar.monthrange(year, month)[1]
+            return date(year, month, 1), date(year, month, last_day)
+        else:
+            # custom oder Fallback auf explizite Datumsangaben
+            ps = data.get("period_start")
+            pe = data.get("period_end")
+            if not ps or not pe:
+                raise ValueError("Für benutzerdefinierte Berichte sind period_start und period_end Pflicht.")
+            return ps, pe
+
+    async def _resolve_meter_ids(
+        self,
+        site_id: uuid.UUID | None,
+        root_meter_id: uuid.UUID | None,
+        meter_ids: list[uuid.UUID] | None,
+    ) -> list[uuid.UUID] | None:
+        """Zähler-IDs basierend auf Scope-Filtern auflösen."""
+        if meter_ids:
+            return meter_ids
+
+        if root_meter_id:
+            # Root-Zähler + alle Unterzähler rekursiv laden
+            all_meters = []
+            queue = [root_meter_id]
+            while queue:
+                current_id = queue.pop(0)
+                all_meters.append(current_id)
+                children = await self.db.execute(
+                    select(Meter.id).where(Meter.parent_meter_id == current_id)
+                )
+                queue.extend(row[0] for row in children.all())
+            return all_meters
+
+        if site_id:
+            result = await self.db.execute(
+                select(Meter.id).where(
+                    Meter.site_id == site_id,
+                    Meter.is_active == True,  # noqa: E712
+                )
+            )
+            ids = [row[0] for row in result.all()]
+            return ids if ids else None
+
+        return None  # Alle Zähler
+
+    async def _collect_chart_data(
+        self,
+        period_start: date,
+        period_end: date,
+        meter_ids: list[uuid.UUID] | None,
+        scope_config: dict,
+    ) -> dict:
+        """Diagramm-Daten für aktivierte Charts sammeln."""
+        from app.services.analytics_service import AnalyticsService
+        analytics = AnalyticsService(self.db)
+        charts = {}
+
+        if scope_config.get("include_sankey"):
+            try:
+                charts["sankey"] = await analytics.get_sankey(period_start, period_end)
+            except Exception as e:
+                logger.warning("chart_sankey_failed", error=str(e))
+
+        if scope_config.get("include_heatmap") and meter_ids:
+            try:
+                # Heatmap für den ersten (Haupt-)Zähler
+                charts["heatmap"] = await analytics.get_heatmap(
+                    meter_ids[0], period_start, period_end
+                )
+            except Exception as e:
+                logger.warning("chart_heatmap_failed", error=str(e))
+
+        if scope_config.get("include_yoy_comparison"):
+            try:
+                prev_start = date(period_start.year - 1, period_start.month, period_start.day)
+                prev_end = date(period_end.year - 1, period_end.month, period_end.day)
+                charts["yoy_comparison"] = await analytics.get_comparison(
+                    meter_ids=meter_ids,
+                    period1_start=prev_start,
+                    period1_end=prev_end,
+                    period2_start=period_start,
+                    period2_end=period_end,
+                    granularity="monthly",
+                )
+            except Exception as e:
+                logger.warning("chart_yoy_failed", error=str(e))
+
+        if scope_config.get("include_meter_tree"):
+            try:
+                # Zählerbaum-Struktur aufbauen
+                query = select(Meter).where(Meter.is_active == True)  # noqa: E712
+                if meter_ids:
+                    query = query.where(Meter.id.in_(meter_ids))
+                result = await self.db.execute(query)
+                meters = list(result.scalars().all())
+                tree_nodes = []
+                for m in meters:
+                    tree_nodes.append({
+                        "id": str(m.id),
+                        "name": m.name,
+                        "energy_type": m.energy_type,
+                        "parent_id": str(m.parent_meter_id) if m.parent_meter_id else None,
+                        "unit": m.unit,
+                    })
+                charts["meter_tree"] = tree_nodes
+            except Exception as e:
+                logger.warning("chart_meter_tree_failed", error=str(e))
+
+        return charts
+
     async def create_report(
         self,
         data: dict,
         user_id: uuid.UUID | None = None,
     ) -> AuditReport:
         """Neuen Bericht anlegen und Daten-Snapshot erstellen."""
-        meter_ids = data.pop("meter_ids", None)
+        # Felder aus data extrahieren
+        meter_ids_raw = data.pop("meter_ids", None)
+        site_id = data.pop("site_id", None)
+        root_meter_id = data.pop("root_meter_id", None)
         include_co2 = data.pop("include_co2", True)
         include_weather_correction = data.pop("include_weather_correction", False)
         include_benchmarks = data.pop("include_benchmarks", False)
         include_seu = data.pop("include_seu", True)
         include_enpi = data.pop("include_enpi", True)
         include_anomalies = data.pop("include_anomalies", True)
+        # Diagramm-Toggles
+        include_sankey = data.pop("include_sankey", True)
+        include_heatmap = data.pop("include_heatmap", False)
+        include_yoy_comparison = data.pop("include_yoy_comparison", True)
+        include_meter_tree = data.pop("include_meter_tree", False)
+        include_cost_flow = data.pop("include_cost_flow", False)
+        include_cost_overview = data.pop("include_cost_overview", False)
         sections = data.pop("sections", None)
         data.pop("template", None)
         data.pop("language", None)
+        # Perioden-Felder entfernen (werden berechnet)
+        year = data.pop("year", None)
+        quarter = data.pop("quarter", None)
+        month = data.pop("month", None)
 
-        period_start = data["period_start"]
-        period_end = data["period_end"]
+        # Zeitraum berechnen
+        period_start, period_end = self._compute_period({
+            "report_type": data.get("report_type", "custom"),
+            "year": year, "quarter": quarter, "month": month,
+            "period_start": data.get("period_start"),
+            "period_end": data.get("period_end"),
+        })
+        data["period_start"] = period_start
+        data["period_end"] = period_end
+
+        # Scope-Filter: Zähler-IDs auflösen
+        meter_ids = await self._resolve_meter_ids(site_id, root_meter_id, meter_ids_raw)
 
         # Daten-Snapshot erstellen
         snapshot = await self._create_data_snapshot(
             period_start, period_end, meter_ids
         )
+
+        # Scope-Konfiguration für Charts und Audit-Trail
+        scope_config = {
+            "meter_ids": [str(m) for m in meter_ids] if meter_ids else None,
+            "site_id": str(site_id) if site_id else None,
+            "root_meter_id": str(root_meter_id) if root_meter_id else None,
+            "include_co2": include_co2,
+            "include_weather_correction": include_weather_correction,
+            "include_benchmarks": include_benchmarks,
+            "include_seu": include_seu,
+            "include_enpi": include_enpi,
+            "include_anomalies": include_anomalies,
+            "include_sankey": include_sankey,
+            "include_heatmap": include_heatmap,
+            "include_yoy_comparison": include_yoy_comparison,
+            "include_meter_tree": include_meter_tree,
+            "include_cost_flow": include_cost_flow,
+            "include_cost_overview": include_cost_overview,
+            "sections": sections,
+        }
+
+        # Diagramm-Daten sammeln
+        charts = await self._collect_chart_data(
+            period_start, period_end, meter_ids, scope_config
+        )
+        if charts:
+            snapshot["charts"] = charts
 
         # CO₂-Zusammenfassung
         co2_summary = None
@@ -120,16 +298,7 @@ class ReportService:
             weather_correction_applied=include_weather_correction,
             findings=findings,
             recommendations=recommendations,
-            scope={
-                "meter_ids": [str(m) for m in meter_ids] if meter_ids else None,
-                "include_co2": include_co2,
-                "include_weather_correction": include_weather_correction,
-                "include_benchmarks": include_benchmarks,
-                "include_seu": include_seu,
-                "include_enpi": include_enpi,
-                "include_anomalies": include_anomalies,
-                "sections": sections,
-            },
+            scope=scope_config,
             generated_by_user_id=user_id,
             generated_at=datetime.now(timezone.utc),
         )
@@ -262,10 +431,19 @@ class ReportService:
 
     def _render_builtin_template(self, report: AuditReport) -> str:
         """Eingebautes HTML-Template für PDF-Generierung."""
+        from app.services.reporting.chart_renderer import (
+            render_bar_comparison_svg,
+            render_heatmap_svg,
+            render_meter_tree_svg,
+            render_sankey_svg,
+        )
+
         snapshot = report.data_snapshot or {}
         co2 = report.co2_summary or {}
         findings = report.findings or []
         recommendations = report.recommendations or []
+        charts = snapshot.get("charts", {})
+        scope = report.scope or {}
 
         # Energiebilanz-Tabelle
         energy_rows = ""
@@ -321,6 +499,58 @@ class ReportService:
         total_co2 = co2.get("total_co2_kg", 0)
         meter_count = snapshot.get("meter_count", 0)
 
+        # ── Diagramm-Sektionen rendern ──
+        chart_sections = ""
+        section_num = 4  # Nächste Kapitelnummer nach Energiebilanz, CO₂, SEU
+
+        if charts.get("meter_tree"):
+            tree_svg = render_meter_tree_svg(charts["meter_tree"])
+            if tree_svg:
+                section_num += 1
+                chart_sections += f"""
+<h1>{section_num}. Zählerstruktur</h1>
+<div class="section">
+    <p>Hierarchische Darstellung der erfassten Zähler und deren Zuordnung.</p>
+    <figure>{tree_svg}</figure>
+</div>"""
+
+        if charts.get("sankey"):
+            sankey_svg = render_sankey_svg(charts["sankey"])
+            if sankey_svg:
+                section_num += 1
+                chart_sections += f"""
+<h1>{section_num}. Energiefluss (Sankey)</h1>
+<div class="section">
+    <p>Visualisierung der Energieflüsse von Bezugsquellen über Hauptzähler und Unterzähler bis zu den Verbrauchern.</p>
+    <figure>{sankey_svg}</figure>
+</div>"""
+
+        if charts.get("heatmap"):
+            heatmap_svg = render_heatmap_svg(charts["heatmap"])
+            if heatmap_svg:
+                section_num += 1
+                chart_sections += f"""
+<h1>{section_num}. Lastprofil (Heatmap)</h1>
+<div class="section">
+    <p>Durchschnittlicher Verbrauch nach Wochentag und Tageszeit. Dunklere Bereiche zeigen höheren Verbrauch.</p>
+    <figure>{heatmap_svg}</figure>
+</div>"""
+
+        if charts.get("yoy_comparison"):
+            yoy_svg = render_bar_comparison_svg(charts["yoy_comparison"])
+            if yoy_svg:
+                section_num += 1
+                chart_sections += f"""
+<h1>{section_num}. Jahresvergleich</h1>
+<div class="section">
+    <p>Monatlicher Verbrauchsvergleich mit dem Vorjahreszeitraum.</p>
+    <figure>{yoy_svg}</figure>
+</div>"""
+
+        # Befunde/Empfehlungen-Nummer dynamisch
+        findings_num = section_num + 1
+        reco_num = section_num + 2
+
         return f"""<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -343,6 +573,7 @@ body {{ font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif; font-size: 10
 .cover .subtitle {{ font-size: 16pt; opacity: 0.9; }}
 .cover .period {{ font-size: 12pt; margin-top: 24pt; opacity: 0.7; }}
 .cover .meta {{ margin-top: 48pt; font-size: 9pt; opacity: 0.6; }}
+.cover .scope {{ margin-top: 12pt; font-size: 10pt; opacity: 0.8; }}
 
 /* Überschriften */
 h1 {{ font-size: 18pt; color: #1B5E7B; border-bottom: 2px solid #1B5E7B; padding-bottom: 6pt; margin: 24pt 0 12pt 0; page-break-before: always; }}
@@ -373,11 +604,14 @@ tfoot td {{ font-weight: 700; border-top: 2px solid #1B5E7B; padding: 6pt 8pt; }
 .recommendation {{ border-left-color: #1B5E7B; }}
 .savings {{ color: #16A34A; font-weight: 600; font-size: 9pt; margin-top: 4pt; }}
 
+/* Diagramme */
+figure {{ page-break-inside: avoid; margin: 12pt 0; }}
+figure svg {{ max-width: 100%; height: auto; }}
+
 /* Sonstige */
 p {{ margin: 6pt 0; }}
 .text-secondary {{ color: #6B7280; }}
 .section {{ margin-bottom: 18pt; }}
-figure {{ page-break-inside: avoid; }}
 </style>
 </head>
 <body>
@@ -455,14 +689,17 @@ figure {{ page-break-inside: avoid; }}
     </table>
 </div>
 
+<!-- Diagramm-Sektionen (dynamisch) -->
+{chart_sections}
+
 <!-- Befunde -->
-<h1>5. Erkenntnisse und Befunde</h1>
+<h1>{findings_num}. Erkenntnisse und Befunde</h1>
 <div class="section">
     {findings_html or '<p class="text-secondary">Keine besonderen Befunde.</p>'}
 </div>
 
 <!-- Empfehlungen -->
-<h1>6. Maßnahmen und Empfehlungen</h1>
+<h1>{reco_num}. Maßnahmen und Empfehlungen</h1>
 <div class="section">
     {reco_html or '<p class="text-secondary">Keine Empfehlungen generiert.</p>'}
 </div>
@@ -548,7 +785,7 @@ figure {{ page-break-inside: avoid; }}
             if m_start < start or m_start > end:
                 continue
 
-            result = await self.db.execute(
+            monthly_query = (
                 select(
                     Meter.unit,
                     func.sum(MeterReading.consumption).label("total"),
@@ -565,6 +802,9 @@ figure {{ page-break-inside: avoid; }}
                 )
                 .group_by(Meter.unit)
             )
+            if meter_ids:
+                monthly_query = monthly_query.where(Meter.id.in_(meter_ids))
+            result = await self.db.execute(monthly_query)
             month_kwh = Decimal("0")
             for row in result.all():
                 c = CONVERSION_FACTORS.get(row.unit, Decimal("1"))

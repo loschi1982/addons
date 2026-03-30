@@ -3,6 +3,8 @@ import {
   Plus, Download, Trash2, Eye, RefreshCw, FileText,
   CheckCircle, AlertCircle, Clock, Loader2, X,
   BarChart3, Leaf, Thermometer, Search,
+  GitBranch, Grid3X3, Workflow, TrendingUp, DollarSign,
+  Building2, Gauge,
 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS } from '@/types';
@@ -336,6 +338,12 @@ export default function ReportsPage() {
 
 /* ── Bericht erstellen Modal ── */
 
+const QUARTER_LABELS = ['Q1 (Jan–Mär)', 'Q2 (Apr–Jun)', 'Q3 (Jul–Sep)', 'Q4 (Okt–Dez)'];
+const MONTH_LABELS_FULL = [
+  'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+];
+
 function CreateReportModal({
   onClose,
   onCreate,
@@ -345,41 +353,107 @@ function CreateReportModal({
 }) {
   const [title, setTitle] = useState('');
   const [reportType, setReportType] = useState('annual');
-  const [periodStart, setPeriodStart] = useState(`${new Date().getFullYear()}-01-01`);
+  // Perioden-Felder
+  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(currentYear);
+  const [quarter, setQuarter] = useState(1);
+  const [month, setMonth] = useState(new Date().getMonth() + 1);
+  const [periodStart, setPeriodStart] = useState(`${currentYear}-01-01`);
   const [periodEnd, setPeriodEnd] = useState(new Date().toISOString().split('T')[0]);
+  // Scope-Filter
+  const [sites, setSites] = useState<{ id: string; name: string }[]>([]);
+  const [rootMeters, setRootMeters] = useState<{ id: string; name: string; energy_type: string }[]>([]);
+  const [siteId, setSiteId] = useState('');
+  const [rootMeterId, setRootMeterId] = useState('');
+  // Inhalts-Toggles
   const [includeCo2, setIncludeCo2] = useState(true);
   const [includeWeather, setIncludeWeather] = useState(false);
   const [includeSeu, setIncludeSeu] = useState(true);
   const [includeEnpi, setIncludeEnpi] = useState(true);
   const [includeAnomalies, setIncludeAnomalies] = useState(true);
+  // Diagramm-Toggles
+  const [includeMeterTree, setIncludeMeterTree] = useState(false);
+  const [includeHeatmap, setIncludeHeatmap] = useState(false);
+  const [includeSankey, setIncludeSankey] = useState(true);
+  const [includeYoyComparison, setIncludeYoyComparison] = useState(true);
+  const [includeCostOverview, setIncludeCostOverview] = useState(false);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  // Standorte und Root-Zähler laden
+  useEffect(() => {
+    apiClient.get('/api/v1/sites', { params: { page_size: 100 } })
+      .then((res) => setSites((res.data.items || []).map((s: Record<string, unknown>) => ({ id: s.id as string, name: s.name as string }))))
+      .catch(() => {});
+    apiClient.get('/api/v1/meters', { params: { page_size: 200 } })
+      .then((res) => {
+        const meters = (res.data.items || []) as Record<string, unknown>[];
+        const roots = meters.filter((m) => !m.parent_meter_id);
+        setRootMeters(roots.map((m) => ({
+          id: m.id as string,
+          name: m.name as string,
+          energy_type: m.energy_type as string,
+        })));
+      })
+      .catch(() => {});
+  }, []);
+
   // Auto-Titel generieren
   useEffect(() => {
-    const typeLabel = REPORT_TYPES.find((t) => t.value === reportType)?.label || '';
-    const year = new Date(periodStart).getFullYear();
-    setTitle(`${typeLabel} ${year}`);
-  }, [reportType, periodStart]);
+    if (reportType === 'annual') {
+      setTitle(`Jahresbericht ${year}`);
+    } else if (reportType === 'quarterly') {
+      setTitle(`Q${quarter} ${year}`);
+    } else if (reportType === 'monthly') {
+      setTitle(`${MONTH_LABELS_FULL[month - 1]} ${year}`);
+    } else {
+      setTitle(`Bericht ${periodStart} – ${periodEnd}`);
+    }
+  }, [reportType, year, quarter, month, periodStart, periodEnd]);
+
+  // Jahr-Optionen (2020 bis aktuelles Jahr + 1)
+  const yearOptions = Array.from({ length: currentYear - 2019 }, (_, i) => currentYear - i);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setError('');
     try {
-      await apiClient.post('/api/v1/reports', {
+      const payload: Record<string, unknown> = {
         title,
         report_type: reportType,
-        period_start: periodStart,
-        period_end: periodEnd,
         include_co2: includeCo2,
         include_weather_correction: includeWeather,
         include_seu: includeSeu,
         include_enpi: includeEnpi,
         include_anomalies: includeAnomalies,
-      });
+        include_meter_tree: includeMeterTree,
+        include_heatmap: includeHeatmap,
+        include_sankey: includeSankey,
+        include_yoy_comparison: includeYoyComparison,
+        include_cost_overview: includeCostOverview,
+      };
+
+      if (reportType === 'annual') {
+        payload.year = year;
+      } else if (reportType === 'quarterly') {
+        payload.year = year;
+        payload.quarter = quarter;
+      } else if (reportType === 'monthly') {
+        payload.year = year;
+        payload.month = month;
+      } else {
+        payload.period_start = periodStart;
+        payload.period_end = periodEnd;
+      }
+
+      if (siteId) payload.site_id = siteId;
+      if (rootMeterId) payload.root_meter_id = rootMeterId;
+
+      await apiClient.post('/api/v1/reports', payload);
       onCreate();
-    } catch (err: unknown) {
+    } catch {
       setError('Bericht konnte nicht erstellt werden');
     }
     setSaving(false);
@@ -416,17 +490,111 @@ function CreateReportModal({
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          {/* Perioden-Auswahl je nach Berichtstyp */}
+          {reportType === 'annual' && (
             <div>
-              <label className="label">Zeitraum von *</label>
-              <input type="date" className="input" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} required />
+              <label className="label">Jahr</label>
+              <select className="input" value={year} onChange={(e) => setYear(Number(e.target.value))}>
+                {yearOptions.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
             </div>
-            <div>
-              <label className="label">Zeitraum bis *</label>
-              <input type="date" className="input" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} required />
-            </div>
-          </div>
+          )}
 
+          {reportType === 'quarterly' && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Jahr</label>
+                <select className="input" value={year} onChange={(e) => setYear(Number(e.target.value))}>
+                  {yearOptions.map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Quartal</label>
+                <select className="input" value={quarter} onChange={(e) => setQuarter(Number(e.target.value))}>
+                  {QUARTER_LABELS.map((label, idx) => (
+                    <option key={idx + 1} value={idx + 1}>{label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {reportType === 'monthly' && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Jahr</label>
+                <select className="input" value={year} onChange={(e) => setYear(Number(e.target.value))}>
+                  {yearOptions.map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Monat</label>
+                <select className="input" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
+                  {MONTH_LABELS_FULL.map((label, idx) => (
+                    <option key={idx + 1} value={idx + 1}>{label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {reportType === 'custom' && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Zeitraum von *</label>
+                <input type="date" className="input" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} required />
+              </div>
+              <div>
+                <label className="label">Zeitraum bis *</label>
+                <input type="date" className="input" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} required />
+              </div>
+            </div>
+          )}
+
+          {/* Scope-Filter */}
+          {(sites.length > 0 || rootMeters.length > 0) && (
+            <div>
+              <label className="label mb-2">Umfang (optional)</label>
+              <div className="space-y-2">
+                {sites.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Building2 className="h-3.5 w-3.5 text-gray-400" />
+                      <span className="text-xs text-gray-500">Standort</span>
+                    </div>
+                    <select className="input" value={siteId} onChange={(e) => setSiteId(e.target.value)}>
+                      <option value="">Alle Standorte</option>
+                      {sites.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {rootMeters.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Gauge className="h-3.5 w-3.5 text-gray-400" />
+                      <span className="text-xs text-gray-500">Zählerstrang (Hauptzähler)</span>
+                    </div>
+                    <select className="input" value={rootMeterId} onChange={(e) => setRootMeterId(e.target.value)}>
+                      <option value="">Alle Zähler</option>
+                      {rootMeters.map((m) => (
+                        <option key={m.id} value={m.id}>{m.name} ({m.energy_type})</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Berichts-Sektionen */}
           <div>
             <label className="label mb-2">Berichts-Sektionen</label>
             <div className="space-y-2">
@@ -436,6 +604,31 @@ function CreateReportModal({
                 { checked: includeSeu, onChange: setIncludeSeu, label: 'Wesentliche Energieverbraucher (SEU)', icon: BarChart3 },
                 { checked: includeEnpi, onChange: setIncludeEnpi, label: 'Energiekennzahlen (EnPI)', icon: BarChart3 },
                 { checked: includeAnomalies, onChange: setIncludeAnomalies, label: 'Anomalie-Erkennung', icon: AlertCircle },
+              ].map(({ checked, onChange, label, icon: Icon }) => (
+                <label key={label} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => onChange(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-primary-600"
+                  />
+                  <Icon className="h-4 w-4 text-gray-400" />
+                  <span className="text-sm text-gray-700">{label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Diagramme */}
+          <div>
+            <label className="label mb-2">Diagramme im Bericht</label>
+            <div className="space-y-2">
+              {[
+                { checked: includeSankey, onChange: setIncludeSankey, label: 'Energiefluss (Sankey)', icon: Workflow },
+                { checked: includeYoyComparison, onChange: setIncludeYoyComparison, label: 'Jahresvergleich', icon: TrendingUp },
+                { checked: includeHeatmap, onChange: setIncludeHeatmap, label: 'Lastprofil (Heatmap)', icon: Grid3X3 },
+                { checked: includeMeterTree, onChange: setIncludeMeterTree, label: 'Zählerstruktur', icon: GitBranch },
+                { checked: includeCostOverview, onChange: setIncludeCostOverview, label: 'Kostenübersicht', icon: DollarSign },
               ].map(({ checked, onChange, label, icon: Icon }) => (
                 <label key={label} className="flex items-center gap-2 cursor-pointer">
                   <input
