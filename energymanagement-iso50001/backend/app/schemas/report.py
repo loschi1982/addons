@@ -61,6 +61,8 @@ class ReportCreate(BaseModel):
     # Bezugsgröße für Energieintensität (z.B. 500 m², 20 Mitarbeiter)
     reference_value: float | None = None
     reference_unit: str | None = "m²"
+    # Optionaler Kommentar zur Analyse (z.B. Ursache für Verbrauchsänderung)
+    analysis_comment: str | None = None
 
 
 class ReportUpdate(BaseModel):

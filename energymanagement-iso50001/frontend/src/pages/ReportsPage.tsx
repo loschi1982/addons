@@ -372,6 +372,8 @@ function CreateReportModal({
   // Bezugsgröße für Energieintensität
   const [referenceValue, setReferenceValue] = useState('');
   const [referenceUnit, setReferenceUnit] = useState('m²');
+  // Analyse-Kommentar
+  const [analysisComment, setAnalysisComment] = useState('');
   // Inhalts-Toggles
   const [includeCo2, setIncludeCo2] = useState(true);
   const [includeWeather, setIncludeWeather] = useState(false);
@@ -461,6 +463,7 @@ function CreateReportModal({
         payload.reference_value = parseFloat(referenceValue);
         payload.reference_unit = referenceUnit;
       }
+      if (analysisComment.trim()) payload.analysis_comment = analysisComment.trim();
 
       await apiClient.post('/api/v1/reports', payload);
       onCreate();
@@ -631,6 +634,18 @@ function CreateReportModal({
                 <option value="Stück">Stück</option>
               </select>
             </div>
+          </div>
+
+          {/* Analyse-Kommentar */}
+          <div>
+            <label className="label mb-1">Ursachen-Kommentar (optional)</label>
+            <p className="text-xs text-gray-400 mb-2">Kontextinformation zur Analyse, z.B. "Neues Gebäude in Betrieb", "Kalter Winter"</p>
+            <textarea
+              className="input min-h-[60px] resize-y"
+              placeholder="Hintergrund oder Ursachen für Verbrauchsänderungen…"
+              value={analysisComment}
+              onChange={(e) => setAnalysisComment(e.target.value)}
+            />
           </div>
 
           {/* Berichts-Sektionen */}
@@ -1016,6 +1031,46 @@ function ReportViewer({
 
           {/* Monatlicher Verbrauchsverlauf */}
           <MonthlyTrendChart snapshot={snapshot as Record<string, unknown>} />
+
+          {/* Ursachenanalyse */}
+          {(() => {
+            const analysis = snapshot.analysis as { bullets?: string[]; weather?: Record<string, unknown> } | undefined;
+            if (!analysis?.bullets?.length) return null;
+            const weather = analysis.weather;
+            return (
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 mb-3">Ursachenanalyse</h3>
+                <ul className="space-y-2">
+                  {analysis.bullets.map((b, i) => (
+                    <li key={i} className="flex gap-2 text-sm text-gray-700">
+                      <span className="mt-0.5 h-2 w-2 flex-shrink-0 rounded-full bg-primary-500 mt-1.5" />
+                      <span dangerouslySetInnerHTML={{ __html: b }} />
+                    </li>
+                  ))}
+                </ul>
+                {weather && (weather.actual_hdd as number) > 0 && (
+                  <div className="mt-3 grid grid-cols-3 gap-3">
+                    <div className="rounded-lg border bg-blue-50 p-3 text-center">
+                      <p className="text-lg font-bold text-blue-700">{(weather.actual_hdd as number).toFixed(0)}</p>
+                      <p className="text-xs text-gray-500">
+                        HDD{weather.reference_hdd ? ` (Ref: ${(weather.reference_hdd as number).toFixed(0)})` : ''}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-blue-50 p-3 text-center">
+                      <p className="text-lg font-bold text-blue-700">{(weather.avg_temp as number).toFixed(1)}°C</p>
+                      <p className="text-xs text-gray-500">Mittlere Temperatur</p>
+                    </div>
+                    {(weather.heating_days as number) > 0 && (
+                      <div className="rounded-lg border bg-blue-50 p-3 text-center">
+                        <p className="text-lg font-bold text-blue-700">{weather.heating_days as number}</p>
+                        <p className="text-xs text-gray-500">Heiztage</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Jahresvergleich */}
           <YoyChart charts={charts} />
