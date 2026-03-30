@@ -726,6 +726,77 @@ function SankeyChart({ charts }: { charts: Record<string, unknown> }) {
   );
 }
 
+function MonthlyTrendChart({ snapshot }: { snapshot: Record<string, unknown> }) {
+  const monthly = snapshot.monthly_trend as { month: number; consumption_kwh: number }[] | undefined;
+  if (!monthly?.length) return null;
+  const data = monthly
+    .filter((d) => d.consumption_kwh > 0)
+    .map((d) => ({ monat: MONTHS_SHORT[d.month - 1], kWh: Math.round(d.consumption_kwh) }));
+  if (data.length === 0) return null;
+  return (
+    <div>
+      <h3 className="text-base font-semibold text-gray-900 mb-3">Monatlicher Verbrauchsverlauf</h3>
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+          <XAxis dataKey="monat" tick={{ fontSize: 11 }} />
+          <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+          <Tooltip formatter={(v: number) => [`${v.toLocaleString('de-DE')} kWh`]} />
+          <Bar dataKey="kWh" fill="#1B5E7B" radius={[2, 2, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function CostSection({ snapshot }: { snapshot: Record<string, unknown> }) {
+  const cost = snapshot.cost_summary as {
+    available: boolean;
+    total_cost_net: number;
+    total_cost_gross: number;
+    monthly_costs: { month: string; cost_net: number }[];
+  } | undefined;
+  if (!cost?.available) return null;
+  const totalKwh = (snapshot.total_consumption_kwh as number) || 0;
+  const costPerKwhCt = totalKwh > 0 ? (cost.total_cost_net / totalKwh) * 100 : 0;
+
+  const monthlyCostData = (cost.monthly_costs || []).map((d) => ({
+    monat: MONTHS_SHORT[parseInt(d.month.slice(5, 7), 10) - 1] || d.month,
+    '€ netto': Math.round(d.cost_net * 100) / 100,
+  }));
+
+  return (
+    <div>
+      <h3 className="text-base font-semibold text-gray-900 mb-3">Wirtschaftlichkeit</h3>
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        <div className="rounded-lg border p-3 text-center">
+          <p className="text-xl font-bold text-primary-600">{cost.total_cost_net.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</p>
+          <p className="text-xs text-gray-500">Energiekosten netto</p>
+        </div>
+        <div className="rounded-lg border p-3 text-center">
+          <p className="text-xl font-bold text-primary-600">{cost.total_cost_gross.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</p>
+          <p className="text-xs text-gray-500">inkl. MwSt.</p>
+        </div>
+        <div className="rounded-lg border p-3 text-center">
+          <p className="text-xl font-bold text-primary-600">{costPerKwhCt.toFixed(1)} ct</p>
+          <p className="text-xs text-gray-500">pro kWh</p>
+        </div>
+      </div>
+      {monthlyCostData.length > 0 && (
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={monthlyCostData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+            <XAxis dataKey="monat" tick={{ fontSize: 11 }} />
+            <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${v} €`} />
+            <Tooltip formatter={(v: number) => [`${v.toLocaleString('de-DE')} €`]} />
+            <Bar dataKey="€ netto" fill="#2A8CB5" radius={[2, 2, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  );
+}
+
 function ReportViewer({
   report,
   onClose,
@@ -890,8 +961,14 @@ function ReportViewer({
             </div>
           )}
 
+          {/* Monatlicher Verbrauchsverlauf */}
+          <MonthlyTrendChart snapshot={snapshot as Record<string, unknown>} />
+
           {/* Jahresvergleich */}
           <YoyChart charts={charts} />
+
+          {/* Wirtschaftlichkeit */}
+          <CostSection snapshot={snapshot as Record<string, unknown>} />
 
           {/* Energiefluss (Sankey) */}
           <SankeyChart charts={charts} />

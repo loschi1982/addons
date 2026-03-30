@@ -305,6 +305,11 @@ class ReportService:
         if include_co2:
             co2_summary = await self._create_co2_summary(period_start, period_end)
 
+        # Kosten-Zusammenfassung
+        cost_summary = await self._create_cost_summary(period_start, period_end, meter_ids)
+        if cost_summary.get("available"):
+            snapshot["cost_summary"] = cost_summary
+
         # Ergebnisse und Empfehlungen generieren
         findings = await self._generate_findings(snapshot, co2_summary)
         recommendations = await self._generate_recommendations(findings)
@@ -452,125 +457,296 @@ class ReportService:
 
     def _render_builtin_template(self, report: AuditReport) -> str:
         """Eingebautes HTML-Template für PDF-Generierung."""
-        from app.services.reporting.chart_renderer import (
-            render_bar_comparison_svg,
-            render_heatmap_svg,
-            render_meter_tree_svg,
-            render_sankey_svg,
-        )
+        # Renderer mit Fehlerbehandlung importieren
+        try:
+            from app.services.reporting.chart_renderer import (
+                render_bar_comparison_svg,
+                render_heatmap_svg,
+                render_meter_tree_svg,
+                render_monthly_cost_svg,
+                render_monthly_trend_svg,
+                render_sankey_svg,
+            )
+        except ImportError as e:
+            logger.warning("chart_renderer_import_failed", error=str(e))
+            render_bar_comparison_svg = render_heatmap_svg = render_meter_tree_svg = None  # type: ignore[assignment]
+            render_monthly_trend_svg = render_monthly_cost_svg = render_sankey_svg = None  # type: ignore[assignment]
+
+        def safe_render(fn, data, name: str = "chart") -> str:
+            """Renderer mit try/except aufrufen, leeren String bei Fehler."""
+            if fn is None or not data:
+                return ""
+            try:
+                return fn(data) or ""
+            except Exception as e:
+                logger.warning(f"chart_render_{name}_failed", error=str(e))
+                return ""
 
         snapshot = report.data_snapshot or {}
         co2 = report.co2_summary or {}
         findings = report.findings or []
         recommendations = report.recommendations or []
         charts = snapshot.get("charts", {})
-        scope = report.scope or {}
+        cost_summary = snapshot.get("cost_summary", {})
 
-        # Energiebilanz-Tabelle
-        energy_rows = ""
-        for item in snapshot.get("energy_balance", []):
-            energy_rows += f"""
-            <tr>
-                <td>{item.get('energy_type', '')}</td>
-                <td class="num">{item.get('consumption_kwh', 0):,.1f}</td>
-                <td class="num">{item.get('share_percent', 0):.1f}%</td>
-            </tr>"""
-
-        # CO₂-Tabelle
-        co2_rows = ""
-        for item in co2.get("by_energy_type", []):
-            co2_rows += f"""
-            <tr>
-                <td>{item.get('energy_type', '')}</td>
-                <td class="num">{item.get('co2_kg', 0):,.1f}</td>
-                <td class="num">{item.get('consumption_kwh', 0):,.1f}</td>
-            </tr>"""
-
-        # Top-Verbraucher
-        top_rows = ""
-        for item in snapshot.get("top_consumers", []):
-            top_rows += f"""
-            <tr>
-                <td>{item.get('name', '')}</td>
-                <td>{item.get('energy_type', '')}</td>
-                <td class="num">{item.get('consumption_kwh', 0):,.1f}</td>
-            </tr>"""
-
-        # Befunde
-        findings_html = ""
-        for f in findings:
-            severity_class = f.get("severity", "info")
-            findings_html += f"""
-            <div class="finding {severity_class}">
-                <strong>{f.get('title', '')}</strong>
-                <p>{f.get('description', '')}</p>
-            </div>"""
-
-        # Empfehlungen
-        reco_html = ""
-        for r in recommendations:
-            reco_html += f"""
-            <div class="recommendation">
-                <strong>{r.get('title', '')}</strong>
-                <p>{r.get('description', '')}</p>
-                {f'<p class="savings">Einsparpotenzial: {r.get("savings_kwh", 0):,.0f} kWh/a</p>' if r.get('savings_kwh') else ''}
-            </div>"""
-
+        # ── Kennzahlen ──
         total_kwh = snapshot.get("total_consumption_kwh", 0)
         total_co2 = co2.get("total_co2_kg", 0)
         meter_count = snapshot.get("meter_count", 0)
+        co2_intensity = co2.get("avg_co2_g_per_kwh", 0)
+        energy_intensity = snapshot.get("energy_intensity_kwh_per_day", 0)
+        co2_trend = co2.get("trend_vs_previous_year")
 
-        # ── Diagramm-Sektionen rendern ──
-        chart_sections = ""
-        section_num = 4  # Nächste Kapitelnummer nach Energiebilanz, CO₂, SEU
+        # YoY-Delta aus Vergleichsdaten berechnen
+        yoy_delta_pct = None
+        yoy_data = charts.get("yoy_comparison", {})
+        if yoy_data:
+            try:
+                p1_data = yoy_data.get("period1", {}).get("data", {})
+                p2_data = yoy_data.get("period2", {}).get("data", {})
+                p1_total = sum(
+                    sum(e.get("value", 0) for e in entries)
+                    for entries in p1_data.values()
+                )
+                p2_total = sum(
+                    sum(e.get("value", 0) for e in entries)
+                    for entries in p2_data.values()
+                )
+                if p1_total > 0:
+                    yoy_delta_pct = round((p2_total - p1_total) / p1_total * 100, 1)
+            except Exception:
+                pass
 
-        if charts.get("meter_tree"):
-            tree_svg = render_meter_tree_svg(charts["meter_tree"])
-            if tree_svg:
-                section_num += 1
-                chart_sections += f"""
-<h1>{section_num}. Zählerstruktur</h1>
-<div class="section">
-    <p>Hierarchische Darstellung der erfassten Zähler und deren Zuordnung.</p>
-    <figure>{tree_svg}</figure>
-</div>"""
+        # ── Management-Zusammenfassung: Kernaussagen ──
+        bullets = []
+        if yoy_delta_pct is not None:
+            sign = "+" if yoy_delta_pct > 0 else ""
+            bullets.append(
+                f"Gesamtverbrauch: <strong>{total_kwh:,.0f} kWh</strong> "
+                f"({sign}{yoy_delta_pct:.1f}&nbsp;% ggü.&nbsp;Vorjahr)"
+            )
+        else:
+            bullets.append(f"Gesamtverbrauch: <strong>{total_kwh:,.0f}&nbsp;kWh</strong>")
 
-        if charts.get("sankey"):
-            sankey_svg = render_sankey_svg(charts["sankey"])
-            if sankey_svg:
-                section_num += 1
-                chart_sections += f"""
-<h1>{section_num}. Energiefluss (Sankey)</h1>
+        if total_co2 > 0:
+            co2_t = total_co2 / 1000
+            co2_str = f"CO₂-Emissionen: <strong>{co2_t:,.2f}&nbsp;t&nbsp;CO₂e</strong>"
+            if co2_intensity > 0:
+                co2_str += f" (Intensität: {co2_intensity:.0f}&nbsp;g/kWh)"
+            bullets.append(co2_str)
+
+        top_consumers = snapshot.get("top_consumers", [])
+        if top_consumers and total_kwh > 0:
+            top = top_consumers[0]
+            top_share = top["consumption_kwh"] / total_kwh * 100
+            bullets.append(
+                f"Größter Verbraucher: <strong>{top['name']}</strong> mit {top_share:.1f}&nbsp;% Anteil"
+            )
+
+        if cost_summary.get("available"):
+            cost_net = cost_summary.get("total_cost_net", 0)
+            cost_kwh_ct = (cost_net / total_kwh * 100) if total_kwh > 0 else 0
+            bullets.append(
+                f"Gesamtkosten: <strong>{cost_net:,.2f}&nbsp;€</strong> netto "
+                f"({cost_kwh_ct:.1f}&nbsp;ct/kWh)"
+            )
+
+        if energy_intensity > 0:
+            bullets.append(f"Energieintensität: <strong>{energy_intensity:,.1f}&nbsp;kWh/Tag</strong>")
+
+        bullets_html = "".join(f"<li>{b}</li>" for b in bullets)
+
+        # ── Tabellen ──
+        energy_rows = ""
+        for item in snapshot.get("energy_balance", []):
+            energy_rows += (
+                f"<tr><td>{item.get('energy_type', '')}</td>"
+                f"<td class='num'>{item.get('consumption_kwh', 0):,.1f}</td>"
+                f"<td class='num'>{item.get('share_percent', 0):.1f}%</td></tr>"
+            )
+
+        co2_rows = ""
+        for item in co2.get("by_energy_type", []):
+            co2_rows += (
+                f"<tr><td>{item.get('energy_type', '')}</td>"
+                f"<td class='num'>{item.get('co2_kg', 0):,.1f}</td>"
+                f"<td class='num'>{item.get('consumption_kwh', 0):,.1f}</td></tr>"
+            )
+
+        top_rows = ""
+        for item in top_consumers:
+            top_rows += (
+                f"<tr><td>{item.get('name', '')}</td>"
+                f"<td>{item.get('energy_type', '')}</td>"
+                f"<td class='num'>{item.get('consumption_kwh', 0):,.1f}</td></tr>"
+            )
+
+        findings_html = ""
+        for f in findings:
+            findings_html += (
+                f"<div class='finding {f.get('severity', 'info')}'>"
+                f"<strong>{f.get('title', '')}</strong>"
+                f"<p>{f.get('description', '')}</p></div>"
+            )
+
+        reco_html = ""
+        for r in recommendations:
+            savings = (
+                f"<p class='savings'>Einsparpotenzial: {r['savings_kwh']:,.0f} kWh/a</p>"
+                if r.get("savings_kwh") else ""
+            )
+            reco_html += (
+                f"<div class='recommendation'>"
+                f"<strong>{r.get('title', '')}</strong>"
+                f"<p>{r.get('description', '')}</p>{savings}</div>"
+            )
+
+        # ── Diagramme rendern ──
+        monthly_trend_svg = safe_render(
+            render_monthly_trend_svg, snapshot.get("monthly_trend", []), "monthly_trend"
+        )
+        yoy_svg = safe_render(render_bar_comparison_svg, charts.get("yoy_comparison"), "yoy")
+        sankey_svg = safe_render(render_sankey_svg, charts.get("sankey"), "sankey")
+        heatmap_svg = safe_render(render_heatmap_svg, charts.get("heatmap"), "heatmap")
+        tree_svg = safe_render(render_meter_tree_svg, charts.get("meter_tree"), "tree")
+        cost_svg = safe_render(
+            render_monthly_cost_svg,
+            cost_summary.get("monthly_costs", []) if cost_summary.get("available") else [],
+            "cost",
+        )
+
+        # ── Sektionsnummern ──
+        sec = [2]  # Start nach Management-Zusammenfassung (1)
+
+        def next_sec() -> int:
+            n = sec[0]
+            sec[0] += 1
+            return n
+
+        # Deckblatt-Scope-Info
+        scope = report.scope or {}
+        scope_info = ""
+        if scope.get("site_id"):
+            scope_info = f"<div class='scope'>Gefiltert nach Standort-ID: {scope['site_id']}</div>"
+        elif scope.get("root_meter_id"):
+            scope_info = f"<div class='scope'>Gefiltert nach Zählerstrang-ID: {scope['root_meter_id']}</div>"
+
+        # KPI-Karten (erweitert)
+        kpi_cards = f"""
+        <div class="kpi-card">
+            <div class="value">{total_kwh:,.0f}</div>
+            <div class="unit">kWh</div>
+            <div class="label">Gesamtverbrauch</div>
+        </div>
+        <div class="kpi-card">
+            <div class="value">{total_co2 / 1000:,.2f}</div>
+            <div class="unit">t CO₂e</div>
+            <div class="label">CO₂-Emissionen</div>
+        </div>"""
+
+        if co2_intensity > 0:
+            kpi_cards += f"""
+        <div class="kpi-card">
+            <div class="value">{co2_intensity:.0f}</div>
+            <div class="unit">g CO₂/kWh</div>
+            <div class="label">CO₂-Intensität</div>
+        </div>"""
+
+        if yoy_delta_pct is not None:
+            delta_color = "#DC2626" if yoy_delta_pct > 0 else "#16A34A"
+            sign = "+" if yoy_delta_pct > 0 else ""
+            kpi_cards += f"""
+        <div class="kpi-card">
+            <div class="value" style="color:{delta_color}">{sign}{yoy_delta_pct:.1f}%</div>
+            <div class="unit">&nbsp;</div>
+            <div class="label">vs. Vorjahr</div>
+        </div>"""
+
+        if cost_summary.get("available"):
+            cost_net = cost_summary.get("total_cost_net", 0)
+            kpi_cards += f"""
+        <div class="kpi-card">
+            <div class="value">{cost_net:,.0f}</div>
+            <div class="unit">€ netto</div>
+            <div class="label">Energiekosten</div>
+        </div>"""
+
+        kpi_cards += f"""
+        <div class="kpi-card">
+            <div class="value">{meter_count}</div>
+            <div class="unit">Stk.</div>
+            <div class="label">Erfasste Zähler</div>
+        </div>"""
+
+        # ── Optionale Sektionen ──
+        analyse_section = ""
+        if yoy_svg:
+            analyse_section += f"""
+<h2>Jahresvergleich</h2>
+<p>Monatlicher Verbrauchsvergleich mit dem Vorjahreszeitraum.</p>
+<figure>{yoy_svg}</figure>"""
+
+        if heatmap_svg:
+            analyse_section += f"""
+<h2>Lastprofil (Heatmap)</h2>
+<p>Durchschnittlicher Verbrauch nach Wochentag und Tageszeit. Dunklere Bereiche zeigen höheren Verbrauch.</p>
+<figure>{heatmap_svg}</figure>"""
+
+        sankey_section = ""
+        if sankey_svg:
+            s = next_sec()
+            sankey_section = f"""
+<h1>{s}. Energiefluss (Sankey)</h1>
 <div class="section">
     <p>Visualisierung der Energieflüsse von Bezugsquellen über Hauptzähler und Unterzähler bis zu den Verbrauchern.</p>
     <figure>{sankey_svg}</figure>
 </div>"""
 
-        if charts.get("heatmap"):
-            heatmap_svg = render_heatmap_svg(charts["heatmap"])
-            if heatmap_svg:
-                section_num += 1
-                chart_sections += f"""
-<h1>{section_num}. Lastprofil (Heatmap)</h1>
+        tree_section = ""
+        if tree_svg:
+            s = next_sec()
+            tree_section = f"""
+<h1>{s}. Zählerstruktur</h1>
 <div class="section">
-    <p>Durchschnittlicher Verbrauch nach Wochentag und Tageszeit. Dunklere Bereiche zeigen höheren Verbrauch.</p>
-    <figure>{heatmap_svg}</figure>
+    <p>Hierarchische Darstellung der erfassten Zähler.</p>
+    <figure>{tree_svg}</figure>
 </div>"""
 
-        if charts.get("yoy_comparison"):
-            yoy_svg = render_bar_comparison_svg(charts["yoy_comparison"])
-            if yoy_svg:
-                section_num += 1
-                chart_sections += f"""
-<h1>{section_num}. Jahresvergleich</h1>
+        cost_section = ""
+        if cost_summary.get("available"):
+            cost_kwh_ct = (cost_summary.get("total_cost_net", 0) / total_kwh * 100) if total_kwh > 0 else 0
+            cost_sec = next_sec()
+            cost_section = f"""
+<h1>{cost_sec}. Wirtschaftlichkeit</h1>
 <div class="section">
-    <p>Monatlicher Verbrauchsvergleich mit dem Vorjahreszeitraum.</p>
-    <figure>{yoy_svg}</figure>
+    <p>Gesamtkosten im Berichtszeitraum auf Basis der erfassten Zählerlesungen.</p>
+    <div class="kpi-row">
+        <div class="kpi-card">
+            <div class="value">{cost_summary.get('total_cost_net', 0):,.2f}</div>
+            <div class="unit">€ netto</div>
+            <div class="label">Energiekosten gesamt</div>
+        </div>
+        <div class="kpi-card">
+            <div class="value">{cost_summary.get('total_cost_gross', 0):,.2f}</div>
+            <div class="unit">€ brutto</div>
+            <div class="label">inkl. MwSt.</div>
+        </div>
+        <div class="kpi-card">
+            <div class="value">{cost_kwh_ct:.1f}</div>
+            <div class="unit">ct/kWh</div>
+            <div class="label">Durchschnittspreis</div>
+        </div>
+    </div>
+    {f'<h2>Monatlicher Kostenverlauf</h2><figure>{cost_svg}</figure>' if cost_svg else ''}
 </div>"""
 
-        # Befunde/Empfehlungen-Nummer dynamisch
-        findings_num = section_num + 1
-        reco_num = section_num + 2
+        n_analyse = next_sec()
+        n_co2 = next_sec()
+        n_seu = next_sec()
+        n_findings = next_sec()
+        n_reco = next_sec()
+
+        generated_str = report.generated_at.strftime("%d.%m.%Y") if report.generated_at else ""
 
         return f"""<!DOCTYPE html>
 <html lang="de">
@@ -582,57 +758,53 @@ class ReportService:
     size: A4;
     margin: 25mm 20mm 30mm 25mm;
     @bottom-right {{ content: "Seite " counter(page) " von " counter(pages); font-size: 7pt; color: #6B7280; }}
-    @bottom-center {{ content: "Energiebericht {report.period_start} – {report.period_end}"; font-size: 7pt; color: #6B7280; }}
+    @bottom-center {{ content: "Energiebericht {report.period_start} \2013 {report.period_end}"; font-size: 7pt; color: #6B7280; }}
 }}
 @page cover {{ margin: 0; }}
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{ font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif; font-size: 10pt; color: #1F2937; line-height: 1.5; }}
+body {{ font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 10pt; color: #1F2937; line-height: 1.5; }}
 
-/* Deckblatt */
-.cover {{ page: cover; height: 297mm; display: flex; flex-direction: column; justify-content: center; align-items: center; background: linear-gradient(135deg, #1B5E7B 0%, #2A8CB5 100%); color: white; text-align: center; }}
-.cover h1 {{ font-size: 28pt; margin-bottom: 12pt; }}
-.cover .subtitle {{ font-size: 16pt; opacity: 0.9; }}
-.cover .period {{ font-size: 12pt; margin-top: 24pt; opacity: 0.7; }}
+.cover {{ page: cover; height: 297mm; display: flex; flex-direction: column; justify-content: center; align-items: center; background: linear-gradient(135deg, #1B5E7B 0%, #2A8CB5 100%); color: white; text-align: center; padding: 40pt; }}
+.cover h1 {{ font-size: 26pt; margin-bottom: 12pt; font-weight: 700; }}
+.cover .subtitle {{ font-size: 14pt; opacity: 0.9; }}
+.cover .period {{ font-size: 12pt; margin-top: 24pt; opacity: 0.75; }}
 .cover .meta {{ margin-top: 48pt; font-size: 9pt; opacity: 0.6; }}
-.cover .scope {{ margin-top: 12pt; font-size: 10pt; opacity: 0.8; }}
+.cover .scope {{ margin-top: 8pt; font-size: 9pt; opacity: 0.7; }}
 
-/* Überschriften */
-h1 {{ font-size: 18pt; color: #1B5E7B; border-bottom: 2px solid #1B5E7B; padding-bottom: 6pt; margin: 24pt 0 12pt 0; page-break-before: always; }}
+h1 {{ font-size: 16pt; color: #1B5E7B; border-bottom: 2px solid #1B5E7B; padding-bottom: 5pt; margin: 24pt 0 10pt 0; page-break-before: always; }}
 h1:first-of-type {{ page-break-before: auto; }}
-h2 {{ font-size: 14pt; color: #1B5E7B; margin: 18pt 0 8pt 0; }}
-h3 {{ font-size: 12pt; color: #374151; margin: 12pt 0 6pt 0; }}
+h2 {{ font-size: 13pt; color: #1B5E7B; margin: 16pt 0 7pt 0; }}
+h3 {{ font-size: 11pt; color: #374151; margin: 10pt 0 5pt 0; }}
 
-/* KPI-Karten */
-.kpi-row {{ display: flex; gap: 12pt; margin: 12pt 0; page-break-inside: avoid; }}
-.kpi-card {{ flex: 1; border: 1px solid #D1D5DB; border-radius: 6pt; padding: 12pt; text-align: center; }}
-.kpi-card .value {{ font-size: 24pt; font-weight: 700; color: #1B5E7B; }}
-.kpi-card .label {{ font-size: 9pt; color: #6B7280; margin-top: 4pt; }}
-.kpi-card .unit {{ font-size: 9pt; color: #9CA3AF; }}
+.kpi-row {{ display: flex; gap: 10pt; margin: 12pt 0; page-break-inside: avoid; flex-wrap: wrap; }}
+.kpi-card {{ flex: 1; min-width: 80pt; border: 1px solid #D1D5DB; border-radius: 5pt; padding: 10pt; text-align: center; background: #FAFAFA; }}
+.kpi-card .value {{ font-size: 20pt; font-weight: 700; color: #1B5E7B; line-height: 1.1; }}
+.kpi-card .label {{ font-size: 8pt; color: #6B7280; margin-top: 3pt; }}
+.kpi-card .unit {{ font-size: 8pt; color: #9CA3AF; }}
 
-/* Tabellen */
+ul.summary-bullets {{ margin: 8pt 0 12pt 16pt; }}
+ul.summary-bullets li {{ margin: 4pt 0; font-size: 10pt; }}
+
 table {{ width: 100%; border-collapse: collapse; margin: 8pt 0; font-size: 9pt; }}
-thead th {{ background: #1B5E7B; color: white; padding: 6pt 8pt; text-align: left; font-weight: 600; }}
-tbody td {{ padding: 5pt 8pt; border-bottom: 1px solid #E5E7EB; }}
+thead th {{ background: #1B5E7B; color: white; padding: 5pt 7pt; text-align: left; font-weight: 600; }}
+tbody td {{ padding: 4pt 7pt; border-bottom: 1px solid #E5E7EB; }}
 tbody tr:nth-child(even) {{ background: #F9FAFB; }}
 .num {{ text-align: right; font-variant-numeric: tabular-nums; }}
-tfoot td {{ font-weight: 700; border-top: 2px solid #1B5E7B; padding: 6pt 8pt; }}
+tfoot td {{ font-weight: 700; border-top: 2px solid #1B5E7B; padding: 5pt 7pt; }}
 
-/* Befunde & Empfehlungen */
-.finding, .recommendation {{ border-left: 4px solid #D1D5DB; padding: 8pt 12pt; margin: 8pt 0; background: #F9FAFB; border-radius: 0 4pt 4pt 0; }}
+.finding, .recommendation {{ border-left: 4px solid #D1D5DB; padding: 7pt 11pt; margin: 7pt 0; background: #F9FAFB; border-radius: 0 3pt 3pt 0; }}
 .finding.hoch {{ border-left-color: #DC2626; }}
 .finding.mittel {{ border-left-color: #D97706; }}
 .finding.niedrig {{ border-left-color: #16A34A; }}
 .recommendation {{ border-left-color: #1B5E7B; }}
-.savings {{ color: #16A34A; font-weight: 600; font-size: 9pt; margin-top: 4pt; }}
+.savings {{ color: #16A34A; font-weight: 600; font-size: 9pt; margin-top: 3pt; }}
 
-/* Diagramme */
-figure {{ page-break-inside: avoid; margin: 12pt 0; }}
-figure svg {{ max-width: 100%; height: auto; }}
+figure {{ page-break-inside: avoid; margin: 10pt 0; }}
+figure svg {{ max-width: 100%; height: auto; display: block; }}
 
-/* Sonstige */
-p {{ margin: 6pt 0; }}
+p {{ margin: 5pt 0; }}
 .text-secondary {{ color: #6B7280; }}
-.section {{ margin-bottom: 18pt; }}
+.section {{ margin-bottom: 16pt; }}
 </style>
 </head>
 <body>
@@ -642,54 +814,52 @@ p {{ margin: 6pt 0; }}
     <h1>{report.title}</h1>
     <div class="subtitle">Energiebericht nach ISO 50001</div>
     <div class="period">{report.period_start} bis {report.period_end}</div>
-    <div class="meta">Erstellt am {report.generated_at.strftime('%d.%m.%Y') if report.generated_at else ''}</div>
+    {scope_info}
+    <div class="meta">Erstellt am {generated_str}</div>
 </div>
 
-<!-- Management-Zusammenfassung -->
+<!-- 1. Management-Zusammenfassung -->
 <h1>1. Management-Zusammenfassung</h1>
 <div class="section">
-    <p>{report.summary or 'Keine Zusammenfassung verfügbar.'}</p>
+    <p>Dieser Bericht dokumentiert den Energieverbrauch im Zeitraum {report.period_start} bis {report.period_end} gem&auml;&szlig; ISO&nbsp;50001.</p>
+    <ul class="summary-bullets">
+        {bullets_html}
+    </ul>
     <div class="kpi-row">
-        <div class="kpi-card">
-            <div class="value">{total_kwh:,.0f}</div>
-            <div class="unit">kWh</div>
-            <div class="label">Gesamtverbrauch</div>
-        </div>
-        <div class="kpi-card">
-            <div class="value">{total_co2:,.0f}</div>
-            <div class="unit">kg CO₂</div>
-            <div class="label">CO₂-Emissionen</div>
-        </div>
-        <div class="kpi-card">
-            <div class="value">{meter_count}</div>
-            <div class="unit">Stk.</div>
-            <div class="label">Erfasste Zähler</div>
-        </div>
+        {kpi_cards}
     </div>
 </div>
 
-<!-- Energiebilanz -->
-<h1>2. Energiebilanz</h1>
+<!-- {next_sec() - 1 if False else 2}. Aktuelle Lage -->
+<h1>2. Aktuelle Lage</h1>
 <div class="section">
-    <p>Aufschlüsselung des Gesamtverbrauchs nach Energieträger im Berichtszeitraum.</p>
+    <h2>Energiebilanz nach Tr&auml;ger</h2>
+    <p>Aufschl&uuml;sselung des Gesamtverbrauchs nach Energietr&auml;ger.</p>
     <table>
         <thead>
-            <tr><th>Energieträger</th><th class="num">Verbrauch (kWh)</th><th class="num">Anteil</th></tr>
+            <tr><th>Energietr&auml;ger</th><th class="num">Verbrauch (kWh)</th><th class="num">Anteil</th></tr>
         </thead>
         <tbody>{energy_rows}</tbody>
         <tfoot>
             <tr><td>Gesamt</td><td class="num">{total_kwh:,.1f}</td><td class="num">100%</td></tr>
         </tfoot>
     </table>
+    {f'<h2>Monatlicher Verbrauchsverlauf</h2><p>Verbrauch nach Monaten im Berichtszeitraum. Die gestrichelte Linie zeigt den Monatsdurchschnitt.</p><figure>{monthly_trend_svg}</figure>' if monthly_trend_svg else ''}
 </div>
 
-<!-- CO₂-Bilanz -->
-<h1>3. CO₂-Bilanz</h1>
+<!-- {n_analyse}. Analyse -->
+<h1>{n_analyse}. Analyse</h1>
 <div class="section">
-    <p>CO₂-Emissionen nach Energieträger und Scope-Aufschlüsselung.</p>
+    {analyse_section or '<p class="text-secondary">Keine Vergleichsdaten verf&uuml;gbar (Diagramme wurden nicht aktiviert).</p>'}
+</div>
+
+<!-- {n_co2}. CO₂-Bilanz -->
+<h1>{n_co2}. CO&#8322;-Bilanz</h1>
+<div class="section">
+    <p>CO&#8322;-Emissionen nach Energietr&auml;ger. Intensit&auml;t: <strong>{co2_intensity:.0f}&nbsp;g&nbsp;CO&#8322;/kWh</strong>{f" ({'+' if co2_trend and co2_trend > 0 else ''}{co2_trend:.1f}&nbsp;% ggü.&nbsp;Vorjahr)" if co2_trend is not None else ""}.</p>
     <table>
         <thead>
-            <tr><th>Energieträger</th><th class="num">CO₂ (kg)</th><th class="num">Verbrauch (kWh)</th></tr>
+            <tr><th>Energietr&auml;ger</th><th class="num">CO&#8322; (kg)</th><th class="num">Verbrauch (kWh)</th></tr>
         </thead>
         <tbody>{co2_rows}</tbody>
         <tfoot>
@@ -698,29 +868,30 @@ p {{ margin: 6pt 0; }}
     </table>
 </div>
 
-<!-- Top-Verbraucher -->
-<h1>4. Wesentliche Energieverbraucher (SEU)</h1>
+{sankey_section}
+{tree_section}
+{cost_section}
+
+<!-- {n_seu}. Wesentliche Energieverbraucher -->
+<h1>{n_seu}. Wesentliche Energieverbraucher (SEU)</h1>
 <div class="section">
-    <p>Die fünf größten Energieverbraucher im Berichtszeitraum (Pareto-Analyse).</p>
+    <p>Die f&uuml;nf gr&ouml;&szlig;ten Energieverbraucher im Berichtszeitraum (Pareto-Analyse).</p>
     <table>
         <thead>
-            <tr><th>Zähler</th><th>Energietyp</th><th class="num">Verbrauch (kWh)</th></tr>
+            <tr><th>Z&auml;hler</th><th>Energietyp</th><th class="num">Verbrauch (kWh)</th></tr>
         </thead>
         <tbody>{top_rows}</tbody>
     </table>
 </div>
 
-<!-- Diagramm-Sektionen (dynamisch) -->
-{chart_sections}
-
-<!-- Befunde -->
-<h1>{findings_num}. Erkenntnisse und Befunde</h1>
+<!-- {n_findings}. Erkenntnisse -->
+<h1>{n_findings}. Erkenntnisse und Befunde</h1>
 <div class="section">
     {findings_html or '<p class="text-secondary">Keine besonderen Befunde.</p>'}
 </div>
 
-<!-- Empfehlungen -->
-<h1>{reco_num}. Maßnahmen und Empfehlungen</h1>
+<!-- {n_reco}. Maßnahmen -->
+<h1>{n_reco}. Ma&szlig;nahmen und Empfehlungen</h1>
 <div class="section">
     {reco_html or '<p class="text-secondary">Keine Empfehlungen generiert.</p>'}
 </div>
@@ -836,6 +1007,9 @@ p {{ margin: 6pt 0; }}
                 "consumption_kwh": float(month_kwh),
             })
 
+        days_in_period = (end - start).days + 1
+        energy_intensity_kwh_per_day = float(total_kwh) / days_in_period if days_in_period > 0 and total_kwh > 0 else 0
+
         return {
             "period_start": start.isoformat(),
             "period_end": end.isoformat(),
@@ -844,6 +1018,8 @@ p {{ margin: 6pt 0; }}
             "energy_balance": energy_balance,
             "top_consumers": top_consumers,
             "monthly_trend": monthly_trend,
+            "energy_intensity_kwh_per_day": round(energy_intensity_kwh_per_day, 1),
+            "days_in_period": days_in_period,
         }
 
     async def _create_co2_summary(self, start: date, end: date) -> dict:
@@ -924,6 +1100,72 @@ p {{ margin: 6pt 0; }}
             "by_energy_type": by_energy_type,
             "by_scope": by_scope,
             "trend_vs_previous_year": trend,
+        }
+
+    async def _create_cost_summary(
+        self,
+        start: date,
+        end: date,
+        meter_ids: list[uuid.UUID] | None = None,
+    ) -> dict:
+        """Kosten-Zusammenfassung aus MeterReading.cost_net/cost_gross."""
+        start_dt = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
+        end_dt = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+
+        # Gesamtsumme
+        total_query = select(
+            func.sum(MeterReading.cost_net),
+            func.sum(MeterReading.cost_gross),
+        ).where(
+            MeterReading.timestamp >= start_dt,
+            MeterReading.timestamp < end_dt,
+            MeterReading.cost_net.is_not(None),
+        )
+        if meter_ids:
+            total_query = total_query.where(MeterReading.meter_id.in_(meter_ids))
+
+        result = await self.db.execute(total_query)
+        total_cost_net, total_cost_gross = result.one()
+
+        if total_cost_net is None:
+            return {"available": False}
+
+        total_cost_net = float(total_cost_net or 0)
+        total_cost_gross = float(total_cost_gross or 0)
+
+        # Monatliche Aufschlüsselung
+        from sqlalchemy import extract
+        monthly_query = (
+            select(
+                extract("year", MeterReading.timestamp).label("year"),
+                extract("month", MeterReading.timestamp).label("month"),
+                func.sum(MeterReading.cost_net).label("cost_net"),
+            )
+            .where(
+                MeterReading.timestamp >= start_dt,
+                MeterReading.timestamp < end_dt,
+                MeterReading.cost_net.is_not(None),
+            )
+            .group_by("year", "month")
+            .order_by("year", "month")
+        )
+        if meter_ids:
+            monthly_query = monthly_query.where(MeterReading.meter_id.in_(meter_ids))
+
+        monthly_result = await self.db.execute(monthly_query)
+        monthly_costs = [
+            {
+                "month": f"{int(row.year)}-{int(row.month):02d}",
+                "cost_net": float(row.cost_net or 0),
+            }
+            for row in monthly_result.all()
+        ]
+
+        return {
+            "available": True,
+            "total_cost_net": total_cost_net,
+            "total_cost_gross": total_cost_gross,
+            "monthly_costs": monthly_costs,
         }
 
     async def _generate_findings(
