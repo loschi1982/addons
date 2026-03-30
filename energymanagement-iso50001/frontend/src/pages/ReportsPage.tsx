@@ -6,6 +6,10 @@ import {
   GitBranch, Grid3X3, Workflow, TrendingUp, DollarSign,
   Building2, Gauge,
 } from 'lucide-react';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from 'recharts';
+import SankeyDiagram from '@/components/charts/SankeyDiagram';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS } from '@/types';
 
@@ -658,6 +662,70 @@ function CreateReportModal({
 
 /* ── Report-Viewer (Online-Ansicht) ── */
 
+/* ── Chart-Hilfskomponenten für den Viewer ── */
+
+const MONTHS_SHORT = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+
+function YoyChart({ charts }: { charts: Record<string, unknown> }) {
+  const yoy = charts.yoy_comparison as Record<string, unknown> | undefined;
+  if (!yoy) return null;
+  const p1 = yoy.period1 as Record<string, unknown> | undefined;
+  const p2 = yoy.period2 as Record<string, unknown> | undefined;
+  const p1data = p1?.data as Record<string, { period: string; value: number }[]> | undefined;
+  const p2data = p2?.data as Record<string, { period: string; value: number }[]> | undefined;
+  if (!p1data || !p2data) return null;
+
+  const sums1: Record<number, number> = {};
+  const sums2: Record<number, number> = {};
+  Object.values(p1data).forEach((entries) =>
+    entries.forEach((e) => { const m = new Date(e.period).getMonth(); sums1[m] = (sums1[m] || 0) + e.value; })
+  );
+  Object.values(p2data).forEach((entries) =>
+    entries.forEach((e) => { const m = new Date(e.period).getMonth(); sums2[m] = (sums2[m] || 0) + e.value; })
+  );
+  const allMonths = [...new Set([...Object.keys(sums1), ...Object.keys(sums2)].map(Number))].sort((a, b) => a - b);
+  if (allMonths.length === 0) return null;
+  const chartData = allMonths.map((m) => ({
+    monat: MONTHS_SHORT[m],
+    Vorjahr: Math.round((sums1[m] || 0) * 10) / 10,
+    Aktuell: Math.round((sums2[m] || 0) * 10) / 10,
+  }));
+  const p1Year = String(p1?.start || '').slice(0, 4);
+  const p2Year = String(p2?.start || '').slice(0, 4);
+
+  return (
+    <div>
+      <h3 className="text-base font-semibold text-gray-900 mb-3">
+        Jahresvergleich{p1Year && p2Year ? ` ${p1Year} vs. ${p2Year}` : ''}
+      </h3>
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={chartData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+          <XAxis dataKey="monat" tick={{ fontSize: 11 }} />
+          <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+          <Tooltip formatter={(v: number) => [`${v.toLocaleString('de-DE')} kWh`]} />
+          <Legend />
+          <Bar dataKey="Vorjahr" fill="#9CA3AF" radius={[2, 2, 0, 0]} />
+          <Bar dataKey="Aktuell" fill="#1B5E7B" radius={[2, 2, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function SankeyChart({ charts }: { charts: Record<string, unknown> }) {
+  const sankey = charts.sankey as { nodes: { id: string; label: string; type: string; depth?: number }[]; links: { source: number; target: number; value: number; direction?: 'consumption' | 'feed_in' }[] } | undefined;
+  if (!sankey?.nodes?.length) return null;
+  return (
+    <div>
+      <h3 className="text-base font-semibold text-gray-900 mb-3">Energiefluss</h3>
+      <div className="rounded-lg border bg-gray-50 p-2 overflow-x-auto">
+        <SankeyDiagram nodes={sankey.nodes} links={sankey.links} width={700} height={340} />
+      </div>
+    </div>
+  );
+}
+
 function ReportViewer({
   report,
   onClose,
@@ -673,6 +741,7 @@ function ReportViewer({
   const co2 = report.co2_summary || {};
   const findings = report.findings || [];
   const recommendations = report.recommendations || [];
+  const charts = (snapshot.charts || {}) as Record<string, unknown>;
 
   const totalKwh = (snapshot.total_consumption_kwh as number) || 0;
   const totalCo2 = (co2.total_co2_kg as number) || 0;
@@ -820,6 +889,12 @@ function ReportViewer({
               </div>
             </div>
           )}
+
+          {/* Jahresvergleich */}
+          <YoyChart charts={charts} />
+
+          {/* Energiefluss (Sankey) */}
+          <SankeyChart charts={charts} />
 
           {/* Befunde */}
           {findings.length > 0 && (
