@@ -36,7 +36,8 @@
       "Bash(export REDIS_URL=\"redis://192.168.178.142:6379/0\")",
       "Bash(node_modules/.bin/tsc --noEmit)",
       "Bash(curl -s -X POST \"http://192.168.178.142:8099/api/v1/auth/login\" -H \"Content-Type: application/json\" -d '{\"\"\"\"username\"\"\"\":\"\"\"\"admin\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"4711lolo\"\"\"\"}')",
-      "Bash(/usr/bin/npx tsc:*)"
+      "Bash(/usr/bin/npx tsc:*)",
+      "Bash(find /home/rico/addons/energymanagement-iso50001/backend/seed_data -type f -name *.json)"
     ]
   }
 }
