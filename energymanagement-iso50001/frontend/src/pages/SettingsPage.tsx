@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell, Monitor, Download, CheckCircle, AlertTriangle, XCircle, Plug2, HeartPulse, Database, Server, Clock, HardDrive, Play, RotateCcw, Wifi, WifiOff } from 'lucide-react';
+import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell, Monitor, Download, CheckCircle, AlertTriangle, XCircle, Plug2, HeartPulse, Database, Server, Clock, HardDrive, Play, RotateCcw, Wifi, WifiOff, ScrollText, Trash2 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 
 interface SettingEntry {
@@ -19,6 +19,7 @@ const TABS = [
   { id: 'notifications', label: 'Benachrichtigungen', icon: Bell },
   { id: 'integrations', label: 'Integrationen', icon: Plug2 },
   { id: 'system', label: 'System', icon: Monitor },
+  { id: 'logs', label: 'Log', icon: ScrollText },
 ] as const;
 
 export default function SettingsPage() {
@@ -91,7 +92,7 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="page-title">Einstellungen</h1>
-        {activeTab !== 'system' && activeTab !== 'integrations' && activeTab !== 'status' && (
+        {activeTab !== 'system' && activeTab !== 'integrations' && activeTab !== 'status' && activeTab !== 'logs' && (
           <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2">
             <Save className="w-4 h-4" />
             {saving ? 'Speichern...' : saved ? 'Gespeichert!' : 'Speichern'}
@@ -146,6 +147,7 @@ export default function SettingsPage() {
         )}
         {activeTab === 'integrations' && <IntegrationsPanel />}
         {activeTab === 'system' && <SystemPanel />}
+        {activeTab === 'logs' && <LogPanel />}
       </div>
     </div>
   );
@@ -1872,6 +1874,135 @@ function IntegrationsPanel() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ── Log-Panel ── */
+
+interface LogEntry {
+  timestamp: string;
+  level: string;
+  source: string;
+  message: string;
+  details: Record<string, unknown>;
+}
+
+const LEVEL_STYLE: Record<string, string> = {
+  ERROR: 'bg-red-50 text-red-700 border-red-200',
+  WARNING: 'bg-amber-50 text-amber-700 border-amber-200',
+  INFO: 'bg-blue-50 text-blue-700 border-blue-200',
+};
+
+function LogPanel() {
+  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  const loadLogs = async () => {
+    setLoading(true);
+    try {
+      const res = await apiClient.get('/api/v1/system/logs?limit=100');
+      setEntries(res.data.entries || []);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const clearLogs = async () => {
+    if (!confirm('Log-Puffer wirklich leeren?')) return;
+    await apiClient.delete('/api/v1/system/logs');
+    setEntries([]);
+  };
+
+  useEffect(() => {
+    loadLogs();
+  }, []);
+
+  const formatTs = (ts: string) => {
+    try {
+      return new Date(ts).toLocaleString('de-DE', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+      });
+    } catch {
+      return ts;
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-base font-semibold text-gray-900">Anwendungs-Log</h3>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Fehler und Warnungen der laufenden Sitzung (max. 200 Einträge, nicht persistent)
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={loadLogs}
+            className="btn-secondary flex items-center gap-1"
+            title="Aktualisieren"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Aktualisieren
+          </button>
+          <button
+            onClick={clearLogs}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-red-200 text-red-600 text-sm hover:bg-red-50"
+            title="Log leeren"
+          >
+            <Trash2 className="w-4 h-4" />
+            Leeren
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="py-8 text-center text-gray-400">Laden...</div>
+      ) : entries.length === 0 ? (
+        <div className="py-12 text-center">
+          <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-3" />
+          <p className="text-gray-500">Keine Fehler seit dem letzten Start</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {entries.map((entry, i) => {
+            const style = LEVEL_STYLE[entry.level] || LEVEL_STYLE.INFO;
+            const hasDetails = entry.details && Object.keys(entry.details).length > 0;
+            return (
+              <div key={i} className={`rounded-lg border p-3 ${style}`}>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-mono font-bold">{entry.level}</span>
+                      <span className="text-xs font-mono text-gray-500">{formatTs(entry.timestamp)}</span>
+                      <span className="text-xs text-gray-500 truncate">{entry.source}</span>
+                    </div>
+                    <p className="mt-1 text-sm font-medium break-words">{entry.message}</p>
+                  </div>
+                  {hasDetails && (
+                    <button
+                      onClick={() => setExpanded(expanded === i ? null : i)}
+                      className="text-xs underline whitespace-nowrap shrink-0"
+                    >
+                      {expanded === i ? 'Schließen' : 'Details'}
+                    </button>
+                  )}
+                </div>
+                {expanded === i && hasDetails && (
+                  <pre className="mt-2 text-xs bg-white/60 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">
+                    {JSON.stringify(entry.details, null, 2)}
+                  </pre>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
