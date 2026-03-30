@@ -10,7 +10,7 @@ import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text
 from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -75,6 +75,7 @@ class ImportBatch(Base, UUIDMixin):
     affected_meter_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="pending")
     error_details: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    file_content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     imported_by: Mapped[uuid.UUID] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
