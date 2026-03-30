@@ -52,6 +52,26 @@ async def lifespan(app: FastAPI):
         print(f"⚠ Datenbank nicht verfügbar: {e}")
         print("⚠ App startet ohne DB – nur Health-Check verfügbar")
 
+    # Alembic-Migrationen automatisch anwenden
+    if db_available:
+        try:
+            from alembic.config import Config
+            from alembic import command
+            import os
+            alembic_cfg = Config()
+            alembic_cfg.set_main_option(
+                "script_location",
+                str(Path(__file__).resolve().parent.parent / "alembic"),
+            )
+            alembic_cfg.set_main_option(
+                "sqlalchemy.url",
+                get_settings().database_url.replace("+asyncpg", ""),
+            )
+            command.upgrade(alembic_cfg, "head")
+            print("✓ Datenbankmigrationen angewendet")
+        except Exception as e:
+            print(f"⚠ Datenbankmigrationen fehlgeschlagen: {e}")
+
     # Seed-Daten laden (nur wenn DB verfügbar)
     if db_available:
         try:
