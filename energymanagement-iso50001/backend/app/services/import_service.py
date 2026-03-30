@@ -216,73 +216,83 @@ class ImportService:
         else:
             columns, rows, _ = self._parse_excel(batch.file_content)
 
+        # Max-Wert für NUMERIC(16,4): 999999999999.9999
+        MAX_VALUE = Decimal("999999999999.9999")
+
         if meter_column_mapping:
             # Multi-Meter-Import: Spalte 0 = Zeitstempel, übrige Spalten = Zählerwerte
             ts_col_name = columns[0] if columns else None
             if not ts_col_name:
                 raise ImportValidationError("Keine Zeitstempel-Spalte gefunden")
 
-            for i, row in enumerate(rows):
-                try:
-                    raw_ts = row.get(ts_col_name, "")
-                    timestamp = self._parse_date(str(raw_ts), date_format)
-                    if not timestamp:
-                        errors.append({"row": i + 1, "error": f"Ungültiges Datum: {raw_ts}"})
-                        continue
-
-                    for col_idx, meter_id in meter_column_mapping.items():
-                        col_name = columns[col_idx] if col_idx < len(columns) else None
-                        if not col_name:
-                            continue
-                        raw_val = row.get(col_name, "")
-                        if raw_val == "" or raw_val is None:
-                            continue
-                        value = self._parse_decimal(str(raw_val), decimal_separator)
-                        if value is None:
-                            errors.append({"row": i + 1, "error": f"Ungültiger Wert in Spalte '{col_name}': {raw_val}"})
+            async with self.db.no_autoflush:
+                for i, row in enumerate(rows):
+                    try:
+                        raw_ts = row.get(ts_col_name, "")
+                        timestamp = self._parse_date(str(raw_ts), date_format)
+                        if not timestamp:
+                            errors.append({"row": i + 1, "error": f"Ungültiges Datum: {raw_ts}"})
                             continue
 
-                        if skip_duplicates:
-                            existing = await self.db.execute(
-                                select(MeterReading).where(
-                                    MeterReading.meter_id == meter_id,
-                                    MeterReading.timestamp == timestamp,
-                                ).limit(1)
-                            )
-                            if existing.scalar_one_or_none():
-                                skipped += 1
+                        for col_idx, meter_id in meter_column_mapping.items():
+                            col_name = columns[col_idx] if col_idx < len(columns) else None
+                            if not col_name:
+                                continue
+                            raw_val = row.get(col_name)
+                            if raw_val == "" or raw_val is None:
+                                continue
+                            value = self._parse_decimal(raw_val, decimal_separator)
+                            if value is None:
+                                errors.append({"row": i + 1, "error": f"Ungültiger Wert in Spalte '{col_name}': {raw_val}"})
                                 continue
 
-                        prev = await self.db.execute(
-                            select(MeterReading)
-                            .where(
-                                MeterReading.meter_id == meter_id,
-                                MeterReading.timestamp < timestamp,
+                            if abs(value) > MAX_VALUE:
+                                errors.append({"row": i + 1, "error": f"Wert zu groß in Spalte '{col_name}': {value}"})
+                                continue
+
+                            if skip_duplicates:
+                                existing = await self.db.execute(
+                                    select(MeterReading).where(
+                                        MeterReading.meter_id == meter_id,
+                                        MeterReading.timestamp == timestamp,
+                                    ).limit(1)
+                                )
+                                if existing.scalar_one_or_none():
+                                    skipped += 1
+                                    continue
+
+                            prev = await self.db.execute(
+                                select(MeterReading)
+                                .where(
+                                    MeterReading.meter_id == meter_id,
+                                    MeterReading.timestamp < timestamp,
+                                )
+                                .order_by(MeterReading.timestamp.desc())
+                                .limit(1)
                             )
-                            .order_by(MeterReading.timestamp.desc())
-                            .limit(1)
-                        )
-                        prev_reading = prev.scalar_one_or_none()
-                        consumption = None
-                        if prev_reading:
-                            diff = value - prev_reading.value
-                            consumption = diff if diff >= 0 else None
+                            prev_reading = prev.scalar_one_or_none()
+                            consumption = None
+                            if prev_reading:
+                                diff = value - prev_reading.value
+                                consumption = diff if diff >= 0 else None
+                                if consumption and abs(consumption) > MAX_VALUE:
+                                    consumption = None
 
-                        reading = MeterReading(
-                            meter_id=meter_id,
-                            timestamp=timestamp,
-                            value=value,
-                            consumption=consumption,
-                            source="import",
-                            quality="measured",
-                            import_batch_id=batch.id,
-                        )
-                        self.db.add(reading)
-                        imported += 1
-                        affected_meters.add(meter_id)
+                            reading = MeterReading(
+                                meter_id=meter_id,
+                                timestamp=timestamp,
+                                value=value,
+                                consumption=consumption,
+                                source="import",
+                                quality="measured",
+                                import_batch_id=batch.id,
+                            )
+                            self.db.add(reading)
+                            imported += 1
+                            affected_meters.add(meter_id)
 
-                except Exception as e:
-                    errors.append({"row": i + 1, "error": str(e)})
+                    except Exception as e:
+                        errors.append({"row": i + 1, "error": str(e)})
         else:
             # Single-Meter-Import
             default_meter_id = None
@@ -294,75 +304,82 @@ class ImportService:
                 except (ValueError, AttributeError):
                     pass
 
-            for i, row in enumerate(rows):
-                try:
-                    raw_ts = row.get(ts_col, "")
-                    timestamp = self._parse_date(str(raw_ts), date_format)
-                    if not timestamp:
-                        errors.append({"row": i + 1, "error": f"Ungültiges Datum: {raw_ts}"})
-                        continue
-
-                    raw_val = row.get(val_col, "")
-                    value = self._parse_decimal(str(raw_val), decimal_separator)
-                    if value is None:
-                        errors.append({"row": i + 1, "error": f"Ungültiger Wert: {raw_val}"})
-                        continue
-
-                    row_meter_id = default_meter_id
-                    if meter_col and not row_meter_id:
-                        raw_mid = row.get(meter_col, "")
-                        try:
-                            row_meter_id = uuid.UUID(str(raw_mid))
-                        except (ValueError, AttributeError):
-                            errors.append({"row": i + 1, "error": f"Ungültige Zähler-ID: {raw_mid}"})
+            async with self.db.no_autoflush:
+                for i, row in enumerate(rows):
+                    try:
+                        raw_ts = row.get(ts_col, "")
+                        timestamp = self._parse_date(str(raw_ts), date_format)
+                        if not timestamp:
+                            errors.append({"row": i + 1, "error": f"Ungültiges Datum: {raw_ts}"})
                             continue
 
-                    if not row_meter_id:
-                        errors.append({"row": i + 1, "error": "Kein Zähler zugeordnet"})
-                        continue
+                        raw_val = row.get(val_col)
+                        value = self._parse_decimal(raw_val, decimal_separator)
+                        if value is None:
+                            errors.append({"row": i + 1, "error": f"Ungültiger Wert: {raw_val}"})
+                            continue
 
-                    if skip_duplicates:
-                        existing = await self.db.execute(
-                            select(MeterReading).where(
+                        if abs(value) > MAX_VALUE:
+                            errors.append({"row": i + 1, "error": f"Wert zu groß: {value}"})
+                            continue
+
+                        row_meter_id = default_meter_id
+                        if meter_col and not row_meter_id:
+                            raw_mid = row.get(meter_col, "")
+                            try:
+                                row_meter_id = uuid.UUID(str(raw_mid))
+                            except (ValueError, AttributeError):
+                                errors.append({"row": i + 1, "error": f"Ungültige Zähler-ID: {raw_mid}"})
+                                continue
+
+                        if not row_meter_id:
+                            errors.append({"row": i + 1, "error": "Kein Zähler zugeordnet"})
+                            continue
+
+                        if skip_duplicates:
+                            existing = await self.db.execute(
+                                select(MeterReading).where(
+                                    MeterReading.meter_id == row_meter_id,
+                                    MeterReading.timestamp == timestamp,
+                                ).limit(1)
+                            )
+                            if existing.scalar_one_or_none():
+                                skipped += 1
+                                continue
+
+                        prev = await self.db.execute(
+                            select(MeterReading)
+                            .where(
                                 MeterReading.meter_id == row_meter_id,
-                                MeterReading.timestamp == timestamp,
-                            ).limit(1)
+                                MeterReading.timestamp < timestamp,
+                            )
+                            .order_by(MeterReading.timestamp.desc())
+                            .limit(1)
                         )
-                        if existing.scalar_one_or_none():
-                            skipped += 1
-                            continue
+                        prev_reading = prev.scalar_one_or_none()
+                        consumption = None
+                        if prev_reading:
+                            diff = value - prev_reading.value
+                            consumption = diff if diff >= 0 else None
+                            if consumption and abs(consumption) > MAX_VALUE:
+                                consumption = None
 
-                    prev = await self.db.execute(
-                        select(MeterReading)
-                        .where(
-                            MeterReading.meter_id == row_meter_id,
-                            MeterReading.timestamp < timestamp,
+                        reading = MeterReading(
+                            meter_id=row_meter_id,
+                            timestamp=timestamp,
+                            value=value,
+                            consumption=consumption,
+                            source="import",
+                            quality="measured",
+                            notes=row.get(notes_col) if notes_col else None,
+                            import_batch_id=batch.id,
                         )
-                        .order_by(MeterReading.timestamp.desc())
-                        .limit(1)
-                    )
-                    prev_reading = prev.scalar_one_or_none()
-                    consumption = None
-                    if prev_reading:
-                        diff = value - prev_reading.value
-                        consumption = diff if diff >= 0 else None
+                        self.db.add(reading)
+                        imported += 1
+                        affected_meters.add(row_meter_id)
 
-                    reading = MeterReading(
-                        meter_id=row_meter_id,
-                        timestamp=timestamp,
-                        value=value,
-                        consumption=consumption,
-                        source="import",
-                        quality="measured",
-                        notes=row.get(notes_col) if notes_col else None,
-                        import_batch_id=batch.id,
-                    )
-                    self.db.add(reading)
-                    imported += 1
-                    affected_meters.add(row_meter_id)
-
-                except Exception as e:
-                    errors.append({"row": i + 1, "error": str(e)})
+                    except Exception as e:
+                        errors.append({"row": i + 1, "error": str(e)})
 
         batch.imported_count = imported
         batch.skipped_count = skipped
@@ -906,14 +923,28 @@ class ImportService:
 
         return None
 
-    def _parse_decimal(self, value: str, decimal_separator: str = ",") -> Decimal | None:
-        """Dezimalzahl parsen mit konfigurierbarem Dezimaltrennzeichen."""
-        if not value or value.strip() == "":
+    def _parse_decimal(self, value, decimal_separator: str = ",") -> Decimal | None:
+        """Dezimalzahl parsen mit konfigurierbarem Dezimaltrennzeichen.
+
+        Akzeptiert str, int oder float. Bei numerischen Typen (z.B. aus Excel)
+        wird der Dezimaltrenner nicht angewendet.
+        """
+        if value is None:
             return None
 
-        value = value.strip()
+        # Native Zahlen direkt konvertieren (Excel liefert float/int)
+        if isinstance(value, (int, float)):
+            try:
+                return Decimal(str(value))
+            except InvalidOperation:
+                return None
 
-        # Tausendertrennzeichen entfernen
+        # String-Verarbeitung
+        value = str(value).strip()
+        if value == "":
+            return None
+
+        # Tausendertrennzeichen entfernen (nur bei Strings – nicht bei Excel-Werten)
         if decimal_separator == ",":
             value = value.replace(".", "").replace(",", ".")
         else:
