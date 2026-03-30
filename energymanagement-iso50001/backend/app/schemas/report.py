@@ -58,6 +58,9 @@ class ReportCreate(BaseModel):
     sections: list[str] | None = None
     template: str = "default"
     language: str = "de"
+    # Bezugsgröße für Energieintensität (z.B. 500 m², 20 Mitarbeiter)
+    reference_value: float | None = None
+    reference_unit: str | None = "m²"
 
 
 class ReportUpdate(BaseModel):

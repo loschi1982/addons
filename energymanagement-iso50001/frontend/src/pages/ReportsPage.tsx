@@ -369,6 +369,9 @@ function CreateReportModal({
   const [rootMeters, setRootMeters] = useState<{ id: string; name: string; energy_type: string }[]>([]);
   const [siteId, setSiteId] = useState('');
   const [rootMeterId, setRootMeterId] = useState('');
+  // Bezugsgröße für Energieintensität
+  const [referenceValue, setReferenceValue] = useState('');
+  const [referenceUnit, setReferenceUnit] = useState('m²');
   // Inhalts-Toggles
   const [includeCo2, setIncludeCo2] = useState(true);
   const [includeWeather, setIncludeWeather] = useState(false);
@@ -454,6 +457,10 @@ function CreateReportModal({
 
       if (siteId) payload.site_id = siteId;
       if (rootMeterId) payload.root_meter_id = rootMeterId;
+      if (referenceValue) {
+        payload.reference_value = parseFloat(referenceValue);
+        payload.reference_unit = referenceUnit;
+      }
 
       await apiClient.post('/api/v1/reports', payload);
       onCreate();
@@ -597,6 +604,34 @@ function CreateReportModal({
               </div>
             </div>
           )}
+
+          {/* Bezugsgröße für Energieintensität */}
+          <div>
+            <label className="label mb-1">Bezugsgröße (optional)</label>
+            <p className="text-xs text-gray-400 mb-2">Ermöglicht die Angabe von kWh pro m², Mitarbeiter o.ä.</p>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                className="input flex-1"
+                placeholder="z.B. 500"
+                min="0"
+                step="any"
+                value={referenceValue}
+                onChange={(e) => setReferenceValue(e.target.value)}
+              />
+              <select
+                className="input w-32"
+                value={referenceUnit}
+                onChange={(e) => setReferenceUnit(e.target.value)}
+              >
+                <option value="m²">m²</option>
+                <option value="Mitarbeiter">Mitarbeiter</option>
+                <option value="Einheit">Einheit</option>
+                <option value="Tonne">Tonne</option>
+                <option value="Stück">Stück</option>
+              </select>
+            </div>
+          </div>
 
           {/* Berichts-Sektionen */}
           <div>
@@ -859,20 +894,38 @@ function ReportViewer({
           )}
 
           {/* KPI-Karten */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="rounded-lg border p-4 text-center">
-              <p className="text-2xl font-bold text-primary-600">{formatNumber(totalKwh)}</p>
-              <p className="text-xs text-gray-500">kWh Gesamtverbrauch</p>
-            </div>
-            <div className="rounded-lg border p-4 text-center">
-              <p className="text-2xl font-bold text-primary-600">{formatNumber(totalCo2)}</p>
-              <p className="text-xs text-gray-500">kg CO₂-Emissionen</p>
-            </div>
-            <div className="rounded-lg border p-4 text-center">
-              <p className="text-2xl font-bold text-primary-600">{meterCount}</p>
-              <p className="text-xs text-gray-500">Erfasste Zähler</p>
-            </div>
-          </div>
+          {(() => {
+            const intensityPerUnit = snapshot.energy_intensity_per_unit as number | null | undefined;
+            const refUnit = (snapshot.reference_unit as string) || 'm²';
+            const intensityPerDay = snapshot.energy_intensity_kwh_per_day as number | undefined;
+            return (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-lg border p-3 text-center">
+                  <p className="text-xl font-bold text-primary-600">{formatNumber(totalKwh)}</p>
+                  <p className="text-xs text-gray-500">kWh Gesamtverbrauch</p>
+                </div>
+                <div className="rounded-lg border p-3 text-center">
+                  <p className="text-xl font-bold text-primary-600">{formatNumber(totalCo2)}</p>
+                  <p className="text-xs text-gray-500">kg CO₂-Emissionen</p>
+                </div>
+                {intensityPerUnit != null ? (
+                  <div className="rounded-lg border p-3 text-center">
+                    <p className="text-xl font-bold text-primary-600">{intensityPerUnit.toFixed(1)}</p>
+                    <p className="text-xs text-gray-500">kWh/{refUnit}</p>
+                  </div>
+                ) : intensityPerDay ? (
+                  <div className="rounded-lg border p-3 text-center">
+                    <p className="text-xl font-bold text-primary-600">{intensityPerDay.toFixed(1)}</p>
+                    <p className="text-xs text-gray-500">kWh/Tag</p>
+                  </div>
+                ) : null}
+                <div className="rounded-lg border p-3 text-center">
+                  <p className="text-xl font-bold text-primary-600">{meterCount}</p>
+                  <p className="text-xs text-gray-500">Erfasste Zähler</p>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Energiebilanz */}
           {(snapshot.energy_balance as Record<string, unknown>[])?.length > 0 && (
@@ -1016,6 +1069,9 @@ function ReportViewer({
                     {!!r.savings_kwh && (
                       <p className="mt-1 text-sm font-medium text-green-600">
                         Einsparpotenzial: {formatNumber(r.savings_kwh as number)} kWh/a
+                        {!!r.savings_note && (
+                          <span className="ml-1 font-normal text-gray-400 text-xs">({String(r.savings_note)})</span>
+                        )}
                       </p>
                     )}
                   </div>

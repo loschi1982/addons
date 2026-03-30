@@ -250,6 +250,9 @@ class ReportService:
         sections = data.pop("sections", None)
         data.pop("template", None)
         data.pop("language", None)
+        # Bezugsgröße für Energieintensität
+        reference_value = data.pop("reference_value", None)
+        reference_unit = data.pop("reference_unit", "m²") or "m²"
         # Perioden-Felder entfernen (werden berechnet)
         year = data.pop("year", None)
         quarter = data.pop("quarter", None)
@@ -270,7 +273,9 @@ class ReportService:
 
         # Daten-Snapshot erstellen
         snapshot = await self._create_data_snapshot(
-            period_start, period_end, meter_ids
+            period_start, period_end, meter_ids,
+            reference_value=reference_value,
+            reference_unit=reference_unit,
         )
 
         # Scope-Konfiguration für Charts und Audit-Trail
@@ -291,6 +296,8 @@ class ReportService:
             "include_cost_flow": include_cost_flow,
             "include_cost_overview": include_cost_overview,
             "sections": sections,
+            "reference_value": reference_value,
+            "reference_unit": reference_unit,
         }
 
         # Diagramm-Daten sammeln
@@ -312,7 +319,7 @@ class ReportService:
 
         # Ergebnisse und Empfehlungen generieren
         findings = await self._generate_findings(snapshot, co2_summary)
-        recommendations = await self._generate_recommendations(findings)
+        recommendations = await self._generate_recommendations(findings, snapshot)
         summary_text = await self._generate_summary(snapshot, co2_summary)
 
         report = AuditReport(
@@ -495,6 +502,8 @@ class ReportService:
         meter_count = snapshot.get("meter_count", 0)
         co2_intensity = co2.get("avg_co2_g_per_kwh", 0)
         energy_intensity = snapshot.get("energy_intensity_kwh_per_day", 0)
+        energy_intensity_per_unit = snapshot.get("energy_intensity_per_unit")
+        reference_unit = snapshot.get("reference_unit") or "m²"
         co2_trend = co2.get("trend_vs_previous_year")
 
         # YoY-Delta aus Vergleichsdaten berechnen
@@ -551,7 +560,11 @@ class ReportService:
                 f"({cost_kwh_ct:.1f}&nbsp;ct/kWh)"
             )
 
-        if energy_intensity > 0:
+        if energy_intensity_per_unit is not None:
+            bullets.append(
+                f"Energieintensität: <strong>{energy_intensity_per_unit:,.1f}&nbsp;kWh/{reference_unit}</strong>"
+            )
+        elif energy_intensity > 0:
             bullets.append(f"Energieintensität: <strong>{energy_intensity:,.1f}&nbsp;kWh/Tag</strong>")
 
         bullets_html = "".join(f"<li>{b}</li>" for b in bullets)
@@ -591,10 +604,12 @@ class ReportService:
 
         reco_html = ""
         for r in recommendations:
-            savings = (
-                f"<p class='savings'>Einsparpotenzial: {r['savings_kwh']:,.0f} kWh/a</p>"
-                if r.get("savings_kwh") else ""
-            )
+            savings_parts = []
+            if r.get("savings_kwh"):
+                savings_parts.append(f"Einsparpotenzial: <strong>{r['savings_kwh']:,.0f}&nbsp;kWh/a</strong>")
+            if r.get("savings_note"):
+                savings_parts.append(f"<span style='color:#6B7280'>({r['savings_note']})</span>")
+            savings = f"<p class='savings'>{' '.join(savings_parts)}</p>" if savings_parts else ""
             reco_html += (
                 f"<div class='recommendation'>"
                 f"<strong>{r.get('title', '')}</strong>"
@@ -669,6 +684,21 @@ class ReportService:
             <div class="value">{cost_net:,.0f}</div>
             <div class="unit">€ netto</div>
             <div class="label">Energiekosten</div>
+        </div>"""
+
+        if energy_intensity_per_unit is not None:
+            kpi_cards += f"""
+        <div class="kpi-card">
+            <div class="value">{energy_intensity_per_unit:,.1f}</div>
+            <div class="unit">kWh/{reference_unit}</div>
+            <div class="label">Energieintensität</div>
+        </div>"""
+        elif energy_intensity > 0:
+            kpi_cards += f"""
+        <div class="kpi-card">
+            <div class="value">{energy_intensity:,.1f}</div>
+            <div class="unit">kWh/Tag</div>
+            <div class="label">Energieintensität</div>
         </div>"""
 
         kpi_cards += f"""
@@ -906,6 +936,8 @@ p {{ margin: 5pt 0; }}
         start: date,
         end: date,
         meter_ids: list[uuid.UUID] | None = None,
+        reference_value: float | None = None,
+        reference_unit: str | None = None,
     ) -> dict:
         """Eingefrorenen Daten-Snapshot für den Bericht erstellen."""
         from app.models.meter import Meter
@@ -1020,6 +1052,12 @@ p {{ margin: 5pt 0; }}
             "monthly_trend": monthly_trend,
             "energy_intensity_kwh_per_day": round(energy_intensity_kwh_per_day, 1),
             "days_in_period": days_in_period,
+            "reference_value": reference_value,
+            "reference_unit": reference_unit,
+            "energy_intensity_per_unit": (
+                round(float(total_kwh) / reference_value, 1)
+                if reference_value and reference_value > 0 else None
+            ),
         }
 
     async def _create_co2_summary(self, start: date, end: date) -> dict:
@@ -1217,32 +1255,75 @@ p {{ margin: 5pt 0; }}
 
         return findings
 
-    async def _generate_recommendations(self, findings: list[dict]) -> list[dict]:
-        """Empfehlungen basierend auf Befunden generieren."""
+    async def _generate_recommendations(
+        self, findings: list[dict], snapshot: dict | None = None
+    ) -> list[dict]:
+        """Empfehlungen basierend auf Befunden generieren, inkl. Einsparpotenzial-Schätzung."""
         recommendations = []
+        total_kwh = float((snapshot or {}).get("total_consumption_kwh", 0))
+        top_consumers = (snapshot or {}).get("top_consumers", [])
+        top_kwh = float(top_consumers[0]["consumption_kwh"]) if top_consumers else 0
 
         for finding in findings:
             if finding.get("category") == "energy_mix":
+                # Einsparpotenzial: ca. 10% durch Diversifizierung / Eigenproduktion (konservativ)
+                savings = round(total_kwh * 0.10) if total_kwh > 0 else None
                 recommendations.append({
                     "title": "Energiemix diversifizieren",
-                    "description": "Prüfen Sie den Einsatz erneuerbarer Energien (PV-Anlage, Wärmepumpe) um die Abhängigkeit von einem Energieträger zu reduzieren.",
+                    "description": (
+                        "Prüfen Sie den Einsatz erneuerbarer Energien (PV-Anlage, Wärmepumpe) "
+                        "um die Abhängigkeit von einem Energieträger zu reduzieren. "
+                        "Eine 10-kWp-PV-Anlage erzeugt typischerweise ca. 9.500 kWh/a."
+                    ),
                     "priority": "mittel",
-                    "savings_kwh": None,
+                    "savings_kwh": savings,
+                    "savings_note": "Schätzung: ~10% Eigenerzeugungspotenzial",
                 })
             elif finding.get("category") == "co2" and finding.get("severity") == "hoch":
+                # Einsparpotenzial: 15% durch Effizienzmaßnahmen (LED, Heizungsopt., Dämmung)
+                savings = round(total_kwh * 0.15) if total_kwh > 0 else None
                 recommendations.append({
                     "title": "CO₂-Reduktionsmaßnahmen einleiten",
-                    "description": "Angesichts steigender Emissionen sollten kurzfristige Maßnahmen (LED-Umrüstung, Heizungsoptimierung) sowie mittelfristige Investitionen (Gebäudedämmung, PV) geprüft werden.",
+                    "description": (
+                        "Angesichts steigender Emissionen sollten kurzfristige Maßnahmen "
+                        "(LED-Umrüstung ca. 50–70% Strom, Heizungsoptimierung ca. 10–15%) "
+                        "sowie mittelfristige Investitionen (Gebäudedämmung, PV) geprüft werden."
+                    ),
                     "priority": "hoch",
-                    "savings_kwh": None,
+                    "savings_kwh": savings,
+                    "savings_note": "Schätzung: ~15% durch kombinierte Effizienzmaßnahmen",
                 })
             elif finding.get("category") == "data_quality":
                 recommendations.append({
                     "title": "Datenerfassung verbessern",
-                    "description": "Automatisierte Zählerablesung (Smart Meter, Shelly) implementieren um Datenlücken zu vermeiden.",
+                    "description": (
+                        "Automatisierte Zählerablesung (Smart Meter, Shelly) implementieren "
+                        "um Datenlücken zu vermeiden und die Messdatenqualität zu erhöhen."
+                    ),
                     "priority": "hoch",
                     "savings_kwh": None,
+                    "savings_note": None,
                 })
+
+        # Immer: Top-Verbraucher-Optimierung vorschlagen wenn vorhanden und signifikant
+        if top_kwh > 0 and total_kwh > 0 and (top_kwh / total_kwh) > 0.30:
+            top_name = top_consumers[0].get("name", "Hauptverbraucher")
+            energy_type = top_consumers[0].get("energy_type", "")
+            # Einsparschätzung je Energietyp: 10-20% Optimierungspotenzial
+            factor = 0.20 if energy_type == "electricity" else 0.12
+            savings = round(top_kwh * factor)
+            recommendations.append({
+                "title": f"Optimierung: {top_name}",
+                "description": (
+                    f"{top_name} ist mit {top_kwh:,.0f} kWh der größte Einzelverbraucher. "
+                    f"Durch Betriebsoptimierung (Lastspitzen vermeiden, Bedarfsregelung, "
+                    f"{'Frequenzumrichter / LED-Optimierung' if energy_type == 'electricity' else 'Dämmung / Thermostatregelung'}) "
+                    f"lassen sich erfahrungsgemäß {int(factor * 100)}% einsparen."
+                ),
+                "priority": "hoch",
+                "savings_kwh": savings,
+                "savings_note": f"Schätzung: ~{int(factor * 100)}% Optimierungspotenzial am Hauptverbraucher",
+            })
 
         return recommendations
 
