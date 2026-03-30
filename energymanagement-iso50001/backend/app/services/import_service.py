@@ -194,11 +194,13 @@ class ImportService:
             elif target == "notes":
                 notes_col = src_col
 
-        # Bei Multi-Meter-Import (meter_column_mapping) wird kein val_col benötigt
-        if not ts_col or (not val_col and not meter_column_mapping):
-            raise ImportValidationError(
-                "Spalten-Mapping unvollständig: 'timestamp' und 'value' sind Pflicht"
-            )
+        # Bei Multi-Meter-Import (meter_column_mapping) werden ts_col/val_col
+        # nicht aus column_mapping gelesen – die Zeitstempel-Spalte ist Spalte 0
+        if not meter_column_mapping:
+            if not ts_col or not val_col:
+                raise ImportValidationError(
+                    "Spalten-Mapping unvollständig: 'timestamp' und 'value' sind Pflicht"
+                )
 
         # TODO: Datei aus Storage laden – für Phase 2 erwarten wir,
         # dass die Daten im Batch gespeichert wurden. Für jetzt
