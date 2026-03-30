@@ -225,7 +225,7 @@ class ImportService:
             if not ts_col_name:
                 raise ImportValidationError("Keine Zeitstempel-Spalte gefunden")
 
-            async with self.db.no_autoflush:
+            with self.db.no_autoflush:
                 for i, row in enumerate(rows):
                     try:
                         raw_ts = row.get(ts_col_name, "")
@@ -304,7 +304,7 @@ class ImportService:
                 except (ValueError, AttributeError):
                     pass
 
-            async with self.db.no_autoflush:
+            with self.db.no_autoflush:
                 for i, row in enumerate(rows):
                     try:
                         raw_ts = row.get(ts_col, "")
