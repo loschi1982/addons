@@ -52,26 +52,43 @@ async def lifespan(app: FastAPI):
         print(f"⚠ Datenbank nicht verfügbar: {e}")
         print("⚠ App startet ohne DB – nur Health-Check verfügbar")
 
-    # Alembic-Migrationen automatisch anwenden (im Thread-Executor,
-    # damit asyncio.run() im env.py einen eigenen Loop starten kann)
+    # Fehlende Spalten automatisch anlegen (idempotent)
     if db_available:
         try:
-            import asyncio
-            from alembic.config import Config
-            from alembic import command
+            from sqlalchemy import text
+            from app.core.database import _engine as engine
 
-            alembic_dir = Path(__file__).resolve().parent.parent / "alembic"
-
-            def _run_alembic():
-                cfg = Config()
-                cfg.set_main_option("script_location", str(alembic_dir))
-                command.upgrade(cfg, "head")
-
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, _run_alembic)
-            print("✓ Datenbankmigrationen angewendet")
+            async with engine.begin() as conn:
+                await conn.execute(text("""
+                    DO $$ BEGIN
+                        -- Consumer-Lebenszyklus (2024_01_09_001)
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='consumers' AND column_name='manufacturer') THEN
+                            ALTER TABLE consumers ADD COLUMN manufacturer VARCHAR(255);
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='consumers' AND column_name='model') THEN
+                            ALTER TABLE consumers ADD COLUMN model VARCHAR(255);
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='consumers' AND column_name='serial_number') THEN
+                            ALTER TABLE consumers ADD COLUMN serial_number VARCHAR(255);
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='consumers' AND column_name='commissioned_at') THEN
+                            ALTER TABLE consumers ADD COLUMN commissioned_at DATE;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='consumers' AND column_name='decommissioned_at') THEN
+                            ALTER TABLE consumers ADD COLUMN decommissioned_at DATE;
+                        END IF;
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='consumers' AND column_name='replaced_by_id') THEN
+                            ALTER TABLE consumers ADD COLUMN replaced_by_id UUID REFERENCES consumers(id);
+                        END IF;
+                        -- Import-Batch: Dateiinhalt (2024_01_10_001)
+                        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='import_batches' AND column_name='file_content') THEN
+                            ALTER TABLE import_batches ADD COLUMN file_content BYTEA;
+                        END IF;
+                    END $$;
+                """))
+            print("✓ Datenbankschema aktualisiert")
         except Exception as e:
-            print(f"⚠ Datenbankmigrationen fehlgeschlagen: {e}")
+            print(f"⚠ Schema-Aktualisierung fehlgeschlagen: {e}")
 
     # Seed-Daten laden (nur wenn DB verfügbar)
     if db_available:
