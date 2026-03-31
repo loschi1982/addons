@@ -70,7 +70,14 @@
       "Bash(xargs -I{} head -15 {})",
       "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1ZTIxZGZjOC0xOWUwLTRkYTktYWJlNy04YjUxNWRjZmNmODIiLCJyb2xlIjoiYWRtaW4iLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzc0OTQ5Mjg1LCJleHAiOjE3NzQ5NTEwODV9.pQlk_Kl1XUkBk0r-KTFKYW9K5-66KMAz20G8hciN7uE\" curl -s -X POST \"http://192.168.178.142:8099/api/v1/reports\" -H \"Authorization: Bearer $TOKEN\" -H \"Content-Type: application/json\" -d '{\"\"\"\"title\"\"\"\":\"\"\"\"Test nach Migration\"\"\"\",\"\"\"\"report_type\"\"\"\":\"\"\"\"annual\"\"\"\",\"\"\"\"period_start\"\"\"\":\"\"\"\"2025-01-01\"\"\"\",\"\"\"\"period_end\"\"\"\":\"\"\"\"2025-12-31\"\"\"\",\"\"\"\"include_co2\"\"\"\":true,\"\"\"\"include_sankey\"\"\"\":true,\"\"\"\"include_yoy_comparison\"\"\"\":true}')",
       "Bash(grep -n \"^revision\\\\|^down_revision\" /home/rico/addons/energymanagement-iso50001/backend/alembic/versions/2024_01_1*.py)",
-      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1ZTIxZGZjOC0xOWUwLTRkYTktYWJlNy04YjUxNWRjZmNmODIiLCJyb2xlIjoiYWRtaW4iLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzc0OTQ5Mjg1LCJleHAiOjE3NzQ5NTEwODV9.pQlk_Kl1XUkBk0r-KTFKYW9K5-66KMAz20G8hciN7uE\" curl -s \"http://192.168.178.142:8099/api/v1/reports/da0f5bc3-9760-4c6f-9b29-64084ee62103\" -H \"Authorization: Bearer $TOKEN\")"
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1ZTIxZGZjOC0xOWUwLTRkYTktYWJlNy04YjUxNWRjZmNmODIiLCJyb2xlIjoiYWRtaW4iLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzc0OTQ5Mjg1LCJleHAiOjE3NzQ5NTEwODV9.pQlk_Kl1XUkBk0r-KTFKYW9K5-66KMAz20G8hciN7uE\" curl -s \"http://192.168.178.142:8099/api/v1/reports/da0f5bc3-9760-4c6f-9b29-64084ee62103\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''app/services/report_service.py''\\).read\\(\\)\\); print\\(''OK''\\)\")",
+      "Bash(/usr/local/bin/npm run:*)",
+      "Bash(~/.nvm/versions/node/v20.20.1/bin/node ~/.nvm/versions/node/v20.20.1/bin/npm --prefix /home/rico/addons/energymanagement-iso50001/frontend run type-check)",
+      "Bash(PATH=/home/rico/.nvm/versions/node/v20.20.1/bin:$PATH node --version)",
+      "Bash(PATH=/home/rico/.nvm/versions/node/v20.20.1/bin:$PATH npm --prefix /home/rico/addons/energymanagement-iso50001/frontend run type-check)",
+      "Bash(PATH=/home/rico/.nvm/versions/node/v20.20.1/bin:$PATH node ~/.nvm/versions/node/v20.20.1/bin/tsc --noEmit)",
+      "Bash(PATH=/home/rico/.nvm/versions/node/v20.20.1/bin:$PATH node /home/rico/addons/energymanagement-iso50001/frontend/node_modules/.bin/tsc --noEmit --project /home/rico/addons/energymanagement-iso50001/frontend/tsconfig.json)"
     ]
   }
 }
