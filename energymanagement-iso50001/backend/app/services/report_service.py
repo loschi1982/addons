@@ -540,14 +540,29 @@ class ReportService:
 
         # ── Management-Zusammenfassung: Kernaussagen ──
         bullets = []
-        if yoy_delta_pct is not None:
-            sign = "+" if yoy_delta_pct > 0 else ""
-            bullets.append(
-                f"Gesamtverbrauch: <strong>{total_kwh:,.0f} kWh</strong> "
-                f"({sign}{yoy_delta_pct:.1f}&nbsp;% ggü.&nbsp;Vorjahr)"
-            )
+        # Verbrauch je Energieart separat ausweisen (keine gemischte kWh-Summe)
+        et_summary = energy_by_type  # bereits oben extrahiert
+        if et_summary:
+            for et_key, et_data in et_summary.items():
+                et_label = et_data.get("label", et_key)
+                et_total_n = et_data.get("total_native", 0)
+                et_unit = et_data.get("unit", "kWh")
+                if et_total_n > 0:
+                    bullet = f"{et_label}: <strong>{et_total_n:,.1f}&nbsp;{et_unit}</strong>"
+                    if yoy_delta_pct is not None and et_key == list(et_summary.keys())[0]:
+                        sign = "+" if yoy_delta_pct > 0 else ""
+                        bullet += f" ({sign}{yoy_delta_pct:.1f}&nbsp;% ggü.&nbsp;Vorjahr)"
+                    bullets.append(bullet)
         else:
-            bullets.append(f"Gesamtverbrauch: <strong>{total_kwh:,.0f}&nbsp;kWh</strong>")
+            # Fallback wenn energy_by_type fehlt
+            if yoy_delta_pct is not None:
+                sign = "+" if yoy_delta_pct > 0 else ""
+                bullets.append(
+                    f"Gesamtverbrauch: <strong>{total_kwh:,.0f}&nbsp;kWh</strong> "
+                    f"({sign}{yoy_delta_pct:.1f}&nbsp;% ggü.&nbsp;Vorjahr)"
+                )
+            else:
+                bullets.append(f"Gesamtverbrauch: <strong>{total_kwh:,.0f}&nbsp;kWh</strong>")
 
         if total_co2 > 0:
             co2_t = total_co2 / 1000
@@ -557,27 +572,34 @@ class ReportService:
             bullets.append(co2_str)
 
         top_consumers = snapshot.get("top_consumers", [])
-        if top_consumers and total_kwh > 0:
+        if top_consumers:
             top = top_consumers[0]
-            top_share = top["consumption_kwh"] / total_kwh * 100
+            top_native = top.get("consumption_native")
+            top_unit = top.get("unit", "kWh")
+            top_val_str = (
+                f"{top_native:,.1f}&nbsp;{top_unit}"
+                if top_native is not None and top_native > 0
+                else f"{top['consumption_kwh']:,.0f}&nbsp;kWh"
+            )
             bullets.append(
-                f"Größter Verbraucher: <strong>{top['name']}</strong> mit {top_share:.1f}&nbsp;% Anteil"
+                f"Größter Verbraucher: <strong>{top['name']}</strong> ({top_val_str})"
             )
 
         if cost_summary.get("available"):
             cost_net = cost_summary.get("total_cost_net", 0)
-            cost_kwh_ct = (cost_net / total_kwh * 100) if total_kwh > 0 else 0
             bullets.append(
-                f"Gesamtkosten: <strong>{cost_net:,.2f}&nbsp;€</strong> netto "
-                f"({cost_kwh_ct:.1f}&nbsp;ct/kWh)"
+                f"Gesamtkosten: <strong>{cost_net:,.2f}&nbsp;€</strong> netto"
             )
 
         if energy_intensity_per_unit is not None:
             bullets.append(
-                f"Energieintensität: <strong>{energy_intensity_per_unit:,.1f}&nbsp;kWh/{reference_unit}</strong>"
+                f"Energieintensität Strom: "
+                f"<strong>{energy_intensity_per_unit:,.1f}&nbsp;kWh/{reference_unit}</strong>"
             )
         elif energy_intensity > 0:
-            bullets.append(f"Energieintensität: <strong>{energy_intensity:,.1f}&nbsp;kWh/Tag</strong>")
+            bullets.append(
+                f"Energieintensität: <strong>{energy_intensity:,.1f}&nbsp;kWh/Tag</strong>"
+            )
 
         bullets_html = "".join(f"<li>{b}</li>" for b in bullets)
 
@@ -600,10 +622,16 @@ class ReportService:
 
         top_rows = ""
         for item in top_consumers:
+            native = item.get("consumption_native")
+            unit = item.get("unit", "kWh")
+            if native is not None and native > 0:
+                display_val = f"{native:,.1f}&nbsp;{unit}"
+            else:
+                display_val = f"{item.get('consumption_kwh', 0):,.1f}&nbsp;kWh"
             top_rows += (
                 f"<tr><td>{item.get('name', '')}</td>"
                 f"<td>{item.get('energy_type', '')}</td>"
-                f"<td class='num'>{item.get('consumption_kwh', 0):,.1f}</td></tr>"
+                f"<td class='num'>{display_val}</td></tr>"
             )
 
         findings_html = ""
@@ -740,13 +768,29 @@ class ReportService:
         elif scope.get("root_meter_id"):
             scope_info = f"<div class='scope'>Gefiltert nach Zählerstrang-ID: {scope['root_meter_id']}</div>"
 
-        # KPI-Karten (erweitert)
-        kpi_cards = f"""
+        # KPI-Karten: pro Energieart eine Karte (native Einheit), dann CO₂
+        kpi_cards = ""
+        if et_summary:
+            for et_key, et_data in et_summary.items():
+                et_label_kpi = et_data.get("label", et_key)
+                et_unit_kpi = et_data.get("unit", "kWh")
+                et_color_kpi = et_data.get("color", "#1B5E7B")
+                et_total_kpi = et_data.get("total_native", 0)
+                kpi_cards += f"""
+        <div class="kpi-card">
+            <div class="value" style="color:{et_color_kpi}">{et_total_kpi:,.0f}</div>
+            <div class="unit">{et_unit_kpi}</div>
+            <div class="label">{et_label_kpi}</div>
+        </div>"""
+        else:
+            kpi_cards += f"""
         <div class="kpi-card">
             <div class="value">{total_kwh:,.0f}</div>
             <div class="unit">kWh</div>
             <div class="label">Gesamtverbrauch</div>
-        </div>
+        </div>"""
+
+        kpi_cards += f"""
         <div class="kpi-card">
             <div class="value">{total_co2 / 1000:,.2f}</div>
             <div class="unit">t CO₂e</div>
@@ -1035,7 +1079,7 @@ p {{ margin: 5pt 0; }}
     <p>Die f&uuml;nf gr&ouml;&szlig;ten Energieverbraucher im Berichtszeitraum (Pareto-Analyse).</p>
     <table>
         <thead>
-            <tr><th>Z&auml;hler</th><th>Energietyp</th><th class="num">Verbrauch (kWh)</th></tr>
+            <tr><th>Z&auml;hler</th><th>Energieart</th><th class="num">Verbrauch (native Einheit)</th></tr>
         </thead>
         <tbody>{top_rows}</tbody>
     </table>
@@ -1102,7 +1146,8 @@ p {{ margin: 5pt 0; }}
                 "meter_id": str(meter.id),
                 "name": meter.name,
                 "energy_type": meter.energy_type,
-                "consumption_kwh": float(kwh),
+                "consumption_kwh": float(kwh),        # kWh-Äquivalent (nur für Sortierung)
+                "consumption_native": float(raw),     # Nativer Wert in meter.unit
                 "unit": meter.unit,
             })
 
@@ -1561,35 +1606,50 @@ p {{ margin: 5pt 0; }}
                         name = m.name if m else f"Zähler {meter_id[:8]}"
                     except Exception:
                         name = f"Zähler {meter_id[:8]}"
-                meter_deltas.append({"name": name, "delta": delta})
+                meter_deltas.append({"meter_id": meter_id, "name": name, "delta": delta})
 
             meter_deltas.sort(key=lambda x: abs(x["delta"]), reverse=True)
             top3 = meter_deltas[:3]
             if top3:
-                parts = [
-                    f"{d['name']} ({'+' if d['delta'] > 0 else ''}{d['delta']:,.0f}&nbsp;kWh)"
-                    for d in top3
-                ]
+                # Zähler-Einheit aus top_consumers nachschlagen
+                tc_unit_map = {
+                    str(t["meter_id"]): t.get("unit", "kWh")
+                    for t in snapshot.get("top_consumers", [])
+                }
+                parts = []
+                for d in top3:
+                    unit_d = tc_unit_map.get(d.get("meter_id", ""), "kWh")
+                    sign = "+" if d["delta"] > 0 else ""
+                    parts.append(f"{d['name']} ({sign}{d['delta']:,.0f}&nbsp;{unit_d})")
                 bullets.append(
                     f"Haupttreiber (Jahresvergleich): {', '.join(parts)}."
                 )
 
-        # ── 3. Monatliche Peaks ──
-        monthly_trend = [m for m in snapshot.get("monthly_trend", []) if m.get("consumption_kwh", 0) > 0]
-        if len(monthly_trend) >= 2:
-            peak = max(monthly_trend, key=lambda m: m["consumption_kwh"])
-            low = min(monthly_trend, key=lambda m: m["consumption_kwh"])
-            avg = sum(m["consumption_kwh"] for m in monthly_trend) / len(monthly_trend)
-            peak_name = MONTH_NAMES[peak["month"] - 1]
-            low_name = MONTH_NAMES[low["month"] - 1]
-            peak_dev = (peak["consumption_kwh"] / avg - 1) * 100
-            low_dev = (low["consumption_kwh"] / avg - 1) * 100
-            bullets.append(
-                f"Monatliche Verteilung: Spitzenmonat <strong>{peak_name}</strong> mit "
-                f"{peak['consumption_kwh']:,.0f}&nbsp;kWh ({peak_dev:+.0f}%&nbsp;vs.&nbsp;Ø), "
-                f"Niedrigstmonat <strong>{low_name}</strong> mit "
-                f"{low['consumption_kwh']:,.0f}&nbsp;kWh ({low_dev:+.0f}%&nbsp;vs.&nbsp;Ø)."
-            )
+        # ── 3. Monatliche Peaks je Energieart ──
+        energy_by_type_snap = snapshot.get("energy_by_type", {})
+        if energy_by_type_snap:
+            for et_key, et_data in energy_by_type_snap.items():
+                et_label_n = et_data.get("label", et_key)
+                et_unit_n = et_data.get("unit", "kWh")
+                mt = [
+                    m for m in et_data.get("monthly_trend", [])
+                    if m.get("consumption_native", 0) > 0
+                ]
+                if len(mt) >= 2:
+                    peak = max(mt, key=lambda m: m["consumption_native"])
+                    low = min(mt, key=lambda m: m["consumption_native"])
+                    avg = sum(m["consumption_native"] for m in mt) / len(mt)
+                    peak_dev = (peak["consumption_native"] / avg - 1) * 100
+                    low_dev = (low["consumption_native"] / avg - 1) * 100
+                    bullets.append(
+                        f"Monatliche Verteilung {et_label_n}: "
+                        f"Spitzenmonat <strong>{MONTH_NAMES[peak['month'] - 1]}</strong> "
+                        f"({peak['consumption_native']:,.1f}&nbsp;{et_unit_n}, "
+                        f"{peak_dev:+.0f}%&nbsp;vs.&nbsp;Ø), "
+                        f"Niedrigstmonat <strong>{MONTH_NAMES[low['month'] - 1]}</strong> "
+                        f"({low['consumption_native']:,.1f}&nbsp;{et_unit_n}, "
+                        f"{low_dev:+.0f}%&nbsp;vs.&nbsp;Ø)."
+                    )
 
         # ── 4. Nutzer-Kommentar ──
         if analysis_comment and analysis_comment.strip():
