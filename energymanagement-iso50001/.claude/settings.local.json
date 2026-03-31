@@ -53,7 +53,23 @@
       "Bash(~/.nvm/versions/node/v20.20.1/bin/node ~/.nvm/versions/node/v20.20.1/bin/../lib/node_modules/typescript/bin/tsc --noEmit)",
       "Bash(~/.nvm/versions/node/v20.20.1/bin/node /home/rico/addons/energymanagement-iso50001/frontend/node_modules/.bin/tsc --noEmit)",
       "Bash(echo \"Exit: $?\")",
-      "Bash(~/.nvm/versions/node/v20.20.1/bin/node node_modules/.bin/tsc --noEmit)"
+      "Bash(~/.nvm/versions/node/v20.20.1/bin/node node_modules/.bin/tsc --noEmit)",
+      "Bash(curl -s -X POST http://192.168.178.142:8099/api/v1/auth/token -H \"Content-Type: application/x-www-form-urlencoded\" -d \"username=admin&password=admin\")",
+      "Bash(curl -s -X POST http://192.168.178.142:8099/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"\"username\"\":\"\"admin\"\",\"\"password\"\":\"\"admin\"\"}')",
+      "Bash(curl -s -X POST http://192.168.178.142:8099/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"\"username\"\":\"\"admin\"\",\"\"password\"\":\"\"4711lolo\"\"}')",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1ZTIxZGZjOC0xOWUwLTRkYTktYWJlNy04YjUxNWRjZmNmODIiLCJyb2xlIjoiYWRtaW4iLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzc0OTQ5Mjg1LCJleHAiOjE3NzQ5NTEwODV9.pQlk_Kl1XUkBk0r-KTFKYW9K5-66KMAz20G8hciN7uE\" curl -s http://192.168.178.142:8099/api/v1/reports?page_size=5 -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1ZTIxZGZjOC0xOWUwLTRkYTktYWJlNy04YjUxNWRjZmNmODIiLCJyb2xlIjoiYWRtaW4iLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzc0OTQ5Mjg1LCJleHAiOjE3NzQ5NTEwODV9.pQlk_Kl1XUkBk0r-KTFKYW9K5-66KMAz20G8hciN7uE\" curl -s \"http://192.168.178.142:8099/api/v1/reports?page_size=20\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(ssh rico@192.168.178.142 \"docker ps --format ''table {{.Names}}\\\\t{{.Status}}''\")",
+      "Bash(ssh -o StrictHostKeyChecking=no rico@192.168.178.142 \"docker ps --format ''table {{.Names}}\\\\t{{.Status}}''\")",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1ZTIxZGZjOC0xOWUwLTRkYTktYWJlNy04YjUxNWRjZmNmODIiLCJyb2xlIjoiYWRtaW4iLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzc0OTQ5Mjg1LCJleHAiOjE3NzQ5NTEwODV9.pQlk_Kl1XUkBk0r-KTFKYW9K5-66KMAz20G8hciN7uE\")",
+      "Bash(curl -s -X POST \"http://192.168.178.142:8099/api/v1/reports/104ec0bd-486c-4b7f-a0bd-a9b26e575168/generate-pdf\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(curl -s -X POST \"http://192.168.178.142:8099/api/v1/reports/104ec0bd-486c-4b7f-a0bd-a9b26e575168/generate\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(curl -s \"http://192.168.178.142:8099/api/v1/reports/104ec0bd-486c-4b7f-a0bd-a9b26e575168/status\" -H \"Authorization: Bearer $TOKEN\")",
+      "Bash(DATABASE_URL=\"postgresql+asyncpg://energy:energy@192.168.178.142:5432/energy_management\" python3 -c \":*)",
+      "Bash(grep -l \"down_revision\" /home/rico/addons/energymanagement-iso50001/backend/alembic/versions/2024_01_0*.py)",
+      "Bash(xargs -I{} head -15 {})",
+      "Bash(TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1ZTIxZGZjOC0xOWUwLTRkYTktYWJlNy04YjUxNWRjZmNmODIiLCJyb2xlIjoiYWRtaW4iLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzc0OTQ5Mjg1LCJleHAiOjE3NzQ5NTEwODV9.pQlk_Kl1XUkBk0r-KTFKYW9K5-66KMAz20G8hciN7uE\" curl -s -X POST \"http://192.168.178.142:8099/api/v1/reports\" -H \"Authorization: Bearer $TOKEN\" -H \"Content-Type: application/json\" -d '{\"\"\"\"title\"\"\"\":\"\"\"\"Test nach Migration\"\"\"\",\"\"\"\"report_type\"\"\"\":\"\"\"\"annual\"\"\"\",\"\"\"\"period_start\"\"\"\":\"\"\"\"2025-01-01\"\"\"\",\"\"\"\"period_end\"\"\"\":\"\"\"\"2025-12-31\"\"\"\",\"\"\"\"include_co2\"\"\"\":true,\"\"\"\"include_sankey\"\"\"\":true,\"\"\"\"include_yoy_comparison\"\"\"\":true}')",
+      "Bash(grep -n \"^revision\\\\|^down_revision\" /home/rico/addons/energymanagement-iso50001/backend/alembic/versions/2024_01_1*.py)"
     ]
   }
 }
