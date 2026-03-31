@@ -37,7 +37,12 @@
       "Bash(node_modules/.bin/tsc --noEmit)",
       "Bash(curl -s -X POST \"http://192.168.178.142:8099/api/v1/auth/login\" -H \"Content-Type: application/json\" -d '{\"\"\"\"username\"\"\"\":\"\"\"\"admin\"\"\"\",\"\"\"\"password\"\"\"\":\"\"\"\"4711lolo\"\"\"\"}')",
       "Bash(/usr/bin/npx tsc:*)",
-      "Bash(find /home/rico/addons/energymanagement-iso50001/backend/seed_data -type f -name *.json)"
+      "Bash(find /home/rico/addons/energymanagement-iso50001/backend/seed_data -type f -name *.json)",
+      "Bash(grep -n \"get_schema_roots\\\\|subtree\" /home/rico/addons/energymanagement-iso50001/backend/app/services/*.py)",
+      "Bash(grep -r \"electricity\\\\|natural_gas\\\\|heating_oil\\\\|district_heating\\\\|water\\\\|solar\" /home/rico/addons/energymanagement-iso50001/backend/app/models/*.py --include=\"*.py\")",
+      "Bash(grep -r \"m³\\\\|kWh\\\\|MWh\\\\|Liter\\\\|Kubikmeter\" /home/rico/addons/energymanagement-iso50001/backend/seed_data/*.json)",
+      "Bash(/home/rico/.nvm/versions/node/v20.20.1/bin/npx tsc:*)",
+      "Bash(PATH=\"/home/rico/.nvm/versions/node/v20.20.1/bin:$PATH\" npx tsc --noEmit)"
     ]
   }
 }
