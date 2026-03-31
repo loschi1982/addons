@@ -1,7 +1,7 @@
 """Verbraucher-Lebenszyklus: Gerätedaten + Inbetriebnahme/Außerbetriebnahme.
 
 Revision ID: 2024_01_09_001
-Revises: 2024_01_08_001
+Revises: a8d001_invoices
 """
 
 from alembic import op
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "2024_01_09_001"
-down_revision = "2024_01_08_001"
+down_revision = "a8d001_invoices"
 
 
 def upgrade() -> None:
