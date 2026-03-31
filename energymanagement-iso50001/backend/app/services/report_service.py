@@ -319,6 +319,14 @@ class ReportService:
         if cost_summary.get("available"):
             snapshot["cost_summary"] = cost_summary
 
+        # Nachhaltigkeits-Snapshot (ISO 50001: Ziele, EnPI, Gebäude)
+        try:
+            sustainability = await self._create_sustainability_snapshot()
+            if sustainability:
+                snapshot["sustainability"] = sustainability
+        except Exception as e:
+            logger.warning("sustainability_snapshot_failed", error=str(e))
+
         # Witterungsanalyse + Verbrauchs-Narrativ
         weather_analysis = await self._create_weather_analysis(period_start, period_end)
         analysis = await self._create_analysis_narrative(
@@ -507,6 +515,8 @@ class ReportService:
         recommendations = report.recommendations or []
         charts = snapshot.get("charts", {})
         cost_summary = snapshot.get("cost_summary", {})
+        energy_by_type = snapshot.get("energy_by_type", {})
+        sustainability = snapshot.get("sustainability", {})
 
         # ── Kennzahlen ──
         total_kwh = snapshot.get("total_consumption_kwh", 0)
@@ -541,7 +551,7 @@ class ReportService:
         # ── Management-Zusammenfassung: Kernaussagen ──
         bullets = []
         # Verbrauch je Energieart separat ausweisen (keine gemischte kWh-Summe)
-        et_summary = energy_by_type  # bereits oben extrahiert
+        et_summary = energy_by_type
         if et_summary:
             for et_key, et_data in et_summary.items():
                 et_label = et_data.get("label", et_key)
@@ -657,7 +667,6 @@ class ReportService:
             )
 
         # ── Energieart-Trennung: Sektionen je Energieart ──
-        energy_by_type = snapshot.get("energy_by_type", {})
         schema_strands = snapshot.get("schema_strands", [])
 
         # HTML je Energieart (mit SVG-Trend, Kennzahlen, Zählerliste)
@@ -942,6 +951,187 @@ class ReportService:
     {f'<h2>Monatlicher Kostenverlauf</h2><figure>{cost_svg}</figure>' if cost_svg else ''}
 </div>"""
 
+        # ── Nachhaltigkeit HTML ──
+        AMPEL_COLORS = {"gruen": "#16A34A", "rot": "#DC2626", "grau": "#9CA3AF"}
+        AMPEL_SYMBOLS = {"gruen": "✓", "rot": "✗", "grau": "–"}
+
+        sustainability_section = ""
+        if sustainability:
+            sus_parts = []
+
+            # EnPI-Tabelle
+            enpis = sustainability.get("enpis", [])
+            if enpis:
+                enpi_rows = ""
+                for ep in enpis:
+                    ampel = ep.get("ampel", "grau")
+                    a_color = AMPEL_COLORS.get(ampel, "#9CA3AF")
+                    a_sym = AMPEL_SYMBOLS.get(ampel, "–")
+                    lv = ep.get("latest_value")
+                    tv = ep.get("target_value")
+                    bv = ep.get("baseline_value")
+                    enpi_rows += (
+                        f"<tr>"
+                        f"<td><strong>{ep['name']}</strong>"
+                        + (f"<br/><span style='color:#6B7280;font-size:8pt'>{ep['description']}</span>" if ep.get("description") else "")
+                        + "</td>"
+                        f"<td class='num'>{f'{lv:,.2f}' if lv is not None else '–'}</td>"
+                        f"<td class='num'>{f'{tv:,.2f}' if tv is not None else '–'}</td>"
+                        f"<td class='num'>{f'{bv:,.2f}' if bv is not None else '–'}</td>"
+                        f"<td class='num'>{ep.get('unit', '')}</td>"
+                        f"<td class='num' style='color:{a_color};font-weight:700'>{a_sym}</td>"
+                        "</tr>"
+                    )
+                sus_parts.append(f"""
+<h2>Energieleistungskennzahlen (EnPI)</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Kennzahl</th>
+            <th class="num">Ist-Wert</th>
+            <th class="num">Zielwert</th>
+            <th class="num">Baseline</th>
+            <th class="num">Einheit</th>
+            <th class="num">Status</th>
+        </tr>
+    </thead>
+    <tbody>{enpi_rows}</tbody>
+</table>""")
+
+            # Energieziele + Aktionspläne
+            objectives = sustainability.get("objectives", [])
+            if objectives:
+                obj_rows = ""
+                action_rows = ""
+                for obj in objectives:
+                    prog = obj.get("progress_percent")
+                    prog_str = f"{prog:.0f}%" if prog is not None else "–"
+                    # Fortschrittsbalken
+                    prog_bar = ""
+                    if prog is not None:
+                        bar_color = "#16A34A" if prog >= 80 else "#F59E0B" if prog >= 40 else "#1B5E7B"
+                        prog_bar = (
+                            f"<div style='background:#E5E7EB;height:6pt;border-radius:3pt;margin-top:3pt'>"
+                            f"<div style='background:{bar_color};height:6pt;border-radius:3pt;"
+                            f"width:{min(prog, 100):.0f}%'></div></div>"
+                        )
+                    savings_str = ""
+                    if obj.get("total_savings_kwh", 0) > 0:
+                        savings_str = f" · {obj['total_savings_kwh']:,.0f}&nbsp;kWh Einsparpotenzial"
+                    if obj.get("total_savings_co2_kg", 0) > 0:
+                        savings_str += f" · {obj['total_savings_co2_kg']:,.0f}&nbsp;kg&nbsp;CO₂"
+                    obj_rows += (
+                        f"<tr>"
+                        f"<td><strong>{obj['title']}</strong>"
+                        + (f"<br/><span style='color:#6B7280;font-size:8pt'>{obj['description']}</span>" if obj.get("description") else "")
+                        + f"<span style='font-size:8pt;color:#6B7280'>{savings_str}</span>"
+                        "</td>"
+                        f"<td>{obj.get('target_value', '–')}&nbsp;{obj.get('target_unit', '')}</td>"
+                        f"<td>{obj.get('target_date', '–')}</td>"
+                        f"<td>{obj.get('responsible', '–')}</td>"
+                        f"<td>{obj.get('status_label', obj.get('status', '–'))}</td>"
+                        f"<td class='num'>{prog_str}{prog_bar}</td>"
+                        "</tr>"
+                    )
+                    for act in obj.get("actions", []):
+                        act_sav = ""
+                        if act.get("savings_kwh", 0) > 0:
+                            act_sav = f" ({act['savings_kwh']:,.0f}&nbsp;kWh"
+                            if act.get("savings_eur", 0) > 0:
+                                act_sav += f", {act['savings_eur']:,.0f}&nbsp;€"
+                            act_sav += ")"
+                        action_rows += (
+                            f"<tr>"
+                            f"<td style='padding-left:16pt'>↳ {act['title']}{act_sav}</td>"
+                            f"<td>{act.get('responsible', '–')}</td>"
+                            f"<td>{act.get('target_date', '–')}</td>"
+                            f"<td colspan='3'>{act.get('status_label', act.get('status', '–'))}</td>"
+                            "</tr>"
+                        )
+
+                sus_parts.append(f"""
+<h2>Energieziele &amp; Ma&szlig;nahmen</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Ziel</th>
+            <th>Zielwert</th>
+            <th>Termin</th>
+            <th>Verantwortlich</th>
+            <th>Status</th>
+            <th class="num">Fortschritt</th>
+        </tr>
+    </thead>
+    <tbody>
+        {obj_rows}
+        {action_rows}
+    </tbody>
+</table>""")
+
+            # Gebäude
+            buildings = sustainability.get("buildings", [])
+            total_area = sustainability.get("total_area_m2", 0)
+            if buildings:
+                bldg_rows = ""
+                for b in buildings:
+                    bldg_rows += (
+                        f"<tr>"
+                        f"<td>{b['name']}</td>"
+                        f"<td>{b.get('building_type_label', b.get('building_type', '–'))}</td>"
+                        f"<td class='num'>{b['area_m2']:,.0f}&nbsp;m²" if b['area_m2'] > 0 else "<td class='num'>–"
+                        f"</td>"
+                        f"<td class='num'>{b['building_year'] or '–'}</td>"
+                        f"<td class='num'>{b.get('energy_certificate_class') or '–'}</td>"
+                        "</tr>"
+                    )
+                sus_parts.append(f"""
+<h2>Geb&auml;ude &amp; Liegenschaft</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Geb&auml;ude</th>
+            <th>Typ</th>
+            <th class="num">Fl&auml;che</th>
+            <th class="num">Baujahr</th>
+            <th class="num">Energieausweis</th>
+        </tr>
+    </thead>
+    <tbody>{bldg_rows}</tbody>
+    <tfoot><tr>
+        <td colspan="2"><strong>Gesamt</strong></td>
+        <td class="num"><strong>{total_area:,.0f}&nbsp;m²</strong></td>
+        <td colspan="2"></td>
+    </tr></tfoot>
+</table>""")
+
+            # CO₂-Verlauf
+            co2_hist = sustainability.get("co2_history", [])
+            if len(co2_hist) >= 2:
+                hist_rows = ""
+                for entry in co2_hist:
+                    hist_rows += (
+                        f"<tr>"
+                        f"<td>{entry['year']}</td>"
+                        f"<td class='num'>{entry['co2_kg']:,.0f}&nbsp;kg</td>"
+                        f"<td class='num'>{entry['co2_kg'] / 1000:,.2f}&nbsp;t&nbsp;CO₂e</td>"
+                        "</tr>"
+                    )
+                sus_parts.append(f"""
+<h2>CO&#8322;-Verlauf (historisch)</h2>
+<table>
+    <thead><tr><th>Jahr</th><th class="num">kg&nbsp;CO&#8322;e</th><th class="num">t&nbsp;CO&#8322;e</th></tr></thead>
+    <tbody>{hist_rows}</tbody>
+</table>""")
+
+            if sus_parts:
+                n_sus = next_sec()
+                sustainability_section = f"""
+<h1>{n_sus}. Nachhaltigkeit &amp; ISO&nbsp;50001</h1>
+<div class="section">
+    <p>Übersicht der Energieziele, Kennzahlen und Maßnahmen gemäß ISO&nbsp;50001.</p>
+    {"".join(sus_parts)}
+</div>"""
+
         n_analyse = next_sec()
         n_co2 = next_sec()
         n_seu = next_sec()
@@ -1069,6 +1259,7 @@ p {{ margin: 5pt 0; }}
     </table>
 </div>
 
+{sustainability_section}
 {sankey_section}
 {tree_section}
 {cost_section}
@@ -1923,6 +2114,192 @@ p {{ margin: 5pt 0; }}
             })
 
         return recommendations
+
+    async def _create_sustainability_snapshot(self) -> dict:
+        """
+        ISO 50001 Nachhaltigkeitsdaten für den Bericht:
+        Energieziele, Aktionspläne, EnPI, Gebäudedaten, CO₂-Historie.
+        """
+        from sqlalchemy.orm import selectinload
+
+        from app.models.energy_review import (
+            EnergyBaseline,
+            EnergyPerformanceIndicator,
+            EnPIValue,
+        )
+        from app.models.iso import ActionPlan, EnergyObjective
+        from app.models.site import Building
+
+        result: dict = {}
+
+        # ── 1. Energieziele mit Aktionsplänen ──
+        obj_result = await self.db.execute(
+            select(EnergyObjective)
+            .options(selectinload(EnergyObjective.action_plans))
+            .order_by(EnergyObjective.target_date)
+        )
+        objectives = list(obj_result.scalars().all())
+
+        STATUS_LABELS = {
+            "planned": "Geplant",
+            "in_progress": "In Umsetzung",
+            "completed": "Abgeschlossen",
+            "cancelled": "Abgebrochen",
+            "on_hold": "Pausiert",
+        }
+
+        objectives_data = []
+        for obj in objectives:
+            total_savings_kwh = 0.0
+            total_savings_eur = 0.0
+            total_savings_co2_kg = 0.0
+            actions = []
+            for action in obj.action_plans:
+                total_savings_kwh += float(action.expected_savings_kwh or 0)
+                total_savings_eur += float(action.expected_savings_eur or 0)
+                total_savings_co2_kg += float(action.expected_savings_co2_kg or 0)
+                actions.append({
+                    "title": action.title,
+                    "responsible": action.responsible_person,
+                    "status": action.status,
+                    "status_label": STATUS_LABELS.get(action.status, action.status),
+                    "target_date": action.target_date.isoformat() if action.target_date else None,
+                    "savings_kwh": float(action.expected_savings_kwh or 0),
+                    "savings_eur": float(action.expected_savings_eur or 0),
+                    "savings_co2_kg": float(action.expected_savings_co2_kg or 0),
+                })
+
+            # Fortschritt berechnen
+            progress = float(obj.progress_percent) if obj.progress_percent else None
+            current = float(obj.current_value) if obj.current_value else None
+            baseline = float(obj.baseline_value) if obj.baseline_value else 0.0
+
+            objectives_data.append({
+                "title": obj.title,
+                "description": obj.description,
+                "target_type": obj.target_type,
+                "target_value": float(obj.target_value),
+                "target_unit": obj.target_unit,
+                "baseline_value": baseline,
+                "baseline_period": obj.baseline_period,
+                "target_date": obj.target_date.isoformat() if obj.target_date else None,
+                "responsible": obj.responsible_person,
+                "status": obj.status,
+                "status_label": STATUS_LABELS.get(obj.status, obj.status),
+                "current_value": current,
+                "progress_percent": progress,
+                "actions": actions,
+                "total_savings_kwh": total_savings_kwh,
+                "total_savings_eur": total_savings_eur,
+                "total_savings_co2_kg": total_savings_co2_kg,
+            })
+        result["objectives"] = objectives_data
+
+        # ── 2. EnPI mit aktuellstem Wert und aktiver Baseline ──
+        enpi_result = await self.db.execute(
+            select(EnergyPerformanceIndicator)
+            .where(EnergyPerformanceIndicator.is_active == True)  # noqa: E712
+            .options(
+                selectinload(EnergyPerformanceIndicator.values),
+                selectinload(EnergyPerformanceIndicator.baselines),
+            )
+            .order_by(EnergyPerformanceIndicator.name)
+        )
+        enpis = list(enpi_result.scalars().all())
+
+        enpi_data = []
+        for enpi in enpis:
+            # Letzten bekannten Wert
+            latest_value = None
+            if enpi.values:
+                latest = max(enpi.values, key=lambda v: v.period_end)
+                latest_value = float(latest.enpi_value)
+
+            # Aktive Baseline
+            current_baseline = None
+            active_baselines = [b for b in enpi.baselines if b.is_current]
+            if active_baselines:
+                current_baseline = float(active_baselines[0].baseline_value)
+
+            target = float(enpi.target_value) if enpi.target_value else None
+
+            # Ampel-Status
+            ampel = "grau"
+            if latest_value is not None and target is not None:
+                if enpi.target_direction == "lower":
+                    ampel = "gruen" if latest_value <= target else "rot"
+                else:
+                    ampel = "gruen" if latest_value >= target else "rot"
+
+            enpi_data.append({
+                "name": enpi.name,
+                "description": enpi.description,
+                "unit": enpi.unit,
+                "formula_type": enpi.formula_type,
+                "target_value": target,
+                "target_direction": enpi.target_direction,
+                "latest_value": latest_value,
+                "baseline_value": current_baseline,
+                "ampel": ampel,
+            })
+        result["enpis"] = enpi_data
+
+        # ── 3. Gebäudedaten mit building_type ──
+        BUILDING_TYPE_LABELS: dict[str, str] = {
+            "residential": "Wohngebäude",
+            "office": "Bürogebäude",
+            "industrial": "Industriegebäude",
+            "commercial": "Gewerbegebäude",
+            "educational": "Bildungseinrichtung",
+            "healthcare": "Gesundheitseinrichtung",
+            "hotel": "Hotel / Beherbergung",
+            "retail": "Einzelhandel",
+            "other": "Sonstiges Gebäude",
+        }
+
+        buildings_result = await self.db.execute(
+            select(Building).where(Building.is_active == True)  # noqa: E712
+        )
+        buildings = list(buildings_result.scalars().all())
+
+        total_area_m2 = 0.0
+        buildings_data = []
+        for b in buildings:
+            area = float(b.gross_floor_area_m2 or 0)
+            total_area_m2 += area
+            buildings_data.append({
+                "name": b.name,
+                "building_type": b.building_type,
+                "building_type_label": BUILDING_TYPE_LABELS.get(
+                    b.building_type or "", b.building_type or "Unbekannt"
+                ),
+                "area_m2": area,
+                "building_year": b.building_year,
+                "energy_certificate_class": b.energy_certificate_class,
+            })
+        result["buildings"] = buildings_data
+        result["total_area_m2"] = total_area_m2
+
+        # ── 4. CO₂-Verlauf nach Kalenderjahr ──
+        try:
+            from sqlalchemy import extract
+            co2_hist = await self.db.execute(
+                select(
+                    extract("year", CO2Calculation.period_start).label("year"),
+                    func.sum(CO2Calculation.co2_kg).label("co2_kg"),
+                )
+                .group_by(extract("year", CO2Calculation.period_start))
+                .order_by(extract("year", CO2Calculation.period_start))
+            )
+            result["co2_history"] = [
+                {"year": int(row.year), "co2_kg": float(row.co2_kg or 0)}
+                for row in co2_hist.all()
+            ]
+        except Exception as e:
+            logger.warning("sustainability_co2_history_failed", error=str(e))
+            result["co2_history"] = []
+
+        return result
 
     async def _generate_summary(self, snapshot: dict, co2_summary: dict | None) -> str:
         """Management-Zusammenfassung automatisch erstellen."""
