@@ -1010,6 +1010,289 @@ function SchemaStrandsSection({ snapshot }: { snapshot: Record<string, unknown> 
   );
 }
 
+/* ── Typen für Nachhaltigkeit ── */
+
+interface EnpiData {
+  name: string;
+  description?: string;
+  unit: string;
+  target_value: number | null;
+  target_direction: string;
+  latest_value: number | null;
+  baseline_value: number | null;
+  ampel: 'gruen' | 'rot' | 'grau';
+}
+
+interface ObjectiveAction {
+  title: string;
+  responsible: string;
+  status: string;
+  status_label: string;
+  target_date: string | null;
+  savings_kwh: number;
+  savings_eur: number;
+  savings_co2_kg: number;
+}
+
+interface ObjectiveData {
+  title: string;
+  description?: string;
+  target_value: number;
+  target_unit: string;
+  baseline_value: number;
+  baseline_period: string;
+  target_date: string | null;
+  responsible: string;
+  status: string;
+  status_label: string;
+  current_value: number | null;
+  progress_percent: number | null;
+  actions: ObjectiveAction[];
+  total_savings_kwh: number;
+  total_savings_eur: number;
+  total_savings_co2_kg: number;
+}
+
+interface BuildingData {
+  name: string;
+  building_type: string | null;
+  building_type_label: string;
+  area_m2: number;
+  building_year: number | null;
+  energy_certificate_class: string | null;
+}
+
+interface SustainabilityData {
+  enpis: EnpiData[];
+  objectives: ObjectiveData[];
+  buildings: BuildingData[];
+  total_area_m2: number;
+  co2_history: { year: number; co2_kg: number }[];
+}
+
+function SustainabilitySection({ snapshot }: { snapshot: Record<string, unknown> }) {
+  const sus = snapshot.sustainability as SustainabilityData | undefined;
+  if (!sus) return null;
+
+  const { enpis, objectives, buildings, total_area_m2, co2_history } = sus;
+  const hasContent = (enpis?.length || 0) + (objectives?.length || 0) + (buildings?.length || 0) > 0;
+  if (!hasContent) return null;
+
+  const AMPEL_COLORS = { gruen: '#16A34A', rot: '#DC2626', grau: '#9CA3AF' };
+  const AMPEL_LABELS = { gruen: 'Ziel erreicht', rot: 'Ziel verfehlt', grau: 'Kein Wert' };
+
+  return (
+    <div className="space-y-6">
+      <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+        <Leaf className="h-4 w-4 text-green-600" />
+        Nachhaltigkeit &amp; ISO 50001
+      </h3>
+
+      {/* EnPI-Tabelle */}
+      {enpis?.length > 0 && (
+        <div>
+          <p className="text-sm font-medium text-gray-700 mb-2">Energieleistungskennzahlen (EnPI)</p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-gray-500">
+                  <th className="pb-2 font-medium">Kennzahl</th>
+                  <th className="pb-2 font-medium text-right">Ist</th>
+                  <th className="pb-2 font-medium text-right">Ziel</th>
+                  <th className="pb-2 font-medium text-right">Baseline</th>
+                  <th className="pb-2 font-medium text-right">Einheit</th>
+                  <th className="pb-2 font-medium text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {enpis.map((ep, i) => (
+                  <tr key={i} className="border-b last:border-0">
+                    <td className="py-2 text-gray-700">
+                      <div className="font-medium">{ep.name}</div>
+                      {ep.description && <div className="text-xs text-gray-400">{ep.description}</div>}
+                    </td>
+                    <td className="py-2 text-right font-mono text-gray-700">
+                      {ep.latest_value != null ? ep.latest_value.toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '–'}
+                    </td>
+                    <td className="py-2 text-right font-mono text-gray-500">
+                      {ep.target_value != null ? ep.target_value.toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '–'}
+                    </td>
+                    <td className="py-2 text-right font-mono text-gray-400">
+                      {ep.baseline_value != null ? ep.baseline_value.toLocaleString('de-DE', { maximumFractionDigits: 2 }) : '–'}
+                    </td>
+                    <td className="py-2 text-right text-gray-400">{ep.unit}</td>
+                    <td className="py-2 text-right">
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+                        style={{
+                          color: AMPEL_COLORS[ep.ampel],
+                          backgroundColor: `${AMPEL_COLORS[ep.ampel]}18`,
+                        }}
+                      >
+                        {ep.ampel === 'gruen' ? '✓' : ep.ampel === 'rot' ? '✗' : '–'}
+                        {AMPEL_LABELS[ep.ampel]}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Energieziele */}
+      {objectives?.length > 0 && (
+        <div>
+          <p className="text-sm font-medium text-gray-700 mb-2">Energieziele &amp; Maßnahmen</p>
+          <div className="space-y-3">
+            {objectives.map((obj, i) => {
+              const prog = obj.progress_percent ?? 0;
+              const barColor = prog >= 80 ? '#16A34A' : prog >= 40 ? '#F59E0B' : '#1B5E7B';
+              return (
+                <div key={i} className="rounded-lg border border-gray-200 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900">{obj.title}</p>
+                      {obj.description && (
+                        <p className="text-xs text-gray-500 mt-0.5">{obj.description}</p>
+                      )}
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-gray-400">
+                        <span>Ziel: <strong className="text-gray-600">{obj.target_value} {obj.target_unit}</strong></span>
+                        {obj.target_date && <span>Termin: {obj.target_date}</span>}
+                        <span>{obj.responsible}</span>
+                        {obj.total_savings_kwh > 0 && (
+                          <span className="text-green-600 font-medium">
+                            ↓ {obj.total_savings_kwh.toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh Einsparpotenzial
+                          </span>
+                        )}
+                        {obj.total_savings_co2_kg > 0 && (
+                          <span className="text-green-600">
+                            · {obj.total_savings_co2_kg.toLocaleString('de-DE', { maximumFractionDigits: 0 })} kg CO₂
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                      obj.status === 'completed' ? 'bg-green-100 text-green-700' :
+                      obj.status === 'in_progress' ? 'bg-blue-100 text-blue-700' :
+                      'bg-gray-100 text-gray-600'
+                    }`}>
+                      {obj.status_label}
+                    </span>
+                  </div>
+                  {/* Fortschrittsbalken */}
+                  <div className="mt-2 h-1.5 w-full rounded-full bg-gray-100">
+                    <div
+                      className="h-1.5 rounded-full transition-all"
+                      style={{ width: `${Math.min(prog, 100)}%`, backgroundColor: barColor }}
+                    />
+                  </div>
+                  {/* Aktionspläne */}
+                  {obj.actions.length > 0 && (
+                    <div className="mt-2 space-y-1 pl-4 border-l-2 border-gray-100">
+                      {obj.actions.map((act, j) => (
+                        <div key={j} className="flex items-start justify-between gap-2 text-xs text-gray-500">
+                          <span>↳ {act.title}</span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {act.savings_kwh > 0 && (
+                              <span className="text-green-600">{act.savings_kwh.toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh</span>
+                            )}
+                            {act.savings_eur > 0 && (
+                              <span className="text-green-600">{act.savings_eur.toLocaleString('de-DE', { maximumFractionDigits: 0 })} €</span>
+                            )}
+                            <span className={`rounded px-1.5 py-0.5 ${
+                              act.status === 'completed' ? 'bg-green-100 text-green-700' :
+                              act.status === 'in_progress' ? 'bg-blue-100 text-blue-700' :
+                              'bg-gray-100 text-gray-500'
+                            }`}>{act.status_label}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Gebäude */}
+      {buildings?.length > 0 && (
+        <div>
+          <p className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+            <Building2 className="h-3.5 w-3.5" />
+            Gebäude &amp; Liegenschaft
+          </p>
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-gray-500">
+                <th className="pb-2 font-medium">Gebäude</th>
+                <th className="pb-2 font-medium">Typ</th>
+                <th className="pb-2 font-medium text-right">Fläche</th>
+                <th className="pb-2 font-medium text-right">Baujahr</th>
+                <th className="pb-2 font-medium text-right">Energieausweis</th>
+              </tr>
+            </thead>
+            <tbody>
+              {buildings.map((b, i) => (
+                <tr key={i} className="border-b last:border-0">
+                  <td className="py-2 font-medium text-gray-700">{b.name}</td>
+                  <td className="py-2 text-gray-500">{b.building_type_label}</td>
+                  <td className="py-2 text-right text-gray-700">{b.area_m2 > 0 ? `${b.area_m2.toLocaleString('de-DE', { maximumFractionDigits: 0 })} m²` : '–'}</td>
+                  <td className="py-2 text-right text-gray-500">{b.building_year ?? '–'}</td>
+                  <td className="py-2 text-right text-gray-500">{b.energy_certificate_class ?? '–'}</td>
+                </tr>
+              ))}
+            </tbody>
+            {total_area_m2 > 0 && (
+              <tfoot>
+                <tr className="border-t-2 border-gray-300">
+                  <td colSpan={2} className="py-2 font-semibold text-gray-700">Gesamt</td>
+                  <td className="py-2 text-right font-semibold text-gray-700">{total_area_m2.toLocaleString('de-DE', { maximumFractionDigits: 0 })} m²</td>
+                  <td colSpan={2} />
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      )}
+
+      {/* CO₂-Verlauf */}
+      {co2_history?.length >= 2 && (
+        <div>
+          <p className="text-sm font-medium text-gray-700 mb-2">CO₂-Verlauf (historisch)</p>
+          <div className="flex gap-2 flex-wrap">
+            {co2_history.map((entry, i) => {
+              const maxKg = Math.max(...co2_history.map(e => e.co2_kg));
+              const pct = maxKg > 0 ? (entry.co2_kg / maxKg) * 100 : 0;
+              const trend = i > 0 ? entry.co2_kg - co2_history[i - 1].co2_kg : 0;
+              return (
+                <div key={i} className="flex flex-col items-center gap-1 min-w-[52px]">
+                  <div className="relative w-8 bg-gray-100 rounded-t" style={{ height: '60px' }}>
+                    <div
+                      className="absolute bottom-0 w-full rounded-t"
+                      style={{ height: `${pct}%`, backgroundColor: '#1B5E7B' }}
+                    />
+                  </div>
+                  <span className="text-xs font-mono text-gray-700">{(entry.co2_kg / 1000).toFixed(1)}t</span>
+                  {i > 0 && (
+                    <span className={`text-xs ${trend > 0 ? 'text-red-500' : 'text-green-600'}`}>
+                      {trend > 0 ? '↑' : '↓'}
+                    </span>
+                  )}
+                  <span className="text-xs text-gray-400">{entry.year}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReportViewer({
   report,
   onClose,
@@ -1154,6 +1437,9 @@ function ReportViewer({
               )}
             </div>
           )}
+
+          {/* Nachhaltigkeit & ISO 50001 */}
+          <SustainabilitySection snapshot={snapshot as Record<string, unknown>} />
 
           {/* Top-Verbraucher (SEU) – native Einheit */}
           {(snapshot.top_consumers as Record<string, unknown>[])?.length > 0 && (
