@@ -52,7 +52,8 @@
       "Bash(PATH=~/.nvm/versions/node/v20.20.1/bin:$PATH ~/.nvm/versions/node/v20.20.1/bin/node ~/.nvm/versions/node/v20.20.1/bin/npx tsc --noEmit)",
       "Bash(~/.nvm/versions/node/v20.20.1/bin/node ~/.nvm/versions/node/v20.20.1/bin/../lib/node_modules/typescript/bin/tsc --noEmit)",
       "Bash(~/.nvm/versions/node/v20.20.1/bin/node /home/rico/addons/energymanagement-iso50001/frontend/node_modules/.bin/tsc --noEmit)",
-      "Bash(echo \"Exit: $?\")"
+      "Bash(echo \"Exit: $?\")",
+      "Bash(~/.nvm/versions/node/v20.20.1/bin/node node_modules/.bin/tsc --noEmit)"
     ]
   }
 }
