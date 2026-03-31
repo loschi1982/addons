@@ -889,7 +889,7 @@ class ReportService:
     {f'<div class="kpi-card"><div class="value">{weather["heating_days"]}</div><div class="unit">Tage</div><div class="label">Heiztage</div></div>' if weather.get('heating_days') else ''}
 </div>"""
 
-        # ── Optionale Sektionen ──
+        # ── Optionale Sektionen: Inhalte ohne Nummern bauen ──
         analyse_section = analysis_html + weather_kpi
         if yoy_svg:
             analyse_section += f"""
@@ -903,32 +903,29 @@ class ReportService:
 <p>Durchschnittlicher Verbrauch nach Wochentag und Tageszeit. Dunklere Bereiche zeigen höheren Verbrauch.</p>
 <figure>{heatmap_svg}</figure>"""
 
-        sankey_section = ""
+        # Sankey-Body (ohne Sektionsnummer)
+        sankey_body = ""
         if sankey_svg:
-            s = next_sec()
-            sankey_section = f"""
-<h1>{s}. Energiefluss (Sankey)</h1>
+            sankey_body = f"""
 <div class="section">
     <p>Visualisierung der Energieflüsse von Bezugsquellen über Hauptzähler und Unterzähler bis zu den Verbrauchern.</p>
     <figure>{sankey_svg}</figure>
 </div>"""
 
-        tree_section = ""
+        # Zählerstruktur-Body (ohne Sektionsnummer)
+        tree_body = ""
         if tree_svg:
-            s = next_sec()
-            tree_section = f"""
-<h1>{s}. Zählerstruktur</h1>
+            tree_body = f"""
 <div class="section">
     <p>Hierarchische Darstellung der erfassten Zähler.</p>
     <figure>{tree_svg}</figure>
 </div>"""
 
-        cost_section = ""
+        # Kosten-Body (ohne Sektionsnummer)
+        cost_body = ""
         if cost_summary.get("available"):
             cost_kwh_ct = (cost_summary.get("total_cost_net", 0) / total_kwh * 100) if total_kwh > 0 else 0
-            cost_sec = next_sec()
-            cost_section = f"""
-<h1>{cost_sec}. Wirtschaftlichkeit</h1>
+            cost_body = f"""
 <div class="section">
     <p>Gesamtkosten im Berichtszeitraum auf Basis der erfassten Zählerlesungen.</p>
     <div class="kpi-row">
@@ -955,7 +952,8 @@ class ReportService:
         AMPEL_COLORS = {"gruen": "#16A34A", "rot": "#DC2626", "grau": "#9CA3AF"}
         AMPEL_SYMBOLS = {"gruen": "✓", "rot": "✗", "grau": "–"}
 
-        sustainability_section = ""
+        # Nachhaltigkeits-Body (ohne Sektionsnummer)
+        sustainability_body = ""
         if sustainability:
             sus_parts = []
 
@@ -1124,16 +1122,35 @@ class ReportService:
 </table>""")
 
             if sus_parts:
-                n_sus = next_sec()
-                sustainability_section = f"""
-<h1>{n_sus}. Nachhaltigkeit &amp; ISO&nbsp;50001</h1>
+                sustainability_body = f"""
 <div class="section">
     <p>Übersicht der Energieziele, Kennzahlen und Maßnahmen gemäß ISO&nbsp;50001.</p>
     {"".join(sus_parts)}
 </div>"""
 
+        # ── Sektionsnummern in der richtigen Reihenfolge vergeben ──
+        # Reihenfolge: 1. Mgmt-Summary, 2. Aktuelle Lage, 3. Analyse, 4. CO₂,
+        #              [5. Nachhaltigkeit], [6. Energiefluss], [7. Zählerstruktur],
+        #              [8. Wirtschaftlichkeit], SEU, Erkenntnisse, Maßnahmen
+        sec[0] = 3  # Nummern 1+2 sind hardcoded
         n_analyse = next_sec()
         n_co2 = next_sec()
+        sustainability_section = (
+            f"<h1>{next_sec()}. Nachhaltigkeit &amp; ISO&nbsp;50001</h1>{sustainability_body}"
+            if sustainability_body else ""
+        )
+        sankey_section = (
+            f"<h1>{next_sec()}. Energiefluss (Sankey)</h1>{sankey_body}"
+            if sankey_body else ""
+        )
+        tree_section = (
+            f"<h1>{next_sec()}. Zählerstruktur</h1>{tree_body}"
+            if tree_body else ""
+        )
+        cost_section = (
+            f"<h1>{next_sec()}. Wirtschaftlichkeit</h1>{cost_body}"
+            if cost_body else ""
+        )
         n_seu = next_sec()
         n_findings = next_sec()
         n_reco = next_sec()
