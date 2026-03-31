@@ -124,6 +124,11 @@ class ConsumerBase(BaseModel):
     commissioned_at: date | None = None
     decommissioned_at: date | None = None
     replaced_by_id: uuid.UUID | None = None
+    # Wirtschaftlichkeit
+    purchase_cost: Decimal | None = None
+    installation_cost: Decimal | None = None
+    annual_maintenance_cost: Decimal | None = None
+    expected_lifetime_years: int | None = None
 
 
 class ConsumerCreate(ConsumerBase):
@@ -148,6 +153,10 @@ class ConsumerUpdate(BaseModel):
     commissioned_at: date | None = None
     decommissioned_at: date | None = None
     replaced_by_id: uuid.UUID | None = None
+    purchase_cost: Decimal | None = None
+    installation_cost: Decimal | None = None
+    annual_maintenance_cost: Decimal | None = None
+    expected_lifetime_years: int | None = None
 
 
 class ConsumerResponse(ConsumerBase, BaseSchema):

@@ -64,6 +64,12 @@ class Consumer(Base, UUIDMixin, TimestampMixin):
         ForeignKey("consumers.id"), nullable=True
     )
 
+    # Wirtschaftlichkeit / Amortisationsrechnung
+    purchase_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    installation_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    annual_maintenance_cost: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    expected_lifetime_years: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     meters = relationship("Meter", secondary=meter_consumer, back_populates="consumers")
     usage_unit = relationship("UsageUnit", back_populates="consumers")
     replaced_by = relationship("Consumer", remote_side="Consumer.id", foreign_keys=[replaced_by_id])

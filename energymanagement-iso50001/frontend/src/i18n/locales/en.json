@@ -38,6 +38,7 @@
     "consumers": "Consumers",
     "schema": "Energy Schema",
     "analytics": "Analytics",
+    "economics": "Economics",
     "emissions": "CO₂ Emissions",
     "weather": "Weather Data",
     "climate": "Climate Sensors",

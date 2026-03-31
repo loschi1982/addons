@@ -15,6 +15,7 @@ from app.api.v1 import (
     climate,
     consumers,
     dashboard,
+    economics,
     emissions,
     energy_review,
     imports,
@@ -48,6 +49,9 @@ api_router.include_router(consumers.router, prefix="/consumers", tags=["Verbrauc
 api_router.include_router(allocations.router, prefix="/allocations", tags=["Zähler-Zuordnungen"])
 api_router.include_router(invoices.router, tags=["Abrechnungen"])
 api_router.include_router(imports.router, prefix="/imports", tags=["Datenimport"])
+
+# Wirtschaftlichkeit
+api_router.include_router(economics.router, prefix="/economics", tags=["Wirtschaftlichkeit"])
 
 # Analysen und Berichte
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])

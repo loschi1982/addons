@@ -24,6 +24,7 @@ import AnalyticsPage from '@/pages/AnalyticsPage';
 import SettingsPage from '@/pages/SettingsPage';
 import MeterMapPage from '@/pages/MeterMapPage';
 import EnergyReviewPage from '@/pages/EnergyReviewPage';
+import EconomicsPage from '@/pages/EconomicsPage';
 
 /**
  * Geschützte Route – leitet auf /login um wenn nicht authentifiziert.
@@ -82,6 +83,7 @@ export default function App() {
         <Route path="reports/*" element={<ReportsPage />} />
         <Route path="iso/*" element={<ISOPage />} />
         <Route path="users" element={<UsersPage />} />
+        <Route path="economics" element={<EconomicsPage />} />
         <Route path="import" element={<ImportPage />} />
         <Route path="integrations" element={<Navigate to="/settings" replace />} />
         <Route path="settings" element={<SettingsPage />} />

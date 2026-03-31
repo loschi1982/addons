@@ -52,6 +52,10 @@ def _consumer_to_response(c: Consumer, replaced_by_name: str | None = None) -> C
         decommissioned_at=c.decommissioned_at,
         replaced_by_id=c.replaced_by_id,
         replaced_by_name=replaced_by_name,
+        purchase_cost=c.purchase_cost,
+        installation_cost=c.installation_cost,
+        annual_maintenance_cost=c.annual_maintenance_cost,
+        expected_lifetime_years=c.expected_lifetime_years,
         created_at=c.created_at,
     )
 
@@ -150,6 +154,10 @@ async def create_consumer(
         commissioned_at=request.commissioned_at,
         decommissioned_at=request.decommissioned_at,
         replaced_by_id=request.replaced_by_id,
+        purchase_cost=request.purchase_cost,
+        installation_cost=request.installation_cost,
+        annual_maintenance_cost=request.annual_maintenance_cost,
+        expected_lifetime_years=request.expected_lifetime_years,
     )
     db.add(consumer)
     await db.flush()
@@ -237,6 +245,10 @@ async def update_consumer(
         "commissioned_at": "commissioned_at",
         "decommissioned_at": "decommissioned_at",
         "replaced_by_id": "replaced_by_id",
+        "purchase_cost": "purchase_cost",
+        "installation_cost": "installation_cost",
+        "annual_maintenance_cost": "annual_maintenance_cost",
+        "expected_lifetime_years": "expected_lifetime_years",
     }
     for schema_field, model_field in field_map.items():
         if schema_field in data:
@@ -310,6 +322,10 @@ async def replace_consumer(
         model=request.model,
         serial_number=request.serial_number,
         commissioned_at=request.commissioned_at or date.today(),
+        purchase_cost=request.purchase_cost,
+        installation_cost=request.installation_cost,
+        annual_maintenance_cost=request.annual_maintenance_cost,
+        expected_lifetime_years=request.expected_lifetime_years,
     )
     db.add(new_consumer)
     await db.flush()
