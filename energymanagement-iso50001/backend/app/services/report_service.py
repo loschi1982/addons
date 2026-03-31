@@ -319,13 +319,21 @@ class ReportService:
         if cost_summary.get("available"):
             snapshot["cost_summary"] = cost_summary
 
-        # Nachhaltigkeits-Snapshot (ISO 50001: Ziele, EnPI, Gebäude)
+        # Nachhaltigkeits-Snapshot (ISO 50001: Ziele, EnPI, Gebäude, KVP)
         try:
             sustainability = await self._create_sustainability_snapshot()
             if sustainability:
                 snapshot["sustainability"] = sustainability
         except Exception as e:
             logger.warning("sustainability_snapshot_failed", error=str(e))
+
+        # Amortisations-Übersicht für Wirtschaftlichkeitssektion
+        try:
+            amortization = await self._create_amortization_summary()
+            if amortization:
+                snapshot["amortization"] = amortization
+        except Exception as e:
+            logger.warning("amortization_snapshot_failed", error=str(e))
 
         # Witterungsanalyse + Verbrauchs-Narrativ
         weather_analysis = await self._create_weather_analysis(period_start, period_end)
@@ -480,7 +488,7 @@ class ReportService:
             recommendations=report.recommendations or [],
         )
 
-    def _render_builtin_template(self, report: AuditReport) -> str:
+    def _render_builtin_template(self, report: AuditReport) -> str:  # noqa: PLR0912, PLR0914, PLR0915
         """Eingebautes HTML-Template für PDF-Generierung."""
         # Renderer mit Fehlerbehandlung importieren
         try:
@@ -517,6 +525,12 @@ class ReportService:
         cost_summary = snapshot.get("cost_summary", {})
         energy_by_type = snapshot.get("energy_by_type", {})
         sustainability = snapshot.get("sustainability", {})
+        amortization = snapshot.get("amortization", [])
+        energy_yoy_table = snapshot.get("energy_yoy_table", [])
+        consumer_categories = snapshot.get("consumer_categories", [])
+        renewable_pct = snapshot.get("renewable_pct", 0.0)
+        renewable_kwh_snap = snapshot.get("renewable_kwh", 0.0)
+        prev_total_kwh_snap = snapshot.get("prev_total_kwh", 0.0)
 
         # ── Kennzahlen ──
         total_kwh = snapshot.get("total_consumption_kwh", 0)
@@ -665,6 +679,192 @@ class ReportService:
                 f"<strong>{r.get('title', '')}</strong>"
                 f"<p>{r.get('description', '')}</p>{savings}</div>"
             )
+
+        # ── Vorjahresvergleichs-Tabelle ──
+        yoy_table_rows = ""
+        for item in energy_yoy_table:
+            delta = item.get("delta_pct")
+            if delta is not None:
+                delta_color = "#DC2626" if delta > 5 else "#16A34A" if delta < -5 else "#374151"
+                delta_str = f'<span style="color:{delta_color};font-weight:600">{delta:+.1f}%</span>'
+            else:
+                delta_str = "–"
+            unit = item.get("unit", "kWh")
+            yoy_table_rows += (
+                f"<tr><td>{item.get('label', '')}</td>"
+                f"<td class='num'>{item.get('prev_native', 0):,.1f}&nbsp;{unit}</td>"
+                f"<td class='num'>{item.get('curr_native', 0):,.1f}&nbsp;{unit}</td>"
+                f"<td class='num'>{delta_str}</td></tr>"
+            )
+
+        # ── Verbrauch nach Bereichen ──
+        cat_rows = ""
+        for cat in consumer_categories:
+            cat_rows += (
+                f"<tr><td>{cat.get('label', '')}</td>"
+                f"<td class='num'>{cat.get('kwh', 0):,.1f}</td>"
+                f"<td class='num'>{cat.get('pct', 0):.1f}%</td></tr>"
+            )
+
+        # ── KPI-Vergleichstabelle ──
+        kpi_compare_rows = ""
+        if prev_total_kwh_snap > 0 or float(total_kwh) > 0:
+            delta_kwh = (
+                round((float(total_kwh) - prev_total_kwh_snap) / prev_total_kwh_snap * 100, 1)
+                if prev_total_kwh_snap > 0 else None
+            )
+            delta_kwh_str = f"{delta_kwh:+.1f}%" if delta_kwh is not None else "–"
+            kpi_compare_rows += (
+                f"<tr><td>Gesamtverbrauch (kWh-Äquiv.)</td><td class='num'>kWh</td>"
+                f"<td class='num'>{prev_total_kwh_snap:,.0f}</td>"
+                f"<td class='num'>{float(total_kwh):,.0f}</td>"
+                f"<td class='num'>{delta_kwh_str}</td></tr>"
+            )
+        if co2_intensity > 0:
+            kpi_compare_rows += (
+                f"<tr><td>CO₂-Intensität</td><td class='num'>g&nbsp;CO₂/kWh</td>"
+                f"<td class='num'>–</td>"
+                f"<td class='num'>{co2_intensity:.0f}</td>"
+                f"<td class='num'>–</td></tr>"
+            )
+        if cost_summary.get("available"):
+            curr_cost = cost_summary.get("total_cost_net", 0)
+            prev_cost = cost_summary.get("prev_year_cost_net")
+            if prev_cost is not None:
+                delta_cost = round((curr_cost - prev_cost) / prev_cost * 100, 1) if prev_cost > 0 else None
+                delta_cost_str = f"{delta_cost:+.1f}%" if delta_cost is not None else "–"
+                kpi_compare_rows += (
+                    f"<tr><td>Energiekosten</td><td class='num'>€&nbsp;netto</td>"
+                    f"<td class='num'>{prev_cost:,.2f}</td>"
+                    f"<td class='num'>{curr_cost:,.2f}</td>"
+                    f"<td class='num'>{delta_cost_str}</td></tr>"
+                )
+        if energy_intensity_per_unit is not None:
+            kpi_compare_rows += (
+                f"<tr><td>Energieintensität</td><td class='num'>kWh/{reference_unit}</td>"
+                f"<td class='num'>–</td>"
+                f"<td class='num'>{energy_intensity_per_unit:,.1f}</td>"
+                f"<td class='num'>–</td></tr>"
+            )
+
+        # ── Maßnahmen & Ergebnisse (getrennt nach Status) ──
+        STATUS_DONE = {"completed", "abgeschlossen", "done"}
+        STATUS_PLANNED = {"planned", "geplant", "open", "offen"}
+        objectives = sustainability.get("objectives", [])
+        done_rows = ""
+        planned_rows = ""
+        for obj in objectives:
+            status_raw = obj.get("status", "")
+            prog = obj.get("progress_percent")
+            prog_str = f"{prog:.0f}%" if prog is not None else "–"
+            prog_bar = ""
+            if prog is not None:
+                bar_color = "#16A34A" if prog >= 80 else "#F59E0B" if prog >= 40 else "#1B5E7B"
+                prog_bar = (
+                    f"<div style='background:#E5E7EB;height:6pt;border-radius:3pt;margin-top:3pt'>"
+                    f"<div style='background:{bar_color};height:6pt;border-radius:3pt;"
+                    f"width:{min(prog, 100):.0f}%'></div></div>"
+                )
+            sav_str = ""
+            if obj.get("total_savings_kwh", 0) > 0:
+                sav_str = f"{obj['total_savings_kwh']:,.0f}&nbsp;kWh"
+                if obj.get("total_savings_co2_kg", 0) > 0:
+                    sav_str += f" / {obj['total_savings_co2_kg']:,.0f}&nbsp;kg&nbsp;CO₂"
+            row = (
+                f"<tr>"
+                f"<td><strong>{obj.get('title', '')}</strong>"
+                + (f"<br/><span style='color:#6B7280;font-size:8pt'>{obj.get('description', '')}</span>" if obj.get("description") else "")
+                + f"</td>"
+                f"<td class='num'>{sav_str}</td>"
+                f"<td>{obj.get('target_date', '–')}</td>"
+                f"<td>{obj.get('responsible', '–')}</td>"
+                f"<td class='num'>{prog_str}{prog_bar}</td>"
+                f"</tr>"
+            )
+            if status_raw.lower() in STATUS_DONE or (prog is not None and prog >= 100):
+                done_rows += row
+            else:
+                planned_rows += row
+
+        massnahmen_table_header = """
+<table>
+    <thead>
+        <tr>
+            <th>Ziel / Maßnahme</th>
+            <th class="num">Einsparpotenzial</th>
+            <th>Termin</th>
+            <th>Verantwortlich</th>
+            <th class="num">Fortschritt</th>
+        </tr>
+    </thead>"""
+        massnahmen_parts = []
+        if done_rows:
+            massnahmen_parts.append(
+                f"<h2>Abgeschlossene Maßnahmen</h2>{massnahmen_table_header}"
+                f"<tbody>{done_rows}</tbody></table>"
+            )
+        if planned_rows:
+            massnahmen_parts.append(
+                f"<h2>Laufende &amp; geplante Maßnahmen</h2>{massnahmen_table_header}"
+                f"<tbody>{planned_rows}</tbody></table>"
+            )
+        if not massnahmen_parts and objectives:
+            massnahmen_parts.append(
+                f"<h2>Alle Maßnahmen</h2>{massnahmen_table_header}"
+                f"<tbody>"
+                + "".join(
+                    f"<tr><td><strong>{o.get('title', '')}</strong></td>"
+                    f"<td class='num'>–</td>"
+                    f"<td>{o.get('target_date', '–')}</td>"
+                    f"<td>{o.get('responsible', '–')}</td>"
+                    f"<td class='num'>–</td></tr>"
+                    for o in objectives
+                )
+                + "</tbody></table>"
+            )
+
+        # Amortisations-Tabelle HTML
+        amortization_html = ""
+        if amortization:
+            amort_rows = ""
+            for a in amortization:
+                payback = a.get("simple_payback_years")
+                payback_str = f"{payback:.1f}&nbsp;a" if payback is not None else "–"
+                npv = a.get("npv")
+                npv_str = f"{npv:,.0f}&nbsp;€" if npv is not None else "–"
+                roi = a.get("roi_pct")
+                roi_str = f"{roi:.1f}%" if roi is not None else "–"
+                profit_color = "#16A34A" if a.get("profitable") else "#DC2626"
+                profit_sym = "✓" if a.get("profitable") else "✗"
+                amort_rows += (
+                    f"<tr>"
+                    f"<td><strong>{a.get('title', '')}</strong>"
+                    + (f"<br/><span style='color:#6B7280;font-size:8pt'>{a.get('type', '')}</span>" if a.get("type") else "")
+                    + f"</td>"
+                    f"<td class='num'>{a.get('investment', 0):,.0f}&nbsp;€</td>"
+                    f"<td class='num'>{a.get('annual_savings_net', 0):,.0f}&nbsp;€/a</td>"
+                    f"<td class='num'>{payback_str}</td>"
+                    f"<td class='num'>{npv_str}</td>"
+                    f"<td class='num'>{roi_str}</td>"
+                    f"<td class='num' style='color:{profit_color};font-weight:700'>{profit_sym}</td>"
+                    f"</tr>"
+                )
+            amortization_html = f"""
+<h2>Amortisationsübersicht</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Maßnahme</th>
+            <th class="num">Investition</th>
+            <th class="num">Einsparung/a</th>
+            <th class="num">Amortisation</th>
+            <th class="num">NPV</th>
+            <th class="num">ROI</th>
+            <th class="num">Rentabel</th>
+        </tr>
+    </thead>
+    <tbody>{amort_rows}</tbody>
+</table>"""
 
         # ── Energieart-Trennung: Sektionen je Energieart ──
         schema_strands = snapshot.get("schema_strands", [])
@@ -946,6 +1146,7 @@ class ReportService:
         </div>
     </div>
     {f'<h2>Monatlicher Kostenverlauf</h2><figure>{cost_svg}</figure>' if cost_svg else ''}
+    {amortization_html}
 </div>"""
 
         # ── Nachhaltigkeit HTML ──
@@ -994,76 +1195,6 @@ class ReportService:
         </tr>
     </thead>
     <tbody>{enpi_rows}</tbody>
-</table>""")
-
-            # Energieziele + Aktionspläne
-            objectives = sustainability.get("objectives", [])
-            if objectives:
-                obj_rows = ""
-                action_rows = ""
-                for obj in objectives:
-                    prog = obj.get("progress_percent")
-                    prog_str = f"{prog:.0f}%" if prog is not None else "–"
-                    # Fortschrittsbalken
-                    prog_bar = ""
-                    if prog is not None:
-                        bar_color = "#16A34A" if prog >= 80 else "#F59E0B" if prog >= 40 else "#1B5E7B"
-                        prog_bar = (
-                            f"<div style='background:#E5E7EB;height:6pt;border-radius:3pt;margin-top:3pt'>"
-                            f"<div style='background:{bar_color};height:6pt;border-radius:3pt;"
-                            f"width:{min(prog, 100):.0f}%'></div></div>"
-                        )
-                    savings_str = ""
-                    if obj.get("total_savings_kwh", 0) > 0:
-                        savings_str = f" · {obj['total_savings_kwh']:,.0f}&nbsp;kWh Einsparpotenzial"
-                    if obj.get("total_savings_co2_kg", 0) > 0:
-                        savings_str += f" · {obj['total_savings_co2_kg']:,.0f}&nbsp;kg&nbsp;CO₂"
-                    obj_rows += (
-                        f"<tr>"
-                        f"<td><strong>{obj['title']}</strong>"
-                        + (f"<br/><span style='color:#6B7280;font-size:8pt'>{obj['description']}</span>" if obj.get("description") else "")
-                        + f"<span style='font-size:8pt;color:#6B7280'>{savings_str}</span>"
-                        "</td>"
-                        f"<td>{obj.get('target_value', '–')}&nbsp;{obj.get('target_unit', '')}</td>"
-                        f"<td>{obj.get('target_date', '–')}</td>"
-                        f"<td>{obj.get('responsible', '–')}</td>"
-                        f"<td>{obj.get('status_label', obj.get('status', '–'))}</td>"
-                        f"<td class='num'>{prog_str}{prog_bar}</td>"
-                        "</tr>"
-                    )
-                    for act in obj.get("actions", []):
-                        act_sav = ""
-                        if act.get("savings_kwh", 0) > 0:
-                            act_sav = f" ({act['savings_kwh']:,.0f}&nbsp;kWh"
-                            if act.get("savings_eur", 0) > 0:
-                                act_sav += f", {act['savings_eur']:,.0f}&nbsp;€"
-                            act_sav += ")"
-                        action_rows += (
-                            f"<tr>"
-                            f"<td style='padding-left:16pt'>↳ {act['title']}{act_sav}</td>"
-                            f"<td>{act.get('responsible', '–')}</td>"
-                            f"<td>{act.get('target_date', '–')}</td>"
-                            f"<td colspan='3'>{act.get('status_label', act.get('status', '–'))}</td>"
-                            "</tr>"
-                        )
-
-                sus_parts.append(f"""
-<h2>Energieziele &amp; Ma&szlig;nahmen</h2>
-<table>
-    <thead>
-        <tr>
-            <th>Ziel</th>
-            <th>Zielwert</th>
-            <th>Termin</th>
-            <th>Verantwortlich</th>
-            <th>Status</th>
-            <th class="num">Fortschritt</th>
-        </tr>
-    </thead>
-    <tbody>
-        {obj_rows}
-        {action_rows}
-    </tbody>
 </table>""")
 
             # Gebäude
@@ -1121,19 +1252,183 @@ class ReportService:
     <tbody>{hist_rows}</tbody>
 </table>""")
 
+            # Anteil erneuerbarer Energien
+            if renewable_pct > 0:
+                sus_parts.append(f"""
+<h2>Anteil erneuerbarer Energien</h2>
+<div class="kpi-row">
+    <div class="kpi-card">
+        <div class="value" style="color:#10B981">{renewable_pct:.1f}%</div>
+        <div class="unit">&nbsp;</div>
+        <div class="label">Erneuerbare am Gesamtbezug</div>
+    </div>
+    <div class="kpi-card">
+        <div class="value" style="color:#10B981">{renewable_kwh_snap:,.1f}</div>
+        <div class="unit">kWh</div>
+        <div class="label">Erneuerbare Energie (Solar, Pellets, …)</div>
+    </div>
+</div>""")
+
             if sus_parts:
                 sustainability_body = f"""
 <div class="section">
-    <p>Übersicht der Energieziele, Kennzahlen und Maßnahmen gemäß ISO&nbsp;50001.</p>
+    <p>Übersicht der Kennzahlen, Gebäude und CO&#8322;-Entwicklung gemäß ISO&nbsp;50001.</p>
     {"".join(sus_parts)}
 </div>"""
 
+        # ── Neue Sektions-Bodies ──
+
+        # Kennzahlen-Vergleichstabelle (nur wenn Vorjahreswerte vorhanden)
+        kpi_section_body = ""
+        if kpi_compare_rows:
+            kpi_section_body = f"""
+<div class="section">
+    <p>Vergleich wesentlicher Energiekennzahlen mit dem Vorjahreszeitraum.</p>
+    <table>
+        <thead>
+            <tr>
+                <th>Kennzahl</th>
+                <th class="num">Einheit</th>
+                <th class="num">Vorjahr</th>
+                <th class="num">Aktuell</th>
+                <th class="num">Δ&nbsp;%</th>
+            </tr>
+        </thead>
+        <tbody>{kpi_compare_rows}</tbody>
+    </table>
+</div>"""
+
+        # Maßnahmen & Ergebnisse (getrennt nach Status)
+        massnahmen_body = ""
+        if massnahmen_parts:
+            massnahmen_body = f"""
+<div class="section">
+    <p>Übersicht der Energieziele und Maßnahmen gemäß ISO&nbsp;50001, aufgeteilt nach Umsetzungsstatus.</p>
+    {"".join(massnahmen_parts)}
+</div>"""
+
+        # Bewertung & Ausblick (auto-generiert)
+        # Bevorzuge Snapshot-Wert (immer berechnet), Fallback auf Chart-Wert
+        yoy_delta_for_bewertung = yoy_total_delta_pct_snap if yoy_total_delta_pct_snap is not None else yoy_delta_pct
+        bewertung_parts = []
+        if yoy_delta_for_bewertung is not None:
+            direction = "gestiegen" if yoy_delta_for_bewertung > 0 else "gesunken"
+            bewertung_parts.append(
+                f"Der Gesamtenergieverbrauch ist im Vergleich zum Vorjahr um "
+                f"<strong>{abs(yoy_delta_for_bewertung):.1f}%</strong> {direction}."
+            )
+        if cost_summary.get("available") and cost_summary.get("cost_savings") is not None:
+            savings = cost_summary["cost_savings"]
+            if abs(savings) > 0:
+                sav_dir = "eingespart" if savings > 0 else "gestiegen"
+                bewertung_parts.append(
+                    f"Die Energiekosten haben sich gegenüber dem Vorjahr um "
+                    f"<strong>{abs(savings):,.0f}&nbsp;€</strong> {sav_dir}."
+                )
+        if renewable_pct > 0:
+            bewertung_parts.append(
+                f"Der Anteil erneuerbarer Energien beträgt <strong>{renewable_pct:.1f}%</strong> "
+                f"des Gesamtenergiebezugs."
+            )
+        if objectives:
+            done_count = sum(
+                1 for o in objectives
+                if o.get("status", "").lower() in STATUS_DONE
+                or (o.get("progress_percent") or 0) >= 100
+            )
+            total_obj = len(objectives)
+            bewertung_parts.append(
+                f"Von {total_obj} Energiezielen sind <strong>{done_count}</strong> abgeschlossen."
+            )
+        if not bewertung_parts:
+            bewertung_parts.append(
+                "Eine detaillierte Bewertung der Energieentwicklung ist anhand der oben "
+                "dargestellten Kennzahlen und Verbrauchsdaten möglich."
+            )
+        bewertung_body = f"""
+<div class="section">
+    <p>{'</p><p>'.join(bewertung_parts)}</p>
+    <p>Als Ausblick für den kommenden Berichtszeitraum wird empfohlen, die laufenden Maßnahmen
+    konsequent umzusetzen und die Energieziele regelmäßig zu überwachen. Die Analyse der
+    wesentlichen Energieverbraucher (SEU) sollte als Basis für gezielte Verbesserungsmaßnahmen
+    genutzt werden.</p>
+</div>"""
+
+        # Kontinuierliche Verbesserung (KVP) aus ISO 50001
+        kvp = sustainability.get("kvp", {}) if sustainability else {}
+        kvp_body = ""
+        if kvp or objectives:
+            open_nc = kvp.get("open_nonconformities", 0)
+            closed_nc = kvp.get("closed_nonconformities", 0)
+            total_audits = kvp.get("total_audits", 0)
+            last_review = kvp.get("last_review_date", "–")
+            kvp_body = f"""
+<div class="section">
+    <p>Überblick über die KVP-Aktivitäten im Rahmen des ISO&nbsp;50001-Energiemanagementsystems.</p>
+    <div class="kpi-row">
+        <div class="kpi-card">
+            <div class="value" style="color:{'#DC2626' if open_nc > 0 else '#16A34A'}">{open_nc}</div>
+            <div class="unit">&nbsp;</div>
+            <div class="label">Offene Abweichungen</div>
+        </div>
+        <div class="kpi-card">
+            <div class="value" style="color:#16A34A">{closed_nc}</div>
+            <div class="unit">&nbsp;</div>
+            <div class="label">Geschlossene Abweichungen</div>
+        </div>
+        <div class="kpi-card">
+            <div class="value">{total_audits}</div>
+            <div class="unit">&nbsp;</div>
+            <div class="label">Interne Audits (gesamt)</div>
+        </div>
+        <div class="kpi-card">
+            <div class="value" style="font-size:12pt">{last_review}</div>
+            <div class="unit">&nbsp;</div>
+            <div class="label">Letztes Management-Review</div>
+        </div>
+    </div>
+    {f'<p>Aktive Energieziele: <strong>{len(objectives)}</strong></p>' if objectives else ''}
+</div>"""
+
+        # Fazit (auto-generiert)
+        fazit_parts = []
+        total_kwh_f = float(total_kwh)
+        if total_kwh_f > 0:
+            fazit_parts.append(
+                f"Der vorliegende Energiebericht dokumentiert den Energieverbrauch im Zeitraum "
+                f"{report.period_start} bis {report.period_end}."
+            )
+        if yoy_delta_for_bewertung is not None:
+            trend_word = "Anstieg" if yoy_delta_for_bewertung > 0 else "Rückgang"
+            fazit_parts.append(
+                f"Der {trend_word} des Gesamtverbrauchs von {abs(yoy_delta_for_bewertung):.1f}% "
+                f"gegenüber dem Vorjahr {'erfordert weitere Analyse und Maßnahmen' if yoy_delta_for_bewertung > 0 else 'zeigt den Erfolg der umgesetzten Maßnahmen'}."
+            )
+        fazit_parts.append(
+            "Die kontinuierliche Überwachung des Energieverbrauchs und die konsequente "
+            "Umsetzung der Energieziele sind wesentliche Elemente zur Erfüllung der "
+            "ISO&nbsp;50001-Anforderungen und zur nachhaltigen Reduktion des Energieeinsatzes."
+        )
+        fazit_body = f"""
+<div class="section">
+    <p>{'</p><p>'.join(fazit_parts)}</p>
+</div>"""
+
         # ── Sektionsnummern in der richtigen Reihenfolge vergeben ──
-        # Reihenfolge: 1. Mgmt-Summary, 2. Aktuelle Lage, 3. Analyse, 4. CO₂,
-        #              [5. Nachhaltigkeit], [6. Energiefluss], [7. Zählerstruktur],
-        #              [8. Wirtschaftlichkeit], SEU, Erkenntnisse, Maßnahmen
+        # Reihenfolge: 1. Mgmt-Summary, 2. Aktuelle Lage, 3. Analyse, 4. Kennzahlen,
+        #              5. Maßnahmen, 6. CO₂, [7. Nachhaltigkeit], [8. Energiefluss],
+        #              [9. Zählerstruktur], [10. Wirtschaftlichkeit], SEU,
+        #              Bewertung, KVP, Erkenntnisse, Empfehlungen, Fazit
         sec[0] = 3  # Nummern 1+2 sind hardcoded
-        n_analyse = next_sec()
+        n_analyse = next_sec()                # 3
+        kpi_section = (
+            f"<h1>{next_sec()}. Kennzahlen</h1>{kpi_section_body}"
+            if kpi_section_body else ""
+        )
+        massnahmen_section = (
+            f"<h1>{next_sec()}. Ma&szlig;nahmen &amp; Ergebnisse</h1>{massnahmen_body}"
+            if massnahmen_body else ""
+        )
         n_co2 = next_sec()
         sustainability_section = (
             f"<h1>{next_sec()}. Nachhaltigkeit &amp; ISO&nbsp;50001</h1>{sustainability_body}"
@@ -1144,7 +1439,7 @@ class ReportService:
             if sankey_body else ""
         )
         tree_section = (
-            f"<h1>{next_sec()}. Zählerstruktur</h1>{tree_body}"
+            f"<h1>{next_sec()}. Z&auml;hlerstruktur</h1>{tree_body}"
             if tree_body else ""
         )
         cost_section = (
@@ -1152,8 +1447,11 @@ class ReportService:
             if cost_body else ""
         )
         n_seu = next_sec()
+        n_bewertung = next_sec()
+        n_kvp = next_sec()
         n_findings = next_sec()
         n_reco = next_sec()
+        n_fazit = next_sec()
 
         generated_str = report.generated_at.strftime("%d.%m.%Y") if report.generated_at else ""
 
@@ -1239,10 +1537,10 @@ p {{ margin: 5pt 0; }}
     </div>
 </div>
 
-<!-- {next_sec() - 1 if False else 2}. Aktuelle Lage -->
-<h1>2. Aktuelle Lage</h1>
+<!-- 2. Energieverbrauch (Aktuelle Lage) -->
+<h1>2. Energieverbrauch</h1>
 <div class="section">
-    <p>Aufschl&uuml;sselung des Energieverbrauchs je Energieart in nativer Einheit. Unterschiedliche Energietr&auml;ger werden nicht zusammengefasst.</p>
+    <p>Aufschl&uuml;sselung des Energieverbrauchs je Energieart in nativer Einheit im Zeitraum {report.period_start} bis {report.period_end}.</p>
     {energy_type_sections_html if energy_type_sections_html else f"""
     <h2>Energiebilanz</h2>
     <table>
@@ -1252,6 +1550,28 @@ p {{ margin: 5pt 0; }}
     </table>
     {f'<figure>{monthly_trend_svg}</figure>' if monthly_trend_svg else ''}
     """}
+    {f"""
+    <h2>Vorjahresvergleich nach Energietr&auml;ger</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Energietr&auml;ger</th>
+                <th class="num">Vorjahr</th>
+                <th class="num">Aktuell</th>
+                <th class="num">&Delta;&nbsp;%</th>
+            </tr>
+        </thead>
+        <tbody>{yoy_table_rows}</tbody>
+    </table>""" if yoy_table_rows else ""}
+    {f"""
+    <h2>Verbrauch nach Bereichen</h2>
+    <p class="text-secondary">Aufschl&uuml;sselung nach Verbrauchergruppen (Consumer-Kategorien).</p>
+    <table>
+        <thead>
+            <tr><th>Bereich</th><th class="num">kWh-&Auml;quiv.</th><th class="num">Anteil</th></tr>
+        </thead>
+        <tbody>{cat_rows}</tbody>
+    </table>""" if cat_rows else ""}
     {schema_strands_html}
 </div>
 
@@ -1260,6 +1580,10 @@ p {{ margin: 5pt 0; }}
 <div class="section">
     {analyse_section or '<p class="text-secondary">Keine Vergleichsdaten verf&uuml;gbar (Diagramme wurden nicht aktiviert).</p>'}
 </div>
+
+{kpi_section}
+
+{massnahmen_section}
 
 <!-- {n_co2}. CO₂-Bilanz -->
 <h1>{n_co2}. CO&#8322;-Bilanz</h1>
@@ -1293,17 +1617,29 @@ p {{ margin: 5pt 0; }}
     </table>
 </div>
 
+<!-- {n_bewertung}. Bewertung & Ausblick -->
+<h1>{n_bewertung}. Bewertung &amp; Ausblick</h1>
+{bewertung_body}
+
+<!-- {n_kvp}. Kontinuierliche Verbesserung -->
+<h1>{n_kvp}. Kontinuierliche Verbesserung (KVP)</h1>
+{kvp_body if kvp_body else '<div class="section"><p class="text-secondary">Keine KVP-Daten vorhanden.</p></div>'}
+
 <!-- {n_findings}. Erkenntnisse -->
 <h1>{n_findings}. Erkenntnisse und Befunde</h1>
 <div class="section">
     {findings_html or '<p class="text-secondary">Keine besonderen Befunde.</p>'}
 </div>
 
-<!-- {n_reco}. Maßnahmen -->
-<h1>{n_reco}. Ma&szlig;nahmen und Empfehlungen</h1>
+<!-- {n_reco}. Empfehlungen -->
+<h1>{n_reco}. Empfehlungen</h1>
 <div class="section">
     {reco_html or '<p class="text-secondary">Keine Empfehlungen generiert.</p>'}
 </div>
+
+<!-- {n_fazit}. Fazit -->
+<h1>{n_fazit}. Fazit</h1>
+{fazit_body}
 
 </body>
 </html>"""
@@ -1428,15 +1764,42 @@ p {{ margin: 5pt 0; }}
         # Schema-Stränge aus dem Energieschema
         schema_strands = await self._create_schema_strands(start, end, meter_ids)
 
+        # Vorjahresvergleich nach Energieträger
+        energy_yoy_table = await self._create_energy_yoy_table(start, end, meter_ids, energy_by_type)
+
+        # Verbrauch nach Bereichen (Consumer-Kategorien)
+        consumer_categories = await self._create_consumer_categories(start, end, meter_ids)
+
+        # Anteil erneuerbarer Energien (Solar, Pellets, Biomasse)
+        RENEWABLE_TYPES = {"solar", "wood_pellets", "biomass", "geothermal", "wind"}
+        renewable_kwh = sum(
+            v.get("total_kwh_equiv", 0)
+            for k, v in energy_by_type.items()
+            if k in RENEWABLE_TYPES
+        )
+        renewable_pct = round(renewable_kwh / float(total_kwh) * 100, 1) if float(total_kwh) > 0 else 0.0
+
+        # Vorjahres-Gesamtverbrauch für Δ% im Summary
+        prev_total_kwh = sum(row["prev_kwh"] for row in energy_yoy_table)
+        yoy_total_delta_pct = None
+        if prev_total_kwh > 0:
+            yoy_total_delta_pct = round((float(total_kwh) - prev_total_kwh) / prev_total_kwh * 100, 1)
+
         return {
             "period_start": start.isoformat(),
             "period_end": end.isoformat(),
             "meter_count": len(meters),
             "total_consumption_kwh": float(total_kwh),
+            "prev_total_kwh": round(prev_total_kwh, 1),
+            "yoy_total_delta_pct": yoy_total_delta_pct,
             "energy_balance": energy_balance,
             "top_consumers": top_consumers,
             "monthly_trend": monthly_trend,
             "energy_by_type": energy_by_type,
+            "energy_yoy_table": energy_yoy_table,
+            "consumer_categories": consumer_categories,
+            "renewable_kwh": round(renewable_kwh, 1),
+            "renewable_pct": renewable_pct,
             "schema_strands": schema_strands,
             "energy_intensity_kwh_per_day": round(energy_intensity_kwh_per_day, 1),
             "days_in_period": days_in_period,
@@ -2004,10 +2367,38 @@ p {{ margin: 5pt 0; }}
             for row in monthly_result.all()
         ]
 
+        # Vorjahreskosten für YoY-Vergleich
+        try:
+            prev_start = start.replace(year=start.year - 1)
+            prev_end = end.replace(year=end.year - 1)
+        except ValueError:
+            prev_start = start - timedelta(days=365)
+            prev_end = end - timedelta(days=365)
+
+        prev_start_dt = datetime.combine(prev_start, datetime.min.time(), tzinfo=timezone.utc)
+        prev_end_dt = datetime.combine(prev_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+
+        prev_query = select(func.sum(MeterReading.cost_net)).where(
+            MeterReading.timestamp >= prev_start_dt,
+            MeterReading.timestamp < prev_end_dt,
+            MeterReading.cost_net.is_not(None),
+        )
+        if meter_ids:
+            prev_query = prev_query.where(MeterReading.meter_id.in_(meter_ids))
+        prev_result = await self.db.execute(prev_query)
+        prev_cost_net = prev_result.scalar()
+        prev_cost_net = float(prev_cost_net) if prev_cost_net is not None else None
+
+        cost_savings = None
+        if prev_cost_net is not None and prev_cost_net > 0:
+            cost_savings = round(prev_cost_net - total_cost_net, 2)
+
         return {
             "available": True,
             "total_cost_net": total_cost_net,
             "total_cost_gross": total_cost_gross,
+            "prev_year_cost_net": prev_cost_net,
+            "cost_savings": cost_savings,
             "monthly_costs": monthly_costs,
         }
 
@@ -2316,7 +2707,215 @@ p {{ margin: 5pt 0; }}
             logger.warning("sustainability_co2_history_failed", error=str(e))
             result["co2_history"] = []
 
+        # ── 5. KVP-Daten (Kontinuierliche Verbesserung) ──
+        try:
+            from app.models.iso import InternalAudit, ManagementReview, Nonconformity
+
+            nc_result = await self.db.execute(
+                select(func.count(Nonconformity.id)).where(
+                    Nonconformity.status != "closed"
+                )
+            )
+            open_nc = nc_result.scalar() or 0
+
+            nc_closed_result = await self.db.execute(
+                select(func.count(Nonconformity.id)).where(
+                    Nonconformity.status == "closed"
+                )
+            )
+            closed_nc = nc_closed_result.scalar() or 0
+
+            audit_result = await self.db.execute(
+                select(func.count(InternalAudit.id))
+            )
+            total_audits = audit_result.scalar() or 0
+
+            mr_result = await self.db.execute(
+                select(ManagementReview.review_date)
+                .order_by(ManagementReview.review_date.desc())
+                .limit(1)
+            )
+            mr_row = mr_result.first()
+            last_review = mr_row[0].isoformat() if mr_row and mr_row[0] else None
+
+            result["kvp"] = {
+                "open_nonconformities": open_nc,
+                "closed_nonconformities": closed_nc,
+                "total_audits": total_audits,
+                "last_review_date": last_review,
+            }
+        except Exception as e:
+            logger.warning("sustainability_kvp_failed", error=str(e))
+            result["kvp"] = {}
+
         return result
+
+    async def _create_energy_yoy_table(
+        self,
+        start: date,
+        end: date,
+        meter_ids: list[uuid.UUID] | None,
+        energy_by_type: dict,
+    ) -> list[dict]:
+        """
+        Vorjahresvergleich nach Energieträger für die Berichtstabelle.
+        Gibt [{energy_type, label, unit, prev_native, curr_native, prev_kwh, curr_kwh, delta_pct}]
+        """
+        from app.models.meter import Meter
+
+        try:
+            prev_start = start.replace(year=start.year - 1)
+            prev_end = end.replace(year=end.year - 1)
+        except ValueError:
+            prev_start = start - timedelta(days=365)
+            prev_end = end - timedelta(days=365)
+
+        prev_start_dt = datetime.combine(prev_start, datetime.min.time(), tzinfo=timezone.utc)
+        prev_end_dt = datetime.combine(prev_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+
+        result = []
+        for et_key, et_data in energy_by_type.items():
+            curr_kwh = et_data.get("total_kwh_equiv", 0.0)
+            curr_native = et_data.get("total_native", 0.0)
+            unit = et_data.get("unit", "kWh")
+            label = et_data.get("label", et_key)
+
+            q = (
+                select(Meter.unit, func.sum(MeterReading.consumption).label("total"))
+                .join(MeterReading, MeterReading.meter_id == Meter.id)
+                .where(
+                    Meter.is_active == True,  # noqa: E712
+                    Meter.energy_type == et_key,
+                    MeterReading.timestamp >= prev_start_dt,
+                    MeterReading.timestamp < prev_end_dt,
+                )
+                .group_by(Meter.unit)
+            )
+            if meter_ids:
+                q = q.where(Meter.id.in_(meter_ids))
+
+            q_result = await self.db.execute(q)
+            prev_kwh = 0.0
+            prev_native = 0.0
+            for row in q_result.all():
+                conv = float(CONVERSION_FACTORS.get(row.unit, Decimal("1")))
+                prev_kwh += float(row.total or 0) * conv
+                if row.unit == unit:
+                    prev_native += float(row.total or 0)
+
+            delta_pct = None
+            if prev_kwh > 0:
+                delta_pct = round((curr_kwh - prev_kwh) / prev_kwh * 100, 1)
+
+            result.append({
+                "energy_type": et_key,
+                "label": label,
+                "unit": unit,
+                "prev_native": round(prev_native, 1),
+                "curr_native": round(curr_native, 1),
+                "prev_kwh": round(prev_kwh, 1),
+                "curr_kwh": round(curr_kwh, 1),
+                "delta_pct": delta_pct,
+            })
+
+        return result
+
+    async def _create_consumer_categories(
+        self,
+        start: date,
+        end: date,
+        meter_ids: list[uuid.UUID] | None,
+    ) -> list[dict]:
+        """Verbrauch nach Consumer-Kategorien (Produktionsbereiche)."""
+        from sqlalchemy.orm import selectinload
+
+        from app.models.consumer import Consumer
+
+        CATEGORY_LABELS: dict[str, str] = {
+            "production": "Produktion",
+            "building": "Gebäude/Heizung",
+            "administration": "Verwaltung",
+            "lighting": "Beleuchtung",
+            "hvac": "Klima/Lüftung",
+            "compressed_air": "Druckluft",
+            "cooling": "Kälteerzeugung",
+            "it": "IT/Rechenzentrum",
+            "other": "Sonstiges",
+        }
+
+        start_dt = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
+        end_dt = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+
+        consumers_result = await self.db.execute(
+            select(Consumer)
+            .options(selectinload(Consumer.meters))
+            .where(Consumer.is_active == True)  # noqa: E712
+        )
+        consumers = list(consumers_result.scalars().all())
+
+        category_kwh: dict[str, float] = {}
+        total_kwh = 0.0
+
+        for consumer in consumers:
+            consumer_kwh = 0.0
+            for meter in consumer.meters:
+                if not getattr(meter, "is_active", True):
+                    continue
+                if meter_ids and meter.id not in meter_ids:
+                    continue
+                cons_result = await self.db.execute(
+                    select(func.sum(MeterReading.consumption)).where(
+                        MeterReading.meter_id == meter.id,
+                        MeterReading.timestamp >= start_dt,
+                        MeterReading.timestamp < end_dt,
+                    )
+                )
+                raw = float(cons_result.scalar() or 0)
+                conv = float(CONVERSION_FACTORS.get(getattr(meter, "unit", "kWh") or "kWh", Decimal("1")))
+                consumer_kwh += raw * conv
+
+            cat = getattr(consumer, "category", None) or "other"
+            category_kwh[cat] = category_kwh.get(cat, 0) + consumer_kwh
+            total_kwh += consumer_kwh
+
+        if total_kwh == 0:
+            return []
+
+        return [
+            {
+                "category": cat,
+                "label": CATEGORY_LABELS.get(cat, cat),
+                "kwh": round(kwh, 1),
+                "pct": round(kwh / total_kwh * 100, 1),
+            }
+            for cat, kwh in sorted(category_kwh.items(), key=lambda x: -x[1])
+            if kwh > 0
+        ]
+
+    async def _create_amortization_summary(self) -> list[dict]:
+        """Amortisationsübersicht für den PDF-Bericht."""
+        from app.services.economics_service import EconomicsService
+
+        try:
+            svc = EconomicsService(self.db)
+            items = await svc.get_amortization_overview()
+            return [
+                {
+                    "title": item.get("title", ""),
+                    "type": item.get("type", ""),
+                    "investment": item.get("investment", 0),
+                    "annual_savings_net": item.get("annual_savings_net", 0),
+                    "simple_payback_years": item.get("simple_payback_years"),
+                    "npv": item.get("npv"),
+                    "roi_pct": item.get("roi_pct"),
+                    "profitable": item.get("profitable", False),
+                    "price_source": item.get("price_source", "fallback"),
+                }
+                for item in items
+            ]
+        except Exception as e:
+            logger.warning("amortization_summary_failed", error=str(e))
+            return []
 
     async def _generate_summary(self, snapshot: dict, co2_summary: dict | None) -> str:
         """Management-Zusammenfassung automatisch erstellen."""
