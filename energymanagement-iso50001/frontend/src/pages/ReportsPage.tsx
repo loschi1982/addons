@@ -1071,17 +1071,29 @@ function ReportViewer({
             </div>
           )}
 
-          {/* KPI-Karten */}
+          {/* KPI-Karten: pro Energieart eine Karte (native Einheit) */}
           {(() => {
+            const energyByType = snapshot.energy_by_type as Record<string, EnergyTypeData> | undefined;
             const intensityPerUnit = snapshot.energy_intensity_per_unit as number | null | undefined;
             const refUnit = (snapshot.reference_unit as string) || 'm²';
             const intensityPerDay = snapshot.energy_intensity_kwh_per_day as number | undefined;
             return (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <div className="rounded-lg border p-3 text-center">
-                  <p className="text-xl font-bold text-primary-600">{formatNumber(totalKwh)}</p>
-                  <p className="text-xs text-gray-500">kWh Gesamtverbrauch</p>
-                </div>
+                {energyByType && Object.entries(energyByType).map(([key, et]) => (
+                  <div key={key} className="rounded-lg border p-3 text-center">
+                    <p className="text-xl font-bold" style={{ color: et.color || '#1B5E7B' }}>
+                      {et.total_native.toLocaleString('de-DE', { maximumFractionDigits: 0 })}
+                    </p>
+                    <p className="text-xs text-gray-400">{et.unit}</p>
+                    <p className="text-xs text-gray-500">{et.label}</p>
+                  </div>
+                ))}
+                {!energyByType && (
+                  <div className="rounded-lg border p-3 text-center">
+                    <p className="text-xl font-bold text-primary-600">{formatNumber(totalKwh)}</p>
+                    <p className="text-xs text-gray-500">kWh Gesamtverbrauch</p>
+                  </div>
+                )}
                 <div className="rounded-lg border p-3 text-center">
                   <p className="text-xl font-bold text-primary-600">{formatNumber(totalCo2)}</p>
                   <p className="text-xs text-gray-500">kg CO₂-Emissionen</p>
@@ -1143,22 +1155,35 @@ function ReportViewer({
             </div>
           )}
 
-          {/* Top-Verbraucher */}
+          {/* Top-Verbraucher (SEU) – native Einheit */}
           {(snapshot.top_consumers as Record<string, unknown>[])?.length > 0 && (
             <div>
               <h3 className="text-base font-semibold text-gray-900 mb-2">Top-Verbraucher (SEU)</h3>
               <div className="space-y-2">
                 {(snapshot.top_consumers as Record<string, unknown>[]).map((tc, idx) => {
+                  // Sortierung per kWh-Äquiv, Anzeige in nativer Einheit
                   const maxVal = ((snapshot.top_consumers as Record<string, unknown>[])[0]?.consumption_kwh as number) || 1;
                   const pct = ((tc.consumption_kwh as number) / maxVal) * 100;
+                  const native = tc.consumption_native as number | null;
+                  const unit = (tc.unit as string) || 'kWh';
+                  const etColor = (ENERGY_TYPE_COLORS as Record<string, string>)[tc.energy_type as string] || '#1B5E7B';
+                  const displayVal = native != null && native > 0
+                    ? `${native.toLocaleString('de-DE', { maximumFractionDigits: 1 })} ${unit}`
+                    : `${formatNumber(tc.consumption_kwh as number)} kWh`;
                   return (
                     <div key={idx}>
                       <div className="flex items-center justify-between text-sm">
-                        <span className="font-medium text-gray-700">{tc.name as string}</span>
-                        <span className="text-gray-500">{formatNumber(tc.consumption_kwh as number)} kWh</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: etColor }} />
+                          <span className="font-medium text-gray-700">{tc.name as string}</span>
+                          <span className="text-xs text-gray-400">
+                            {ENERGY_TYPE_LABELS[(tc.energy_type as string) as keyof typeof ENERGY_TYPE_LABELS] || (tc.energy_type as string)}
+                          </span>
+                        </div>
+                        <span className="text-gray-500 font-mono text-xs">{displayVal}</span>
                       </div>
-                      <div className="mt-1 h-2 w-full rounded-full bg-gray-100">
-                        <div className="h-2 rounded-full bg-primary-500" style={{ width: `${pct}%` }} />
+                      <div className="mt-1 h-1.5 w-full rounded-full bg-gray-100">
+                        <div className="h-1.5 rounded-full" style={{ width: `${pct}%`, backgroundColor: etColor }} />
                       </div>
                     </div>
                   );
@@ -1167,8 +1192,10 @@ function ReportViewer({
             </div>
           )}
 
-          {/* Monatlicher Verbrauchsverlauf */}
-          <MonthlyTrendChart snapshot={snapshot as Record<string, unknown>} />
+          {/* Monatlicher Verbrauchsverlauf: nur anzeigen wenn genau eine Energieart */}
+          {Object.keys((snapshot.energy_by_type as Record<string, unknown>) || {}).length <= 1 && (
+            <MonthlyTrendChart snapshot={snapshot as Record<string, unknown>} />
+          )}
 
           {/* Ursachenanalyse */}
           {(() => {
