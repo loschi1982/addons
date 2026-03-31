@@ -21,6 +21,7 @@ import {
   Settings,
   Globe,
   Network,
+  Euro,
 } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
 import { toggleSidebar } from '@/store/slices/uiSlice';
@@ -35,6 +36,7 @@ const navItems = [
   { path: '/energy-review', labelKey: 'nav.energyReview', icon: Activity },
   { path: '/schemas', labelKey: 'nav.schema', icon: BarChart3 },
   { path: '/analytics', labelKey: 'nav.analytics', icon: TrendingUp },
+  { path: '/economics', labelKey: 'nav.economics', icon: Euro },
   { path: '/emissions', labelKey: 'nav.emissions', icon: Leaf },
   { path: '/weather', labelKey: 'nav.weather', icon: Cloud },
   { path: '/climate', labelKey: 'nav.climate', icon: Thermometer },
