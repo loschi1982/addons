@@ -42,7 +42,8 @@
       "Bash(grep -r \"electricity\\\\|natural_gas\\\\|heating_oil\\\\|district_heating\\\\|water\\\\|solar\" /home/rico/addons/energymanagement-iso50001/backend/app/models/*.py --include=\"*.py\")",
       "Bash(grep -r \"m³\\\\|kWh\\\\|MWh\\\\|Liter\\\\|Kubikmeter\" /home/rico/addons/energymanagement-iso50001/backend/seed_data/*.json)",
       "Bash(/home/rico/.nvm/versions/node/v20.20.1/bin/npx tsc:*)",
-      "Bash(PATH=\"/home/rico/.nvm/versions/node/v20.20.1/bin:$PATH\" npx tsc --noEmit)"
+      "Bash(PATH=\"/home/rico/.nvm/versions/node/v20.20.1/bin:$PATH\" npx tsc --noEmit)",
+      "Bash(curl -s http://192.168.178.142:8099/assets/index-D04PJiAF.js)"
     ]
   }
 }
