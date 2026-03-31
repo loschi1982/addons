@@ -43,7 +43,16 @@
       "Bash(grep -r \"m³\\\\|kWh\\\\|MWh\\\\|Liter\\\\|Kubikmeter\" /home/rico/addons/energymanagement-iso50001/backend/seed_data/*.json)",
       "Bash(/home/rico/.nvm/versions/node/v20.20.1/bin/npx tsc:*)",
       "Bash(PATH=\"/home/rico/.nvm/versions/node/v20.20.1/bin:$PATH\" npx tsc --noEmit)",
-      "Bash(curl -s http://192.168.178.142:8099/assets/index-D04PJiAF.js)"
+      "Bash(curl -s http://192.168.178.142:8099/assets/index-D04PJiAF.js)",
+      "Bash(grep -l \"target\\\\|goal\\\\|baseline\" /home/rico/addons/energymanagement-iso50001/backend/app/services/*.py)",
+      "Bash(wc -l /home/rico/addons/energymanagement-iso50001/backend/app/models/*.py)",
+      "Bash(~/.nvm/versions/node/v22.15.0/bin/npm run:*)",
+      "Bash(~/.nvm/versions/node/v20.20.1/bin/npm run:*)",
+      "Bash(PATH=~/.nvm/versions/node/v20.20.1/bin:$PATH npm run type-check)",
+      "Bash(PATH=~/.nvm/versions/node/v20.20.1/bin:$PATH ~/.nvm/versions/node/v20.20.1/bin/node ~/.nvm/versions/node/v20.20.1/bin/npx tsc --noEmit)",
+      "Bash(~/.nvm/versions/node/v20.20.1/bin/node ~/.nvm/versions/node/v20.20.1/bin/../lib/node_modules/typescript/bin/tsc --noEmit)",
+      "Bash(~/.nvm/versions/node/v20.20.1/bin/node /home/rico/addons/energymanagement-iso50001/frontend/node_modules/.bin/tsc --noEmit)",
+      "Bash(echo \"Exit: $?\")"
     ]
   }
 }
