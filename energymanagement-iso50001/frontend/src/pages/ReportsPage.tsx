@@ -4,14 +4,14 @@ import {
   CheckCircle, AlertCircle, Clock, Loader2, X,
   BarChart3, Leaf, Thermometer, Search,
   GitBranch, Grid3X3, Workflow, TrendingUp, DollarSign,
-  Building2, Gauge,
+  Building2, Gauge, Zap,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import SankeyDiagram from '@/components/charts/SankeyDiagram';
 import { apiClient } from '@/utils/api';
-import { ENERGY_TYPE_LABELS } from '@/types';
+import { ENERGY_TYPE_LABELS, ENERGY_TYPE_COLORS } from '@/types';
 
 /* ── Typen ── */
 
@@ -847,6 +847,169 @@ function CostSection({ snapshot }: { snapshot: Record<string, unknown> }) {
   );
 }
 
+/* Typen für Energieart-Trennung */
+interface EnergyTypeData {
+  label: string;
+  unit: string;
+  color: string;
+  total_native: number;
+  total_kwh_equiv: number;
+  meter_count: number;
+  top_meters: { meter_id: string; name: string; unit: string; total_native: number; total_kwh_equiv: number }[];
+  monthly_trend: { month: number; consumption_native: number }[];
+}
+
+interface SchemaStrand {
+  schema_label: string;
+  root_meter_id: string;
+  root_meter_name: string;
+  energy_type: string;
+  unit: string;
+  total_native: number;
+  total_kwh_equiv: number;
+  meter_count: number;
+  meters: { meter_id: string; name: string; energy_type: string; unit: string; total_native: number; total_kwh_equiv: number; is_root: boolean }[];
+}
+
+function EnergyByTypeSection({ snapshot }: { snapshot: Record<string, unknown> }) {
+  const energyByType = snapshot.energy_by_type as Record<string, EnergyTypeData> | undefined;
+  if (!energyByType || Object.keys(energyByType).length === 0) return null;
+
+  return (
+    <div>
+      <h3 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+        <Zap className="h-4 w-4 text-primary-600" />
+        Energieverbrauch nach Energieart
+      </h3>
+      <p className="text-sm text-gray-500 mb-4">
+        Jede Energieart wird in ihrer nativen Einheit ausgewiesen. Eine Zusammenfassung verschiedener Energieträger ist nicht ISO&nbsp;50001-konform.
+      </p>
+      <div className="space-y-6">
+        {Object.entries(energyByType).map(([key, et]) => {
+          const color = et.color || (ENERGY_TYPE_COLORS as Record<string, string>)[key] || '#1B5E7B';
+          const chartData = et.monthly_trend
+            .filter((d) => d.consumption_native > 0)
+            .map((d) => ({
+              monat: MONTHS_SHORT[d.month - 1],
+              [et.unit]: Math.round(d.consumption_native * 10) / 10,
+            }));
+          return (
+            <div key={key} className="rounded-lg border overflow-hidden">
+              {/* Header */}
+              <div className="px-4 py-2.5 flex items-center gap-2" style={{ backgroundColor: color + '18', borderBottom: `2px solid ${color}` }}>
+                <span className="h-3 w-3 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                <span className="font-semibold text-gray-900">{et.label}</span>
+                <span className="ml-auto text-sm font-bold" style={{ color }}>
+                  {et.total_native.toLocaleString('de-DE', { maximumFractionDigits: 1 })} {et.unit}
+                </span>
+                {et.unit !== 'kWh' && (
+                  <span className="text-xs text-gray-400">
+                    ({et.total_kwh_equiv.toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh-Äquiv.)
+                  </span>
+                )}
+              </div>
+              <div className="p-4">
+                {/* Zähler-Liste */}
+                {et.top_meters.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-xs text-gray-500 mb-2">{et.meter_count} Zähler erfasst</p>
+                    <div className="space-y-1.5">
+                      {et.top_meters.map((m) => {
+                        const maxVal = et.top_meters[0]?.total_native || 1;
+                        const pct = (m.total_native / maxVal) * 100;
+                        return (
+                          <div key={m.meter_id}>
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-gray-700">{m.name}</span>
+                              <span className="text-gray-500 font-mono">
+                                {m.total_native.toLocaleString('de-DE', { maximumFractionDigits: 1 })} {m.unit}
+                              </span>
+                            </div>
+                            <div className="mt-0.5 h-1.5 w-full rounded-full bg-gray-100">
+                              <div className="h-1.5 rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {/* Monatsverlauf */}
+                {chartData.length > 0 && (
+                  <ResponsiveContainer width="100%" height={160}>
+                    <BarChart data={chartData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                      <XAxis dataKey="monat" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+                      <Tooltip formatter={(v: number) => [`${v.toLocaleString('de-DE')} ${et.unit}`]} />
+                      <Bar dataKey={et.unit} fill={color} radius={[2, 2, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SchemaStrandsSection({ snapshot }: { snapshot: Record<string, unknown> }) {
+  const strands = snapshot.schema_strands as SchemaStrand[] | undefined;
+  if (!strands?.length) return null;
+
+  return (
+    <div>
+      <h3 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
+        <GitBranch className="h-4 w-4 text-primary-600" />
+        Auswertung nach Energieschema
+      </h3>
+      <p className="text-sm text-gray-500 mb-3">
+        Verbrauch je Zählerstrang (Betrachtungspunkt) gemäß dem konfigurierten Energieschema.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="border-b text-left text-gray-500">
+              <th className="pb-2 font-medium">Strang</th>
+              <th className="pb-2 font-medium">Energieart</th>
+              <th className="pb-2 font-medium text-right">Verbrauch</th>
+              <th className="pb-2 font-medium text-right">kWh-Äquiv.</th>
+              <th className="pb-2 font-medium text-right">Zähler</th>
+            </tr>
+          </thead>
+          <tbody>
+            {strands.map((strand) => {
+              const color = (ENERGY_TYPE_COLORS as Record<string, string>)[strand.energy_type] || '#1B5E7B';
+              return (
+                <tr key={strand.root_meter_id} className="border-b last:border-0">
+                  <td className="py-2">
+                    <span className="font-medium text-gray-800">{strand.schema_label}</span>
+                    <span className="block text-xs text-gray-400">{strand.root_meter_name}</span>
+                  </td>
+                  <td className="py-2">
+                    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: color + '22', color }}>
+                      {ENERGY_TYPE_LABELS[strand.energy_type as keyof typeof ENERGY_TYPE_LABELS] || strand.energy_type}
+                    </span>
+                  </td>
+                  <td className="py-2 text-right font-mono text-gray-700">
+                    {strand.total_native.toLocaleString('de-DE', { maximumFractionDigits: 1 })} {strand.unit}
+                  </td>
+                  <td className="py-2 text-right text-gray-500">
+                    {strand.total_kwh_equiv.toLocaleString('de-DE', { maximumFractionDigits: 0 })}
+                  </td>
+                  <td className="py-2 text-right text-gray-500">{strand.meter_count}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function ReportViewer({
   report,
   onClose,
@@ -942,36 +1105,11 @@ function ReportViewer({
             );
           })()}
 
-          {/* Energiebilanz */}
-          {(snapshot.energy_balance as Record<string, unknown>[])?.length > 0 && (
-            <div>
-              <h3 className="text-base font-semibold text-gray-900 mb-2">Energiebilanz</h3>
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-gray-500">
-                    <th className="pb-2 font-medium">Energieträger</th>
-                    <th className="pb-2 font-medium text-right">Verbrauch (kWh)</th>
-                    <th className="pb-2 font-medium text-right">Anteil</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(snapshot.energy_balance as Record<string, unknown>[]).map((item, idx) => (
-                    <tr key={idx} className="border-b last:border-0">
-                      <td className="py-2 text-gray-700">
-                        {ENERGY_TYPE_LABELS[(item.energy_type as string) as keyof typeof ENERGY_TYPE_LABELS] || (item.energy_type as string)}
-                      </td>
-                      <td className="py-2 text-right text-gray-700">
-                        {formatNumber(item.consumption_kwh as number)}
-                      </td>
-                      <td className="py-2 text-right text-gray-500">
-                        {(item.share_percent as number).toFixed(1)}%
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {/* Energieart-Trennung (Hauptsektion) */}
+          <EnergyByTypeSection snapshot={snapshot as Record<string, unknown>} />
+
+          {/* Schema-Stränge */}
+          <SchemaStrandsSection snapshot={snapshot as Record<string, unknown>} />
 
           {/* CO₂-Bilanz */}
           {(co2.by_energy_type as Record<string, unknown>[])?.length > 0 && (
