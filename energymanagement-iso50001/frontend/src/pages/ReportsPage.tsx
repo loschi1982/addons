@@ -1406,6 +1406,59 @@ function ReportViewer({
           {/* Schema-Stränge */}
           <SchemaStrandsSection snapshot={snapshot as Record<string, unknown>} />
 
+          {/* Vorjahresvergleich nach Energieträger */}
+          {(snapshot.energy_yoy_table as Record<string, unknown>[])?.length > 0 && (
+            <div>
+              <h3 className="text-base font-semibold text-gray-900 mb-2">Vorjahresvergleich nach Energieträger</h3>
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-gray-500">
+                    <th className="pb-2 font-medium">Energieträger</th>
+                    <th className="pb-2 font-medium text-right">Vorjahr</th>
+                    <th className="pb-2 font-medium text-right">Aktuell</th>
+                    <th className="pb-2 font-medium text-right">Δ %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(snapshot.energy_yoy_table as Record<string, unknown>[]).map((row, idx) => {
+                    const delta = row.delta_pct as number | null;
+                    const unit = row.unit as string;
+                    return (
+                      <tr key={idx} className="border-b last:border-0">
+                        <td className="py-2 text-gray-700 font-medium">{row.label as string}</td>
+                        <td className="py-2 text-right text-gray-500">{(row.prev_native as number).toLocaleString('de-DE', { maximumFractionDigits: 1 })} {unit}</td>
+                        <td className="py-2 text-right text-gray-700">{(row.curr_native as number).toLocaleString('de-DE', { maximumFractionDigits: 1 })} {unit}</td>
+                        <td className={`py-2 text-right font-semibold ${delta == null ? 'text-gray-400' : delta > 5 ? 'text-red-600' : delta < -5 ? 'text-green-600' : 'text-gray-700'}`}>
+                          {delta != null ? `${delta > 0 ? '+' : ''}${delta.toFixed(1)}%` : '–'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Verbrauch nach Bereichen */}
+          {(snapshot.consumer_categories as Record<string, unknown>[])?.length > 0 && (
+            <div>
+              <h3 className="text-base font-semibold text-gray-900 mb-2">Verbrauch nach Bereichen</h3>
+              <div className="space-y-2">
+                {(snapshot.consumer_categories as Record<string, unknown>[]).map((cat, idx) => (
+                  <div key={idx}>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-700">{cat.label as string}</span>
+                      <span className="text-gray-500 font-mono">{(cat.kwh as number).toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh ({(cat.pct as number).toFixed(1)}%)</span>
+                    </div>
+                    <div className="mt-1 h-1.5 w-full rounded-full bg-gray-100">
+                      <div className="h-1.5 rounded-full bg-primary-500" style={{ width: `${cat.pct as number}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* CO₂-Bilanz */}
           {(co2.by_energy_type as Record<string, unknown>[])?.length > 0 && (
             <div>
@@ -1526,6 +1579,103 @@ function ReportViewer({
           {/* Jahresvergleich */}
           <YoyChart charts={charts} />
 
+          {/* KPI-Vergleichstabelle */}
+          {(() => {
+            const prevKwh = snapshot.prev_total_kwh as number | undefined;
+            const currKwh = snapshot.total_consumption_kwh as number | undefined;
+            const costSum = snapshot.cost_summary as Record<string, unknown> | undefined;
+            const rows: { label: string; unit: string; prev: string; curr: string; delta: string | null }[] = [];
+            if (prevKwh != null && currKwh != null && (prevKwh > 0 || currKwh > 0)) {
+              const d = prevKwh > 0 ? ((currKwh - prevKwh) / prevKwh * 100) : null;
+              rows.push({ label: 'Gesamtverbrauch (kWh-Äquiv.)', unit: 'kWh', prev: prevKwh.toLocaleString('de-DE', { maximumFractionDigits: 0 }), curr: currKwh.toLocaleString('de-DE', { maximumFractionDigits: 0 }), delta: d != null ? `${d > 0 ? '+' : ''}${d.toFixed(1)}%` : null });
+            }
+            if (costSum?.available && costSum.prev_year_cost_net != null) {
+              const prev = costSum.prev_year_cost_net as number;
+              const curr = costSum.total_cost_net as number;
+              const d = prev > 0 ? ((curr - prev) / prev * 100) : null;
+              rows.push({ label: 'Energiekosten', unit: '€ netto', prev: prev.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), curr: curr.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), delta: d != null ? `${d > 0 ? '+' : ''}${d.toFixed(1)}%` : null });
+            }
+            if (rows.length === 0) return null;
+            return (
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 mb-2">Kennzahlen-Vergleich</h3>
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-gray-500">
+                      <th className="pb-2 font-medium">Kennzahl</th>
+                      <th className="pb-2 font-medium text-right">Einheit</th>
+                      <th className="pb-2 font-medium text-right">Vorjahr</th>
+                      <th className="pb-2 font-medium text-right">Aktuell</th>
+                      <th className="pb-2 font-medium text-right">Δ %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row, idx) => (
+                      <tr key={idx} className="border-b last:border-0">
+                        <td className="py-2 text-gray-700">{row.label}</td>
+                        <td className="py-2 text-right text-gray-400 text-xs">{row.unit}</td>
+                        <td className="py-2 text-right text-gray-500">{row.prev}</td>
+                        <td className="py-2 text-right text-gray-700 font-medium">{row.curr}</td>
+                        <td className={`py-2 text-right font-semibold ${row.delta == null ? 'text-gray-400' : row.delta.startsWith('+') ? 'text-red-600' : 'text-green-600'}`}>
+                          {row.delta ?? '–'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+
+          {/* Maßnahmen & Ergebnisse (split by status) */}
+          {(() => {
+            const sus = snapshot.sustainability as Record<string, unknown> | undefined;
+            const objs = sus?.objectives as Record<string, unknown>[] | undefined;
+            if (!objs?.length) return null;
+            const STATUS_DONE = new Set(['completed', 'abgeschlossen', 'done']);
+            const done = objs.filter(o => STATUS_DONE.has((o.status as string || '').toLowerCase()) || (o.progress_percent as number) >= 100);
+            const planned = objs.filter(o => !STATUS_DONE.has((o.status as string || '').toLowerCase()) && (o.progress_percent as number | null) !== 100);
+            const renderRows = (items: Record<string, unknown>[]) => items.map((obj, idx) => {
+              const prog = obj.progress_percent as number | null;
+              return (
+                <div key={idx} className="border-b last:border-0 py-2">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">{obj.title as string}</p>
+                      {!!obj.description && <p className="text-xs text-gray-500">{obj.description as string}</p>}
+                    </div>
+                    <span className="text-xs text-gray-400 ml-2 flex-shrink-0">{obj.target_date as string || '–'}</span>
+                  </div>
+                  {prog != null && (
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <div className="flex-1 h-1.5 rounded-full bg-gray-100">
+                        <div className="h-1.5 rounded-full" style={{ width: `${Math.min(prog, 100)}%`, backgroundColor: prog >= 80 ? '#16A34A' : prog >= 40 ? '#F59E0B' : '#1B5E7B' }} />
+                      </div>
+                      <span className="text-xs text-gray-500 w-8 text-right">{prog.toFixed(0)}%</span>
+                    </div>
+                  )}
+                </div>
+              );
+            });
+            return (
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 mb-2">Maßnahmen &amp; Ergebnisse</h3>
+                {done.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-xs font-semibold text-green-700 uppercase tracking-wide mb-1">Abgeschlossen ({done.length})</p>
+                    <div className="divide-y">{renderRows(done)}</div>
+                  </div>
+                )}
+                {planned.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-primary-600 uppercase tracking-wide mb-1">Laufend &amp; Geplant ({planned.length})</p>
+                    <div className="divide-y">{renderRows(planned)}</div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Wirtschaftlichkeit */}
           <CostSection snapshot={snapshot as Record<string, unknown>} />
 
@@ -1585,6 +1735,76 @@ function ReportViewer({
               </div>
             </div>
           )}
+
+          {/* Bewertung & Ausblick */}
+          {(() => {
+            const sus = snapshot.sustainability as Record<string, unknown> | undefined;
+            const objs = sus?.objectives as Record<string, unknown>[] | undefined;
+            const costSum = snapshot.cost_summary as Record<string, unknown> | undefined;
+            const prevKwh = snapshot.prev_total_kwh as number | undefined;
+            const currKwh = snapshot.total_consumption_kwh as number | undefined;
+            const renewPct = snapshot.renewable_pct as number | undefined;
+            const hasData = (prevKwh != null && currKwh != null) || costSum?.available || (renewPct != null && renewPct > 0);
+            if (!hasData) return null;
+            const yoyDelta = (prevKwh != null && prevKwh > 0 && currKwh != null) ? ((currKwh - prevKwh) / prevKwh * 100) : null;
+            const STATUS_DONE = new Set(['completed', 'abgeschlossen', 'done']);
+            const doneCount = objs?.filter(o => STATUS_DONE.has((o.status as string || '').toLowerCase()) || (o.progress_percent as number) >= 100).length ?? 0;
+            return (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <h3 className="text-base font-semibold text-gray-900 mb-2">Bewertung &amp; Ausblick</h3>
+                <div className="space-y-1.5 text-sm text-gray-700">
+                  {yoyDelta != null && (
+                    <p>Gesamtenergieverbrauch ist gegenüber Vorjahr um <span className={`font-semibold ${yoyDelta > 0 ? 'text-red-600' : 'text-green-600'}`}>{yoyDelta > 0 ? '+' : ''}{yoyDelta.toFixed(1)}%</span> {yoyDelta > 0 ? 'gestiegen' : 'gesunken'}.</p>
+                  )}
+                  {!!costSum?.available && (() => {
+                    const savings = costSum!.cost_savings as number | null;
+                    if (savings == null || Math.abs(savings) === 0) return null;
+                    return <p>Energiekosten haben sich um <span className={`font-semibold ${savings > 0 ? 'text-green-600' : 'text-red-600'}`}>{Math.abs(savings).toLocaleString('de-DE', { maximumFractionDigits: 0 })} €</span> {savings > 0 ? 'reduziert' : 'erhöht'}.</p>;
+                  })()}
+                  {renewPct != null && renewPct > 0 && (
+                    <p>Anteil erneuerbarer Energien: <span className="font-semibold text-green-600">{renewPct.toFixed(1)}%</span></p>
+                  )}
+                  {objs != null && objs.length > 0 && (
+                    <p>Von {objs.length} Energiezielen sind <span className="font-semibold text-green-600">{doneCount}</span> abgeschlossen.</p>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Kontinuierliche Verbesserung (KVP) */}
+          {(() => {
+            const sus = snapshot.sustainability as Record<string, unknown> | undefined;
+            const kvp = sus?.kvp as Record<string, unknown> | undefined;
+            if (!kvp) return null;
+            const openNc = kvp.open_nonconformities as number ?? 0;
+            const closedNc = kvp.closed_nonconformities as number ?? 0;
+            const totalAudits = kvp.total_audits as number ?? 0;
+            const lastReview = kvp.last_review_date as string | null;
+            return (
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 mb-2">Kontinuierliche Verbesserung (KVP)</h3>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className={`rounded-lg border p-3 text-center ${openNc > 0 ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'}`}>
+                    <p className={`text-2xl font-bold ${openNc > 0 ? 'text-red-600' : 'text-green-600'}`}>{openNc}</p>
+                    <p className="text-xs text-gray-500 mt-1">Offene Abweichungen</p>
+                  </div>
+                  <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-center">
+                    <p className="text-2xl font-bold text-green-600">{closedNc}</p>
+                    <p className="text-xs text-gray-500 mt-1">Geschlossene Abweichungen</p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-center">
+                    <p className="text-2xl font-bold text-gray-700">{totalAudits}</p>
+                    <p className="text-xs text-gray-500 mt-1">Interne Audits</p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-center">
+                    <p className="text-sm font-bold text-gray-700">{lastReview ?? '–'}</p>
+                    <p className="text-xs text-gray-500 mt-1">Letztes Management-Review</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Fehler-Info */}
           {report.error_message && (
