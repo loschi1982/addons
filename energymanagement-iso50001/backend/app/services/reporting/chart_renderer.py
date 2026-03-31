@@ -623,6 +623,102 @@ def render_monthly_trend_svg(
         return _fallback_svg(f"Monatsverlauf nicht verfügbar: {e}", width, height)
 
 
+def render_energy_type_trend_svg(
+    monthly_data: list[dict],
+    unit: str = "kWh",
+    color: str = "#1B5E7B",
+    width: int = 650,
+    height: int = 200,
+) -> str:
+    """
+    Monatlicher Verlauf einer Energieart in nativer Einheit.
+
+    monthly_data: Liste von {month: int (1-12), consumption_native: float}
+    unit: Anzeigeeinheit (kWh, m³, kg, l, MWh)
+    color: Balkenfarbe
+    """
+    try:
+        if not monthly_data:
+            return _fallback_svg("Keine Monatsdaten vorhanden", width, height)
+
+        data = [d for d in monthly_data if d.get("consumption_native", 0) > 0]
+        if not data:
+            return _fallback_svg("Keine Verbrauchsdaten im Berichtszeitraum", width, height)
+
+        margin_left = 65
+        margin_top = 20
+        margin_bottom = 40
+        margin_right = 15
+        chart_w = width - margin_left - margin_right
+        chart_h = height - margin_top - margin_bottom
+
+        max_val = max(d["consumption_native"] for d in data)
+        if max_val == 0:
+            max_val = 1
+        avg_val = sum(d["consumption_native"] for d in data) / len(data)
+
+        all_months = list(range(1, 13))
+        val_map = {d["month"]: d["consumption_native"] for d in monthly_data}
+
+        bar_w = chart_w / 12
+        bar_gap = bar_w * 0.15
+
+        svg_parts = [
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+            f'style="width:{width}px;height:{height}px;font-family:Arial,sans-serif;font-size:9px">'
+        ]
+
+        for i in range(5):
+            y = margin_top + chart_h * (1 - i / 4)
+            val = max_val * i / 4
+            svg_parts.append(
+                f'<line x1="{margin_left}" y1="{y:.1f}" x2="{width - margin_right}" '
+                f'y2="{y:.1f}" stroke="#E5E7EB" stroke-dasharray="3,3"/>'
+            )
+            svg_parts.append(
+                f'<text x="{margin_left - 5}" y="{y + 3:.1f}" text-anchor="end" '
+                f'fill="#6B7280">{val:,.0f}</text>'
+            )
+
+        for month in all_months:
+            x = margin_left + (month - 1) * bar_w + bar_gap
+            bw = bar_w - 2 * bar_gap
+            val = val_map.get(month, 0)
+            h = (val / max_val) * chart_h if val > 0 else 0
+            bar_y = margin_top + chart_h - h
+            if val > 0:
+                svg_parts.append(
+                    f'<rect x="{x:.1f}" y="{bar_y:.1f}" width="{bw:.1f}" height="{h:.1f}" '
+                    f'fill="{color}" rx="2" fill-opacity="0.85"/>'
+                )
+            lx = margin_left + (month - 1) * bar_w + bar_w / 2
+            svg_parts.append(
+                f'<text x="{lx:.1f}" y="{height - margin_bottom + 14}" '
+                f'text-anchor="middle" fill="#374151">{MONTH_LABELS[month - 1]}</text>'
+            )
+
+        avg_y = margin_top + chart_h - (avg_val / max_val) * chart_h
+        svg_parts.append(
+            f'<line x1="{margin_left}" y1="{avg_y:.1f}" x2="{width - margin_right}" '
+            f'y2="{avg_y:.1f}" stroke="#DC2626" stroke-width="1" stroke-dasharray="5,3"/>'
+        )
+        svg_parts.append(
+            f'<text x="{width - margin_right - 2}" y="{avg_y - 3:.1f}" '
+            f'text-anchor="end" fill="#DC2626" font-size="8">Ø {avg_val:,.1f} {unit}</text>'
+        )
+        svg_parts.append(
+            f'<text x="{margin_left - 5}" y="{margin_top - 5}" text-anchor="end" '
+            f'fill="#6B7280" font-size="8">{unit}</text>'
+        )
+
+        svg_parts.append("</svg>")
+        return "\n".join(svg_parts)
+
+    except Exception as e:
+        logger.warning("render_energy_type_trend_failed", error=str(e))
+        return _fallback_svg(f"Verlauf nicht verfügbar: {e}", width, height)
+
+
 def render_monthly_cost_svg(
     monthly_costs: list[dict],
     width: int = 650,

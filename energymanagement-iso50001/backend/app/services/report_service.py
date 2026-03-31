@@ -478,6 +478,7 @@ class ReportService:
         try:
             from app.services.reporting.chart_renderer import (
                 render_bar_comparison_svg,
+                render_energy_type_trend_svg,
                 render_heatmap_svg,
                 render_meter_tree_svg,
                 render_monthly_cost_svg,
@@ -488,6 +489,7 @@ class ReportService:
             logger.warning("chart_renderer_import_failed", error=str(e))
             render_bar_comparison_svg = render_heatmap_svg = render_meter_tree_svg = None  # type: ignore[assignment]
             render_monthly_trend_svg = render_monthly_cost_svg = render_sankey_svg = None  # type: ignore[assignment]
+            render_energy_type_trend_svg = None  # type: ignore[assignment]
 
         def safe_render(fn, data, name: str = "chart") -> str:
             """Renderer mit try/except aufrufen, leeren String bei Fehler."""
@@ -625,6 +627,88 @@ class ReportService:
                 f"<strong>{r.get('title', '')}</strong>"
                 f"<p>{r.get('description', '')}</p>{savings}</div>"
             )
+
+        # ── Energieart-Trennung: Sektionen je Energieart ──
+        energy_by_type = snapshot.get("energy_by_type", {})
+        schema_strands = snapshot.get("schema_strands", [])
+
+        # HTML je Energieart (mit SVG-Trend, Kennzahlen, Zählerliste)
+        energy_type_sections_html = ""
+        for et_key, et_data in energy_by_type.items():
+            et_label = et_data.get("label", et_key)
+            et_unit = et_data.get("unit", "kWh")
+            et_color = et_data.get("color", "#1B5E7B")
+            et_total = et_data.get("total_native", 0)
+            et_kwh = et_data.get("total_kwh_equiv", 0)
+            et_count = et_data.get("meter_count", 0)
+            et_meters = et_data.get("top_meters", [])
+            et_monthly = et_data.get("monthly_trend", [])
+
+            # Trend-SVG für diese Energieart
+            et_svg = ""
+            if render_energy_type_trend_svg and et_monthly:
+                try:
+                    et_svg = render_energy_type_trend_svg(et_monthly, unit=et_unit, color=et_color) or ""
+                except Exception as e:
+                    logger.warning(f"chart_render_et_trend_{et_key}_failed", error=str(e))
+
+            # Zähler-Tabelle
+            et_meter_rows = ""
+            for m in et_meters:
+                nat = m.get("total_native", 0)
+                kwh_e = m.get("total_kwh_equiv", 0)
+                m_unit = m.get("unit", et_unit)
+                et_meter_rows += (
+                    f"<tr><td>{m.get('name', '')}</td>"
+                    f"<td class='num'>{nat:,.1f}&nbsp;{m_unit}</td>"
+                    + (f"<td class='num'>{kwh_e:,.1f}</td>" if m_unit != "kWh" else "")
+                    + "</tr>"
+                )
+
+            kwh_col = "<th class='num'>kWh-Äquiv.</th>" if et_unit != "kWh" else ""
+            energy_type_sections_html += f"""
+<h2 style="color:{et_color};border-bottom:2px solid {et_color}">{et_label}</h2>
+<div class="kpi-row">
+    <div class="kpi-card">
+        <div class="value" style="color:{et_color}">{et_total:,.1f}</div>
+        <div class="unit">{et_unit}</div>
+        <div class="label">Gesamtverbrauch</div>
+    </div>
+    {"<div class='kpi-card'><div class='value'>" + f"{et_kwh:,.1f}" + "</div><div class='unit'>kWh-Äquiv.</div><div class='label'>für CO₂-Berechnung</div></div>" if et_unit != "kWh" else ""}
+    <div class="kpi-card">
+        <div class="value">{et_count}</div>
+        <div class="unit">Stk.</div>
+        <div class="label">Zähler</div>
+    </div>
+</div>
+{"<table><thead><tr><th>Zähler</th><th class='num'>Verbrauch</th>" + kwh_col + "</tr></thead><tbody>" + et_meter_rows + "</tbody></table>" if et_meter_rows else ""}
+{f'<figure>{et_svg}</figure>' if et_svg else ""}
+"""
+
+        # HTML für Schema-Stränge
+        schema_strands_html = ""
+        if schema_strands:
+            strand_rows = ""
+            for strand in schema_strands:
+                strand_rows += (
+                    f"<tr>"
+                    f"<td><strong>{strand.get('schema_label', '')}</strong>"
+                    f"<br/><span style='color:#6B7280;font-size:8pt'>{strand.get('root_meter_name', '')}</span></td>"
+                    f"<td>{strand.get('energy_type', '')}</td>"
+                    f"<td class='num'>{strand.get('total_native', 0):,.1f}&nbsp;{strand.get('unit', '')}</td>"
+                    f"<td class='num'>{strand.get('total_kwh_equiv', 0):,.1f}&nbsp;kWh</td>"
+                    f"<td class='num'>{strand.get('meter_count', 0)}</td>"
+                    f"</tr>"
+                )
+            schema_strands_html = f"""
+<h2>Auswertung nach Energieschema</h2>
+<p>Verbrauch je Betrachtungspunkt (Z&auml;hlerstrang) gem&auml;&szlig; Energieschema.</p>
+<table>
+    <thead>
+        <tr><th>Strang</th><th>Energieart</th><th class="num">Verbrauch</th><th class="num">kWh-&Auml;quiv.</th><th class="num">Z&auml;hler</th></tr>
+    </thead>
+    <tbody>{strand_rows}</tbody>
+</table>"""
 
         # ── Diagramme rendern ──
         monthly_trend_svg = safe_render(
@@ -907,18 +991,17 @@ p {{ margin: 5pt 0; }}
 <!-- {next_sec() - 1 if False else 2}. Aktuelle Lage -->
 <h1>2. Aktuelle Lage</h1>
 <div class="section">
-    <h2>Energiebilanz nach Tr&auml;ger</h2>
-    <p>Aufschl&uuml;sselung des Gesamtverbrauchs nach Energietr&auml;ger.</p>
+    <p>Aufschl&uuml;sselung des Energieverbrauchs je Energieart in nativer Einheit. Unterschiedliche Energietr&auml;ger werden nicht zusammengefasst.</p>
+    {energy_type_sections_html if energy_type_sections_html else f"""
+    <h2>Energiebilanz</h2>
     <table>
-        <thead>
-            <tr><th>Energietr&auml;ger</th><th class="num">Verbrauch (kWh)</th><th class="num">Anteil</th></tr>
-        </thead>
+        <thead><tr><th>Energietr&auml;ger</th><th class='num'>Verbrauch (kWh)</th><th class='num'>Anteil</th></tr></thead>
         <tbody>{energy_rows}</tbody>
-        <tfoot>
-            <tr><td>Gesamt</td><td class="num">{total_kwh:,.1f}</td><td class="num">100%</td></tr>
-        </tfoot>
+        <tfoot><tr><td>Gesamt</td><td class='num'>{total_kwh:,.1f}</td><td class='num'>100%</td></tr></tfoot>
     </table>
-    {f'<h2>Monatlicher Verbrauchsverlauf</h2><p>Verbrauch nach Monaten im Berichtszeitraum. Die gestrichelte Linie zeigt den Monatsdurchschnitt.</p><figure>{monthly_trend_svg}</figure>' if monthly_trend_svg else ''}
+    {f'<figure>{monthly_trend_svg}</figure>' if monthly_trend_svg else ''}
+    """}
+    {schema_strands_html}
 </div>
 
 <!-- {n_analyse}. Analyse -->
@@ -1086,6 +1169,12 @@ p {{ margin: 5pt 0; }}
         days_in_period = (end - start).days + 1
         energy_intensity_kwh_per_day = float(total_kwh) / days_in_period if days_in_period > 0 and total_kwh > 0 else 0
 
+        # Verbrauch getrennt nach Energieart (native Einheit)
+        energy_by_type = await self._create_energy_by_type(start, end, meter_ids, meters)
+
+        # Schema-Stränge aus dem Energieschema
+        schema_strands = await self._create_schema_strands(start, end, meter_ids)
+
         return {
             "period_start": start.isoformat(),
             "period_end": end.isoformat(),
@@ -1094,6 +1183,8 @@ p {{ margin: 5pt 0; }}
             "energy_balance": energy_balance,
             "top_consumers": top_consumers,
             "monthly_trend": monthly_trend,
+            "energy_by_type": energy_by_type,
+            "schema_strands": schema_strands,
             "energy_intensity_kwh_per_day": round(energy_intensity_kwh_per_day, 1),
             "days_in_period": days_in_period,
             "reference_value": reference_value,
@@ -1103,6 +1194,237 @@ p {{ margin: 5pt 0; }}
                 if reference_value and reference_value > 0 else None
             ),
         }
+
+    async def _create_energy_by_type(
+        self,
+        start: date,
+        end: date,
+        meter_ids: list[uuid.UUID] | None,
+        meters: list,
+    ) -> dict:
+        """Verbrauch getrennt nach Energieart – native Einheit je Typ."""
+        LABELS: dict[str, str] = {
+            "electricity": "Strom",
+            "natural_gas": "Erdgas",
+            "heating_oil": "Heizöl",
+            "district_heating": "Fernwärme",
+            "district_cooling": "Kälte",
+            "water": "Wasser",
+            "solar": "Solar",
+            "lpg": "Flüssiggas",
+            "wood_pellets": "Holzpellets",
+            "compressed_air": "Druckluft",
+            "steam": "Dampf",
+            "other": "Sonstige",
+        }
+        # Energietyp-Farben für Diagramme
+        ET_COLORS: dict[str, str] = {
+            "electricity": "#F59E0B",
+            "natural_gas": "#3B82F6",
+            "heating_oil": "#8B5CF6",
+            "district_heating": "#F97316",
+            "district_cooling": "#0EA5E9",
+            "water": "#06B6D4",
+            "solar": "#10B981",
+            "lpg": "#EC4899",
+            "wood_pellets": "#84CC16",
+            "compressed_air": "#6B7280",
+            "steam": "#EF4444",
+            "other": "#9CA3AF",
+        }
+
+        start_dt = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
+        end_dt = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+
+        # Zähler nach Energieart gruppieren
+        type_groups: dict[str, list] = {}
+        for meter in meters:
+            et = meter.energy_type or "other"
+            type_groups.setdefault(et, []).append(meter)
+
+        result: dict[str, dict] = {}
+        for energy_type, type_meters in type_groups.items():
+            unit_totals: dict[str, Decimal] = {}
+            total_kwh_equiv = Decimal("0")
+            meter_data: list[dict] = []
+
+            for meter in type_meters:
+                cons_result = await self.db.execute(
+                    select(func.sum(MeterReading.consumption)).where(
+                        MeterReading.meter_id == meter.id,
+                        MeterReading.timestamp >= start_dt,
+                        MeterReading.timestamp < end_dt,
+                    )
+                )
+                raw = cons_result.scalar() or Decimal("0")
+                unit = meter.unit or "kWh"
+                conv = CONVERSION_FACTORS.get(unit, Decimal("1"))
+                kwh_equiv = raw * conv
+                total_kwh_equiv += kwh_equiv
+                unit_totals[unit] = unit_totals.get(unit, Decimal("0")) + raw
+                if float(raw) > 0:
+                    meter_data.append({
+                        "meter_id": str(meter.id),
+                        "name": meter.name,
+                        "unit": unit,
+                        "total_native": float(raw),
+                        "total_kwh_equiv": float(kwh_equiv),
+                    })
+
+            meter_data.sort(key=lambda x: -x["total_kwh_equiv"])
+
+            # Primäreinheit: die mit dem höchsten Gesamtverbrauch
+            primary_unit = (
+                max(unit_totals, key=lambda u: unit_totals[u])
+                if unit_totals else "kWh"
+            )
+
+            # Monatlicher Verlauf in Primäreinheit
+            monthly_trend: list[dict] = []
+            for month_num in range(1, 13):
+                m_start = date(start.year, month_num, 1)
+                m_end = (
+                    date(start.year, month_num + 1, 1)
+                    if month_num < 12
+                    else date(start.year + 1, 1, 1)
+                )
+                if m_start < start or m_start > end:
+                    continue
+
+                m_query = (
+                    select(Meter.unit, func.sum(MeterReading.consumption).label("total"))
+                    .join(MeterReading, MeterReading.meter_id == Meter.id)
+                    .where(
+                        Meter.is_active == True,  # noqa: E712
+                        Meter.energy_type == energy_type,
+                        MeterReading.timestamp >= datetime.combine(
+                            m_start, datetime.min.time(), tzinfo=timezone.utc
+                        ),
+                        MeterReading.timestamp < datetime.combine(
+                            m_end, datetime.min.time(), tzinfo=timezone.utc
+                        ),
+                    )
+                    .group_by(Meter.unit)
+                )
+                if meter_ids:
+                    m_query = m_query.where(Meter.id.in_(meter_ids))
+
+                m_result = await self.db.execute(m_query)
+                month_unit_totals: dict[str, Decimal] = {}
+                for row in m_result.all():
+                    month_unit_totals[row.unit] = (
+                        month_unit_totals.get(row.unit, Decimal("0")) + (row.total or Decimal("0"))
+                    )
+                monthly_trend.append({
+                    "month": month_num,
+                    "consumption_native": float(month_unit_totals.get(primary_unit, Decimal("0"))),
+                })
+
+            result[energy_type] = {
+                "label": LABELS.get(energy_type, energy_type),
+                "unit": primary_unit,
+                "color": ET_COLORS.get(energy_type, "#1B5E7B"),
+                "total_native": float(unit_totals.get(primary_unit, Decimal("0"))),
+                "total_kwh_equiv": float(total_kwh_equiv),
+                "meter_count": len(type_meters),
+                "top_meters": meter_data[:5],
+                "monthly_trend": monthly_trend,
+            }
+
+        return result
+
+    async def _create_schema_strands(
+        self,
+        start: date,
+        end: date,
+        meter_ids: list[uuid.UUID] | None,
+    ) -> list[dict]:
+        """Schema-Stränge (Betrachtungspunkte aus Energieschema) mit Verbrauchsdaten."""
+        start_dt = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
+        end_dt = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+
+        # Schema-Wurzeln laden (schema_label gesetzt)
+        schema_result = await self.db.execute(
+            select(Meter)
+            .where(Meter.schema_label.isnot(None), Meter.is_active == True)  # noqa: E712
+            .order_by(Meter.schema_label)
+        )
+        schema_roots = list(schema_result.scalars().all())
+
+        strands: list[dict] = []
+        for root in schema_roots:
+            # Rekursiv alle Zähler im Strang ermitteln
+            strand_ids: list[uuid.UUID] = []
+            queue: list[uuid.UUID] = [root.id]
+            while queue:
+                current_id = queue.pop(0)
+                strand_ids.append(current_id)
+                children_res = await self.db.execute(
+                    select(Meter.id).where(
+                        Meter.parent_meter_id == current_id,
+                        Meter.is_active == True,  # noqa: E712
+                    )
+                )
+                queue.extend(row[0] for row in children_res.all())
+
+            # Scope-Filter anwenden
+            if meter_ids:
+                strand_ids = [m_id for m_id in strand_ids if m_id in meter_ids]
+            if not strand_ids:
+                continue
+
+            # Zähler-Details laden
+            meters_res = await self.db.execute(
+                select(Meter).where(Meter.id.in_(strand_ids))
+            )
+            strand_meters = list(meters_res.scalars().all())
+
+            # Verbrauch pro Zähler
+            meter_consumptions: list[dict] = []
+            unit_totals: dict[str, Decimal] = {}
+            strand_total_kwh = Decimal("0")
+
+            for meter in strand_meters:
+                cons_res = await self.db.execute(
+                    select(func.sum(MeterReading.consumption)).where(
+                        MeterReading.meter_id == meter.id,
+                        MeterReading.timestamp >= start_dt,
+                        MeterReading.timestamp < end_dt,
+                    )
+                )
+                raw = cons_res.scalar() or Decimal("0")
+                unit = meter.unit or "kWh"
+                conv = CONVERSION_FACTORS.get(unit, Decimal("1"))
+                kwh = raw * conv
+                strand_total_kwh += kwh
+                unit_totals[unit] = unit_totals.get(unit, Decimal("0")) + raw
+                if float(raw) > 0:
+                    meter_consumptions.append({
+                        "meter_id": str(meter.id),
+                        "name": meter.name,
+                        "energy_type": meter.energy_type,
+                        "unit": unit,
+                        "total_native": float(raw),
+                        "total_kwh_equiv": float(kwh),
+                        "is_root": meter.id == root.id,
+                    })
+
+            meter_consumptions.sort(key=lambda x: -x["total_kwh_equiv"])
+            primary_unit = root.unit or "kWh"
+
+            strands.append({
+                "schema_label": root.schema_label,
+                "root_meter_id": str(root.id),
+                "root_meter_name": root.name,
+                "energy_type": root.energy_type,
+                "unit": primary_unit,
+                "total_native": float(unit_totals.get(primary_unit, Decimal("0"))),
+                "total_kwh_equiv": float(strand_total_kwh),
+                "meter_count": len(strand_meters),
+                "meters": meter_consumptions[:10],
+            })
+
+        return strands
 
     async def _create_weather_analysis(self, start: date, end: date) -> dict | None:
         """Witterungsanalyse: Heizgradtage Ist vs. Langzeitdurchschnitt."""
