@@ -1,0 +1,9 @@
+{% if sankey_svg %}
+<h1>6. Energiefluss (Sankey-Diagramm)</h1>
+<div class="section">
+    <p>Energiefluss von Erzeugern zu Verbrauchern im Berichtszeitraum.</p>
+    <div class="chart-container">
+        {{ sankey_svg | safe }}
+    </div>
+</div>
+{% endif %}

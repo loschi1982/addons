@@ -1,0 +1,39 @@
+{% set cost = snapshot.cost_summary %}
+{% if cost and cost.available %}
+<h1>7. Wirtschaftlichkeit</h1>
+<div class="section">
+    <div class="kpi-row">
+        <div class="kpi-card">
+            <div class="value">{{ "{:,.0f}".format(cost.total_cost_net | default(0)) }}</div>
+            <div class="unit">€ netto</div>
+            <div class="label">Energiekosten gesamt</div>
+            {% if cost.prev_year_cost_net is defined and cost.prev_year_cost_net %}
+            {% set delta = ((cost.total_cost_net - cost.prev_year_cost_net) / cost.prev_year_cost_net * 100) %}
+            <div class="trend {{ 'negative' if delta > 0 else 'positive' }}">
+                {{ "↑" if delta > 0 else "↓" }} {{ "%.1f" | format(delta | abs) }}% vs. Vorjahr
+            </div>
+            {% endif %}
+        </div>
+        {% if cost.cost_per_kwh is defined and cost.cost_per_kwh %}
+        <div class="kpi-card">
+            <div class="value">{{ "%.2f" | format(cost.cost_per_kwh * 100) }}</div>
+            <div class="unit">ct/kWh</div>
+            <div class="label">Ø Energiepreis</div>
+        </div>
+        {% endif %}
+        {% if cost.cost_savings is defined and cost.cost_savings %}
+        <div class="kpi-card">
+            <div class="value">{{ "{:,.0f}".format(cost.cost_savings) }}</div>
+            <div class="unit">€</div>
+            <div class="label">Einsparpotenzial</div>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if monthly_cost_svg %}
+    <div class="chart-container" style="margin-top: 16pt;">
+        {{ monthly_cost_svg | safe }}
+    </div>
+    {% endif %}
+</div>
+{% endif %}

@@ -1,0 +1,9 @@
+{% if monthly_trend_svg %}
+<h1>3. Monatlicher Energieverbrauch</h1>
+<div class="section">
+    <p>Monatlicher Energieverbrauch im Berichtszeitraum in kWh.</p>
+    <div class="chart-container">
+        {{ monthly_trend_svg | safe }}
+    </div>
+</div>
+{% endif %}

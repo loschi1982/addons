@@ -1,0 +1,40 @@
+{% if snapshot.energy_yoy_table %}
+<h1>4. Vorjahresvergleich</h1>
+<div class="section">
+    <p>Vergleich des Energieverbrauchs mit dem Vorjahreszeitraum nach Energieträger.</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Energieträger</th>
+                <th class="num">Vorjahr</th>
+                <th class="num">Berichtsjahr</th>
+                <th class="num">Veränderung</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in snapshot.energy_yoy_table %}
+            {% set delta = item.delta_pct %}
+            <tr>
+                <td>{{ item.label }}</td>
+                <td class="num">{{ "{:,.1f}".format(item.prev_native) }}&nbsp;{{ item.unit }}</td>
+                <td class="num">{{ "{:,.1f}".format(item.curr_native) }}&nbsp;{{ item.unit }}</td>
+                <td class="num">
+                    {% if delta is not none %}
+                    <span style="color: {{ '#DC2626' if delta > 5 else '#16A34A' if delta < -5 else '#374151' }}; font-weight: 600;">
+                        {{ '%+.1f' | format(delta) }}%
+                    </span>
+                    {% else %}–{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if yoy_svg %}
+    <div class="chart-container" style="margin-top: 16pt;">
+        {{ yoy_svg | safe }}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
