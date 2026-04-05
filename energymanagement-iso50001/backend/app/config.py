@@ -91,8 +91,10 @@ class Settings(BaseSettings):
     electricity_maps_api_key: str = ""
 
     # ── Dateien ──
-    # Verzeichnis für hochgeladene Dokumente und generierte PDFs
+    # Verzeichnis für hochgeladene Dokumente
     upload_dir: str = "/data/uploads"
+    # Verzeichnis für generierte PDF-Berichte (überschreibbar via REPORT_PDF_DIR)
+    report_pdf_dir: str = ""
 
     # ── Allgemein ──
     language: str = "de"

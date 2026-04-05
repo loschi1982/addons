@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell, Monitor, Download, CheckCircle, AlertTriangle, XCircle, Plug2, HeartPulse, Database, Server, Clock, HardDrive, Play, RotateCcw, Wifi, WifiOff, ScrollText, Trash2 } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell, Monitor, Download, CheckCircle, AlertTriangle, XCircle, Plug2, HeartPulse, Database, Server, Clock, HardDrive, Play, RotateCcw, Wifi, WifiOff, ScrollText, Trash2, Upload, ShieldCheck } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 
 interface SettingEntry {
@@ -20,6 +20,7 @@ const TABS = [
   { id: 'integrations', label: 'Integrationen', icon: Plug2 },
   { id: 'system', label: 'System', icon: Monitor },
   { id: 'logs', label: 'Log', icon: ScrollText },
+  { id: 'backup', label: 'Datensicherung', icon: ShieldCheck },
 ] as const;
 
 export default function SettingsPage() {
@@ -92,7 +93,7 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="page-title">Einstellungen</h1>
-        {activeTab !== 'system' && activeTab !== 'integrations' && activeTab !== 'status' && activeTab !== 'logs' && (
+        {activeTab !== 'system' && activeTab !== 'integrations' && activeTab !== 'status' && activeTab !== 'logs' && activeTab !== 'backup' && (
           <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2">
             <Save className="w-4 h-4" />
             {saving ? 'Speichern...' : saved ? 'Gespeichert!' : 'Speichern'}
@@ -148,7 +149,245 @@ export default function SettingsPage() {
         {activeTab === 'integrations' && <IntegrationsPanel />}
         {activeTab === 'system' && <SystemPanel />}
         {activeTab === 'logs' && <LogPanel />}
+        {activeTab === 'backup' && <BackupPanel />}
       </div>
+    </div>
+  );
+}
+
+/* ── Backup-Panel (Export / Import) ── */
+
+interface InspectResult {
+  version: string;
+  compatible: boolean;
+  exported_at: string;
+  file_size_kb: number;
+  total_rows: number;
+  tables: Record<string, number>;
+  skipped_tables: string[];
+}
+
+function BackupPanel() {
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [inspecting, setInspecting] = useState(false);
+  const [inspectResult, setInspectResult] = useState<InspectResult | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importResult, setImportResult] = useState<{ imported_rows: number; skipped_tables: number; errors: string[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExport = async () => {
+    setExporting(true);
+    setError(null);
+    try {
+      const res = await apiClient.get('/api/v1/backup/export', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement('a');
+      const now = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      a.href = url;
+      a.download = `energy_backup_${now}.json.gz`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      setError('Export fehlgeschlagen. Bitte erneut versuchen.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportFile(file);
+    setInspectResult(null);
+    setImportResult(null);
+    setError(null);
+
+    // Direkt Metadaten prüfen
+    setInspecting(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await apiClient.post('/api/v1/backup/inspect', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setInspectResult(res.data);
+    } catch {
+      setError('Backup-Datei konnte nicht gelesen werden.');
+    } finally {
+      setInspecting(false);
+    }
+  };
+
+  const handleImport = async () => {
+    if (!importFile) return;
+    setImporting(true);
+    setError(null);
+    setImportResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', importFile);
+      const res = await apiClient.post('/api/v1/backup/import?replace=true', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setImportResult(res.data);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(msg || 'Import fehlgeschlagen.');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <h2 className="text-lg font-semibold text-gray-800 mb-1">Datensicherung</h2>
+        <p className="text-sm text-gray-500">
+          Exportiere alle Daten als komprimierte JSON-Datei und spiele sie auf einem neuen System ein.
+        </p>
+      </div>
+
+      {/* Export */}
+      <div className="border border-gray-200 rounded-lg p-5 space-y-3">
+        <div className="flex items-center gap-2 mb-1">
+          <Download className="w-5 h-5 text-primary-600" />
+          <h3 className="font-medium text-gray-800">Datenbank exportieren</h3>
+        </div>
+        <p className="text-sm text-gray-500">
+          Erstellt eine vollständige Sicherung aller Zähler, Messwerte, Einstellungen,
+          ISO 50001-Daten und Benutzer als <code>.json.gz</code>-Datei.
+        </p>
+        <button
+          onClick={handleExport}
+          disabled={exporting}
+          className="btn-primary flex items-center gap-2"
+        >
+          {exporting
+            ? <><RefreshCw className="w-4 h-4 animate-spin" /> Exportiere…</>
+            : <><Download className="w-4 h-4" /> Backup herunterladen</>
+          }
+        </button>
+      </div>
+
+      {/* Import */}
+      <div className="border border-gray-200 rounded-lg p-5 space-y-4">
+        <div className="flex items-center gap-2 mb-1">
+          <Upload className="w-5 h-5 text-primary-600" />
+          <h3 className="font-medium text-gray-800">Datenbank importieren</h3>
+        </div>
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <p className="text-sm text-amber-800">
+            <strong>Achtung:</strong> Beim Import werden alle bestehenden Daten überschrieben.
+            Erstelle zuerst ein Backup des aktuellen Systems.
+          </p>
+        </div>
+
+        {/* Datei wählen */}
+        <div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".gz"
+            onChange={handleFileChange}
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="btn-secondary flex items-center gap-2"
+          >
+            <Upload className="w-4 h-4" />
+            {importFile ? importFile.name : 'Backup-Datei auswählen (.json.gz)'}
+          </button>
+        </div>
+
+        {/* Datei-Inspektion */}
+        {inspecting && (
+          <div className="flex items-center gap-2 text-sm text-gray-500">
+            <RefreshCw className="w-4 h-4 animate-spin" /> Datei wird geprüft…
+          </div>
+        )}
+
+        {inspectResult && (
+          <div className={`rounded-lg border p-4 space-y-3 ${inspectResult.compatible ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
+            <div className="flex items-center gap-2">
+              {inspectResult.compatible
+                ? <CheckCircle className="w-4 h-4 text-green-600" />
+                : <XCircle className="w-4 h-4 text-red-600" />
+              }
+              <span className="text-sm font-medium">
+                {inspectResult.compatible ? 'Kompatible Backup-Datei' : 'Inkompatible Version'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="text-gray-500">Exportiert am</div>
+              <div className="text-gray-800">{new Date(inspectResult.exported_at).toLocaleString('de-DE')}</div>
+              <div className="text-gray-500">Dateigröße</div>
+              <div className="text-gray-800">{inspectResult.file_size_kb} KB</div>
+              <div className="text-gray-500">Datensätze gesamt</div>
+              <div className="text-gray-800">{inspectResult.total_rows.toLocaleString('de-DE')}</div>
+              <div className="text-gray-500">Tabellen</div>
+              <div className="text-gray-800">{Object.keys(inspectResult.tables).length}</div>
+            </div>
+            <details className="text-xs text-gray-600 cursor-pointer">
+              <summary className="font-medium hover:text-primary-600">Tabellen-Details</summary>
+              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 max-h-40 overflow-y-auto">
+                {Object.entries(inspectResult.tables).map(([t, n]) => (
+                  <div key={t} className="flex justify-between">
+                    <span>{t}</span>
+                    <span className="font-mono">{n}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
+        )}
+
+        {/* Import-Button */}
+        {inspectResult?.compatible && !importResult && (
+          <button
+            onClick={handleImport}
+            disabled={importing}
+            className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
+          >
+            {importing
+              ? <><RefreshCw className="w-4 h-4 animate-spin" /> Importiere…</>
+              : <><Upload className="w-4 h-4" /> Jetzt importieren (Daten überschreiben)</>
+            }
+          </button>
+        )}
+
+        {/* Import-Ergebnis */}
+        {importResult && (
+          <div className="rounded-lg border border-green-200 bg-green-50 p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-green-600" />
+              <span className="text-sm font-medium text-green-800">Import erfolgreich abgeschlossen</span>
+            </div>
+            <div className="text-sm text-green-700">
+              {importResult.imported_rows.toLocaleString('de-DE')} Datensätze importiert
+            </div>
+            {importResult.errors.length > 0 && (
+              <div className="text-xs text-amber-700 mt-1">
+                <strong>Hinweise:</strong>
+                <ul className="list-disc ml-4 mt-1">
+                  {importResult.errors.map((e, i) => <li key={i}>{e}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Fehler */}
+      {error && (
+        <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
+          <XCircle className="w-4 h-4 shrink-0" />
+          {error}
+        </div>
+      )}
     </div>
   );
 }
