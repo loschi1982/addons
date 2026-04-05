@@ -71,6 +71,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LANGUAGE: ${LANGUAGE:-de}
       UPLOAD_DIR: /data/uploads
+      REPORT_PDF_DIR: /data/reports
       DEPLOYMENT_MODE: standalone
       # Home Assistant Integration (optional)
       HA_ACCESS_TOKEN: ${HA_ACCESS_TOKEN:-}

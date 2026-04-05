@@ -28,6 +28,9 @@ echo "PostgreSQL bereit."
 # Redis-Check entfällt: docker-compose wartet via depends_on + healthcheck
 echo "Redis bereit (via Docker Healthcheck)."
 
+# ── Verzeichnisse anlegen ──
+mkdir -p /data/reports /data/uploads
+
 # ── Datenbank-Migrationen ──
 echo "Führe Datenbank-Migrationen aus..."
 cd /app/backend
