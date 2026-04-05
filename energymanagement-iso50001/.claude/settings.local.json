@@ -99,7 +99,16 @@
       "Bash(ls /tmp/*.py /tmp/seed*.py /tmp/test*.py)",
       "Bash(python3 -c \"from pathlib import Path; p = Path\\(''/home/rico/addons/energymanagement-iso50001/backend/data/reports/32a99b7d-58d5-40e7-b17d-93be0992b18f.pdf''\\); print\\(''exists:'', p.exists\\(\\), ''size:'', p.stat\\(\\).st_size if p.exists\\(\\) else ''n/a''\\)\")",
       "Bash(__NEW_LINE_c3a2f515618a0ac8__ git:*)",
-      "Bash(find /home/rico/addons/energymanagement-iso50001 -name docker-compose*.yml -o -name docker-compose*.yaml)"
+      "Bash(find /home/rico/addons/energymanagement-iso50001 -name docker-compose*.yml -o -name docker-compose*.yaml)",
+      "Bash(curl -s http://localhost:8099/api/v1/auth/setup/status)",
+      "Bash(PGPASSWORD=energy psql -h 192.168.178.142 -U energy -d energy_management -c \"SELECT id, username, email, display_name, is_active, role_id FROM users;\")",
+      "Bash(curl -s http://localhost:8099/api/v1/auth/login -X POST -H \"Content-Type: application/json\" -d '{\"\"username\"\":\"\"admin\"\",\"\"password\"\":\"\"test\"\"}')",
+      "Bash(curl -s http://localhost:8099/api/v1/auth/login -X POST -H \"Content-Type: application/json\" -d '{\"\"username\"\":\"\"admin\"\",\"\"password\"\":\"\"4711lolo\"\"}')",
+      "Bash(curl -s http://localhost:8099/api/v1/auth/me -H \"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyNGE1NjRjNy1mYTI0LTRkYWQtOTM4NS01NmUyZWIzZWYyMjYiLCJyb2xlIjoiYWRtaW4iLCJ0eXBlIjoiYWNjZXNzIiwiaWF0IjoxNzc1NDEzMTU1LCJleHAiOjE3NzU0MTQ5NTV9.ejgIrZne7trYk2wx-1ZJrbQ2YSQWlo5wQRhwAcqrnOw\" -v)",
+      "Bash(netstat -tlnp)",
+      "Bash(fuser 8099/tcp)",
+      "Read(//proc/412741/net/**)",
+      "Read(//home/rico/addons/energymanagement-iso50001/**)"
     ]
   }
 }

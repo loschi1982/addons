@@ -99,7 +99,7 @@ class UserProfileResponse(BaseSchema):
     username: str
     email: str
     display_name: str | None
-    language: str
+    language: str | None = "de"
     role_name: str
     permissions: list[str]
 

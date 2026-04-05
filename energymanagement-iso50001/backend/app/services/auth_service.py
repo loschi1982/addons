@@ -344,7 +344,7 @@ class AuthService:
             "username": user.username,
             "email": user.email,
             "display_name": user.display_name,
-            "language": user.language,
+            "language": user.language or "de",
             "role_name": role.name if role else "unknown",
             "permissions": permissions,
         }
