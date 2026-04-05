@@ -14,6 +14,7 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_permission
@@ -152,8 +153,12 @@ async def reset_to_factory(
     if not verify_password(password, current_user.password_hash):
         raise HTTPException(status_code=403, detail="Falsches Passwort. Werksreset abgebrochen.")
 
-    # Nur Admins dürfen zurücksetzen
-    role_name = current_user.role.name if current_user.role else ""
+    # Nur Admins dürfen zurücksetzen – Role explizit laden (kein lazy-load in async)
+    user_with_role = await db.execute(
+        select(User).where(User.id == current_user.id).options(selectinload(User.role))
+    )
+    user_obj = user_with_role.scalar_one_or_none()
+    role_name = user_obj.role.name if (user_obj and user_obj.role) else ""
     if role_name != "admin":
         raise HTTPException(status_code=403, detail="Nur Administratoren können das System zurücksetzen.")
 
