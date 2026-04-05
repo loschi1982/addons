@@ -388,7 +388,122 @@ function BackupPanel() {
           {error}
         </div>
       )}
+
+      {/* Werksreset */}
+      <FactoryResetSection />
     </div>
+  );
+}
+
+/* ── Werksreset-Sektion ── */
+function FactoryResetSection() {
+  const [showDialog, setShowDialog] = useState(false);
+  const [password, setPassword] = useState('');
+  const [resetting, setResetting] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+
+  const handleReset = async () => {
+    setResetting(true);
+    setResetError(null);
+    try {
+      await apiClient.post('/api/v1/backup/factory-reset', { password });
+      setResetDone(true);
+      setShowDialog(false);
+      setPassword('');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setResetError(msg || 'Werksreset fehlgeschlagen.');
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="border border-red-200 rounded-lg p-5 space-y-3 bg-red-50">
+        <div className="flex items-center gap-2 mb-1">
+          <Trash2 className="w-5 h-5 text-red-600" />
+          <h3 className="font-medium text-red-800">Werkseinstellungen wiederherstellen</h3>
+        </div>
+        <p className="text-sm text-red-700">
+          Löscht alle Messdaten, Zähler, Standorte, Berichte, ISO-Daten und Einstellungen.
+          Rollen, Berechtigungen, Emissionsfaktoren und Wetterstationen bleiben erhalten.
+          Der Admin-Benutzer wird mit dem aktuellen Passwort neu angelegt.
+        </p>
+        {resetDone && (
+          <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg p-3">
+            <CheckCircle className="w-4 h-4 shrink-0" />
+            System wurde auf Werkseinstellungen zurückgesetzt.
+          </div>
+        )}
+        <button
+          onClick={() => { setShowDialog(true); setResetError(null); setPassword(''); }}
+          className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
+        >
+          <Trash2 className="w-4 h-4" />
+          Auf Werkseinstellungen zurücksetzen…
+        </button>
+      </div>
+
+      {/* Bestätigungs-Dialog */}
+      {showDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6 space-y-5">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-6 h-6 text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Werksreset bestätigen</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  Diese Aktion löscht unwiderruflich alle Benutzer- und Messdaten.
+                  Stelle sicher, dass du vorher ein Backup erstellt hast.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="label">Administratorpasswort zur Bestätigung</label>
+              <input
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && password && handleReset()}
+                placeholder="Passwort eingeben…"
+                className="input w-full"
+                autoFocus
+              />
+            </div>
+
+            {resetError && (
+              <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
+                <XCircle className="w-4 h-4 shrink-0" />
+                {resetError}
+              </div>
+            )}
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => { setShowDialog(false); setPassword(''); setResetError(null); }}
+                className="btn-secondary"
+                disabled={resetting}
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={handleReset}
+                disabled={!password || resetting}
+                className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                {resetting
+                  ? <><RefreshCw className="w-4 h-4 animate-spin" /> Wird zurückgesetzt…</>
+                  : <><Trash2 className="w-4 h-4" /> Jetzt zurücksetzen</>
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
