@@ -12,6 +12,7 @@ from app.api.v1 import (
     analytics,
     audit,
     auth,
+    backup,
     climate,
     consumers,
     dashboard,
@@ -81,3 +82,6 @@ api_router.include_router(audit.router, prefix="/audit", tags=["Audit-Log"])
 
 # System (Version, Updates)
 api_router.include_router(system.router, prefix="/system", tags=["System"])
+
+# Datensicherung (Export / Import)
+api_router.include_router(backup.router, prefix="/backup", tags=["Datensicherung"])
