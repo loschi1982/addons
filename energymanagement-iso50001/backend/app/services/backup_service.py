@@ -123,39 +123,52 @@ async def factory_reset(db: AsyncSession, new_password_hash: str) -> dict:
     """
     deleted: list[str] = []
 
-    await db.execute(text("SET session_replication_role = 'replica'"))
     try:
+        # FK-Checks deaktivieren
+        await db.execute(text("SET session_replication_role = 'replica'"))
+        await db.commit()
+
+        # Jede Tabelle in eigenem Savepoint – Fehler einer Tabelle bricht
+        # nicht die gesamte Transaktion ab
         for table in reversed(EXPORT_TABLES):
             if table in FACTORY_RESET_KEEP:
                 continue
             try:
-                await db.execute(text(f"TRUNCATE TABLE {table} CASCADE"))  # noqa: S608
+                async with db.begin_nested():
+                    await db.execute(text(f'TRUNCATE TABLE "{table}" CASCADE'))  # noqa: S608
                 deleted.append(table)
             except Exception as e:
                 logger.warning("factory_reset_table_skip", table=table, error=str(e))
 
-        # Frischen Admin-Benutzer anlegen
+        # Frischen Admin-Benutzer anlegen (Spaltenname: password_hash)
         admin_id = str(uuid.uuid4())
         await db.execute(text("""
-            INSERT INTO users (id, username, email, hashed_password, is_active, created_at, updated_at)
+            INSERT INTO users (id, username, email, password_hash, is_active, created_at, updated_at)
             SELECT :id, 'admin', 'admin@local.host', :pw, true, NOW(), NOW()
             WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin')
         """), {"id": admin_id, "pw": new_password_hash})
 
-        # Admin-Rolle zuweisen (falls vorhanden)
+        # Admin-Rolle zuweisen
         await db.execute(text("""
-            UPDATE users u
+            UPDATE users
             SET role_id = (SELECT id FROM roles WHERE name = 'admin' LIMIT 1)
             WHERE username = 'admin' AND role_id IS NULL
         """))
 
         await db.commit()
-    except Exception:
-        await db.rollback()
-        raise
-    finally:
+
+        # FK-Checks wieder aktivieren
         await db.execute(text("SET session_replication_role = 'origin'"))
         await db.commit()
+
+    except Exception:
+        await db.rollback()
+        try:
+            await db.execute(text("SET session_replication_role = 'origin'"))
+            await db.commit()
+        except Exception:
+            pass
+        raise
 
     logger.info("factory_reset_complete", deleted_tables=len(deleted))
     return {"deleted_tables": deleted, "kept_tables": list(FACTORY_RESET_KEEP)}
