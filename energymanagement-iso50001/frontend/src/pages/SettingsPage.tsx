@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell, Monitor, Download, CheckCircle, AlertTriangle, XCircle, Plug2, HeartPulse, Database, Server, Clock, HardDrive, Play, RotateCcw, Wifi, WifiOff, ScrollText, Trash2, Upload, ShieldCheck } from 'lucide-react';
 import { apiClient } from '@/utils/api';
+import { useAppDispatch } from '@/hooks/useRedux';
+import { logout } from '@/store/slices/authSlice';
 
 interface SettingEntry {
   value: Record<string, unknown>;
@@ -397,10 +400,11 @@ function BackupPanel() {
 
 /* ── Werksreset-Sektion ── */
 function FactoryResetSection() {
+  const dispatch = useAppDispatch();
+  const navigate = useNavigate();
   const [showDialog, setShowDialog] = useState(false);
   const [password, setPassword] = useState('');
   const [resetting, setResetting] = useState(false);
-  const [resetDone, setResetDone] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
 
   const handleReset = async () => {
@@ -408,13 +412,12 @@ function FactoryResetSection() {
     setResetError(null);
     try {
       await apiClient.post('/api/v1/backup/factory-reset', { password });
-      setResetDone(true);
-      setShowDialog(false);
-      setPassword('');
+      // Ausloggen und Ersteinrichtung starten
+      dispatch(logout());
+      navigate('/setup');
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setResetError(msg || 'Werksreset fehlgeschlagen.');
-    } finally {
       setResetting(false);
     }
   };
@@ -427,16 +430,10 @@ function FactoryResetSection() {
           <h3 className="font-medium text-red-800">Werkseinstellungen wiederherstellen</h3>
         </div>
         <p className="text-sm text-red-700">
-          Löscht alle Messdaten, Zähler, Standorte, Berichte, ISO-Daten und Einstellungen.
+          Löscht alle Benutzer, Messdaten, Zähler, Standorte, Berichte, ISO-Daten und Einstellungen.
           Rollen, Berechtigungen, Emissionsfaktoren und Wetterstationen bleiben erhalten.
-          Der Admin-Benutzer wird mit dem aktuellen Passwort neu angelegt.
+          Danach startet die Ersteinrichtung automatisch.
         </p>
-        {resetDone && (
-          <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg p-3">
-            <CheckCircle className="w-4 h-4 shrink-0" />
-            System wurde auf Werkseinstellungen zurückgesetzt.
-          </div>
-        )}
         <button
           onClick={() => { setShowDialog(true); setResetError(null); setPassword(''); }}
           className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"

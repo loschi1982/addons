@@ -162,13 +162,11 @@ async def reset_to_factory(
     if role_name != "admin":
         raise HTTPException(status_code=403, detail="Nur Administratoren können das System zurücksetzen.")
 
-    result = await factory_reset(
-        db=db,
-        new_password_hash=current_user.password_hash,
-    )
+    result = await factory_reset(db=db)
 
     return {
-        "message": "System erfolgreich auf Werkseinstellungen zurückgesetzt.",
+        "message": "System erfolgreich auf Werkseinstellungen zurückgesetzt. Bitte neu einrichten.",
         "deleted_tables": len(result["deleted_tables"]),
         "kept_tables": result["kept_tables"],
+        "setup_required": True,
     }

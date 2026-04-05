@@ -105,18 +105,16 @@ FACTORY_RESET_KEEP: set[str] = {
 }
 
 
-async def factory_reset(db: AsyncSession, new_password_hash: str) -> dict:
+async def factory_reset(db: AsyncSession) -> dict:
     """
     Setzt das System auf Werkseinstellungen zurück.
 
     Behält: Rollen, Berechtigungen, Emissionsfaktoren, Wetterstationen.
     Löscht: Alle Benutzer- und Messdaten, ISO-Daten, Einstellungen, Berichte usw.
-    Legt danach einen frischen Admin-Benutzer mit dem neuen Passwort-Hash an.
+    Danach startet die Ersteinrichtung automatisch (keine Benutzer → Setup-Flow aktiv).
 
     Args:
         db: Datenbankverbindung.
-        admin_user_password_hash: Aktueller Hash des Admin-Passworts (bereits verifiziert).
-        new_password_hash: Hash des neuen Admin-Passworts (identisch wenn nicht geändert).
 
     Returns:
         Dict mit gelöschten Tabellen.
@@ -139,16 +137,6 @@ async def factory_reset(db: AsyncSession, new_password_hash: str) -> dict:
                 deleted.append(table)
             except Exception as e:
                 logger.warning("factory_reset_table_skip", table=table, error=str(e))
-
-        # Frischen Admin-Benutzer anlegen
-        admin_id = str(uuid.uuid4())
-        await db.execute(text("""
-            INSERT INTO users (id, username, email, display_name, password_hash, is_active, role_id, created_at, updated_at)
-            SELECT :id, 'admin', 'admin@local.host', 'Administrator', :pw, true,
-                   (SELECT id FROM roles WHERE name = 'admin' LIMIT 1),
-                   NOW(), NOW()
-            WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin')
-        """), {"id": admin_id, "pw": new_password_hash})
 
         await db.commit()
 
