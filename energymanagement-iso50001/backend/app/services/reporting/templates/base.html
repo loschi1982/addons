@@ -23,32 +23,52 @@
 </div>
 {% endblock %}
 
-<!-- Management-Zusammenfassung -->
+<!-- 1. Management-Zusammenfassung -->
 {% block executive_summary %}
 {% include "sections/executive_summary.html" %}
 {% endblock %}
 
-<!-- Energiebilanz -->
+<!-- 2. Energiebilanz -->
 {% block energy_balance %}
 {% include "sections/energy_balance.html" %}
 {% endblock %}
 
-<!-- CO₂-Bilanz -->
+<!-- 3. Monatlicher Trendverlauf -->
+{% block monthly_trend %}
+{% include "sections/monthly_trend.html" %}
+{% endblock %}
+
+<!-- 4. Vorjahresvergleich -->
+{% block yoy_comparison %}
+{% include "sections/yoy_comparison.html" %}
+{% endblock %}
+
+<!-- 5. CO₂-Bilanz -->
 {% block co2_balance %}
 {% include "sections/co2_balance.html" %}
 {% endblock %}
 
-<!-- Top-Verbraucher (SEU) -->
+<!-- 6. Sankey-Energiefluss -->
+{% block sankey %}
+{% include "sections/sankey.html" %}
+{% endblock %}
+
+<!-- 7. Wirtschaftlichkeit -->
+{% block cost_summary %}
+{% include "sections/cost_summary.html" %}
+{% endblock %}
+
+<!-- 8. Wesentliche Energieverbraucher (SEU) -->
 {% block seu_analysis %}
 {% include "sections/seu_analysis.html" %}
 {% endblock %}
 
-<!-- Befunde -->
+<!-- 9. Erkenntnisse und Befunde -->
 {% block findings %}
 {% include "sections/findings.html" %}
 {% endblock %}
 
-<!-- Empfehlungen -->
+<!-- 10. Maßnahmen und Empfehlungen -->
 {% block recommendations %}
 {% include "sections/recommendations.html" %}
 {% endblock %}

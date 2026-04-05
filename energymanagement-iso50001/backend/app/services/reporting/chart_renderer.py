@@ -489,25 +489,40 @@ def render_sankey_svg(
                 f'fill="#1B5E7B" fill-opacity="0.15" stroke="none"/>'
             )
 
+        # Energie-Typ-Übersetzungen für Sankey-Labels
+        _et_trans = {
+            "electricity": "Strom", "natural_gas": "Erdgas", "heating_oil": "Heizöl",
+            "district_heating": "Fernwärme", "district_cooling": "Kälte", "water": "Wasser",
+            "solar": "Solarstrom", "lpg": "Flüssiggas", "wood_pellets": "Holzpellets",
+            "compressed_air": "Druckluft", "steam": "Dampf",
+        }
+
+        def _translate_sankey_label(lbl: str) -> str:
+            """Englische Energie-Typ-Namen in deutschen Sankey-Labels ersetzen."""
+            for en, de in _et_trans.items():
+                lbl = lbl.replace(en, de)
+            lbl = lbl.replace("Bezug ", "Bezug ").replace("Einspeisung ", "Einspeis. ")
+            return lbl
+
         # Knoten zeichnen
         for idx, (x, y, h) in node_positions.items():
             node = nodes[idx] if idx < len(nodes) else {}
             color = type_colors.get(node.get("type", ""), "#607D8B")
-            label = node.get("label", "")
+            label = _translate_sankey_label(node.get("label", ""))
 
             svg_parts.append(
                 f'<rect x="{x}" y="{y:.1f}" width="{node_width}" height="{h:.1f}" '
                 f'rx="3" fill="{color}"/>'
             )
-            # Label rechts oder links
+            # Label rechts oder links – letztes Drittel bekommt linksausgerichtetes Label
             text_x = x + node_width + 4
-            if x + node_width + 100 > width:
+            if x + node_width + 140 > width:
                 text_x = x - 4
                 anchor = "end"
             else:
                 anchor = "start"
             text_y = y + h / 2 + 3
-            short_label = label[:20]
+            short_label = label[:26]
             svg_parts.append(
                 f'<text x="{text_x}" y="{text_y:.1f}" text-anchor="{anchor}" '
                 f'fill="#1F2937" font-size="8">{short_label}</text>'

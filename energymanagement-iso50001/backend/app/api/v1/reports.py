@@ -126,21 +126,14 @@ async def generate_pdf(
     current_user: User = Depends(require_permission("reports", "generate")),
     db: AsyncSession = Depends(get_db),
 ):
-    """PDF-Bericht generieren (async via Celery)."""
+    """PDF-Bericht synchron generieren."""
     service = ReportService(db)
     report = await service.get_report(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Bericht nicht gefunden")
 
-    # Celery-Task starten
-    from app.tasks import generate_report_pdf
-    generate_report_pdf.delay(str(report_id))
-
-    return {
-        "message": "PDF-Generierung gestartet",
-        "report_id": str(report_id),
-        "status": "pending",
-    }
+    await service.generate_pdf(report_id)
+    return {"message": "PDF-Generierung abgeschlossen", "report_id": str(report_id), "status": "ready"}
 
 
 @router.get("/{report_id}/pdf")
@@ -162,10 +155,10 @@ async def download_pdf(
     if not pdf_file.exists():
         raise HTTPException(status_code=404, detail="PDF-Datei nicht gefunden")
 
-    filename = f"{report.title.replace(' ', '_')}_{report.period_start}_{report.period_end}.pdf"
+    safe_title = report.title.encode("ascii", "ignore").decode("ascii").replace(" ", "_")
+    filename = f"{safe_title}_{report.period_start}_{report.period_end}.pdf"
     return FileResponse(
         str(pdf_file),
         media_type="application/pdf",
         filename=filename,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

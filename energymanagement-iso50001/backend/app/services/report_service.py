@@ -31,7 +31,28 @@ CONVERSION_FACTORS: dict[str, Decimal] = {
     "kWh": Decimal("1"),
 }
 
-PDF_DIR = Path(__file__).parent.parent.parent / "data" / "reports"
+import os as _os
+# Suche das Verzeichnis über das Repo-Root (parent von app/, services/)
+# __file__ kann in Flatpak/Docker-Umgebungen als /app/... aufgelöst werden – daher Fallback auf bekannte Pfade
+def _resolve_pdf_dir() -> Path:
+    env_val = _os.environ.get("REPORT_PDF_DIR")
+    if env_val:
+        return Path(env_val)
+    # Kandidaten: relatives Verzeichnis, bekannte Home-Pfade
+    candidates = [
+        Path(_os.getcwd()) / "data" / "reports",
+        Path(_os.path.expanduser("~")) / "addons" / "energymanagement-iso50001" / "backend" / "data" / "reports",
+        Path("/tmp") / "energymanagement_reports",
+    ]
+    for c in candidates:
+        try:
+            c.mkdir(parents=True, exist_ok=True)
+            return c
+        except OSError:
+            continue
+    return candidates[-1]
+
+PDF_DIR = _resolve_pdf_dir()
 
 
 class ReportService:
@@ -437,6 +458,7 @@ class ReportService:
             html_content = self._render_template(report)
 
             # PDF erzeugen
+            logger.info("pdf_dir_debug", pdf_dir=str(PDF_DIR), cwd=str(__import__("os").getcwd()))
             PDF_DIR.mkdir(parents=True, exist_ok=True)
             pdf_filename = f"{report.id}.pdf"
             pdf_path = PDF_DIR / pdf_filename
@@ -480,12 +502,55 @@ class ReportService:
         env = Environment(loader=FileSystemLoader(str(template_dir)))
         template = env.get_template("base.html")
 
+        et_labels = {
+            "electricity": "Strom", "natural_gas": "Erdgas", "heating_oil": "Heizöl",
+            "district_heating": "Fernwärme", "district_cooling": "Kälte (Fernkälte)",
+            "water": "Wasser", "solar": "Solarstrom", "lpg": "Flüssiggas",
+            "wood_pellets": "Holzpellets", "compressed_air": "Druckluft",
+            "steam": "Dampf", "other": "Sonstige",
+        }
+        scope_labels = {
+            "scope_1": "Scope 1", "scope_2": "Scope 2", "scope_3": "Scope 3",
+        }
+
+        # SVG-Charts serverseitig rendern
+        snap = report.data_snapshot or {}
+        charts = snap.get("charts", {})
+        monthly_trend_svg = ""
+        monthly_cost_svg = ""
+        sankey_svg = ""
+        yoy_svg = ""
+        try:
+            from app.services.reporting.chart_renderer import (
+                render_monthly_trend_svg,
+                render_monthly_cost_svg,
+                render_sankey_svg,
+                render_bar_comparison_svg,
+            )
+            if snap.get("monthly_trend"):
+                monthly_trend_svg = render_monthly_trend_svg(snap["monthly_trend"])
+            cost_summary = snap.get("cost_summary", {})
+            if cost_summary.get("available") and cost_summary.get("monthly_costs"):
+                monthly_cost_svg = render_monthly_cost_svg(cost_summary["monthly_costs"])
+            if charts.get("sankey"):
+                sankey_svg = render_sankey_svg(charts["sankey"])
+            if charts.get("yoy_comparison"):
+                yoy_svg = render_bar_comparison_svg(charts["yoy_comparison"])
+        except Exception as e:
+            logger.warning("chart_render_failed_in_template", error=str(e))
+
         return template.render(
             report=report,
-            snapshot=report.data_snapshot or {},
+            snapshot=snap,
             co2=report.co2_summary or {},
             findings=report.findings or [],
             recommendations=report.recommendations or [],
+            et_labels=et_labels,
+            scope_labels=scope_labels,
+            monthly_trend_svg=monthly_trend_svg,
+            monthly_cost_svg=monthly_cost_svg,
+            sankey_svg=sankey_svg,
+            yoy_svg=yoy_svg,
         )
 
     def _render_builtin_template(self, report: AuditReport) -> str:  # noqa: PLR0912, PLR0914, PLR0915
@@ -627,19 +692,37 @@ class ReportService:
 
         bullets_html = "".join(f"<li>{b}</li>" for b in bullets)
 
+        # Lokalisierte Energieträger-Bezeichnungen
+        ET_LABELS: dict[str, str] = {
+            "electricity": "Strom",
+            "natural_gas": "Erdgas",
+            "heating_oil": "Heizöl",
+            "district_heating": "Fernwärme",
+            "district_cooling": "Kälte (Fernkälte)",
+            "water": "Wasser",
+            "solar": "Solarstrom",
+            "lpg": "Flüssiggas",
+            "wood_pellets": "Holzpellets",
+            "compressed_air": "Druckluft",
+            "steam": "Dampf",
+            "other": "Sonstige",
+        }
+
         # ── Tabellen ──
         energy_rows = ""
         for item in snapshot.get("energy_balance", []):
+            et = item.get("energy_type", "")
             energy_rows += (
-                f"<tr><td>{item.get('energy_type', '')}</td>"
+                f"<tr><td>{ET_LABELS.get(et, et)}</td>"
                 f"<td class='num'>{item.get('consumption_kwh', 0):,.1f}</td>"
                 f"<td class='num'>{item.get('share_percent', 0):.1f}%</td></tr>"
             )
 
         co2_rows = ""
         for item in co2.get("by_energy_type", []):
+            et = item.get("energy_type", "")
             co2_rows += (
-                f"<tr><td>{item.get('energy_type', '')}</td>"
+                f"<tr><td>{ET_LABELS.get(et, et)}</td>"
                 f"<td class='num'>{item.get('co2_kg', 0):,.1f}</td>"
                 f"<td class='num'>{item.get('consumption_kwh', 0):,.1f}</td></tr>"
             )
@@ -648,13 +731,14 @@ class ReportService:
         for item in top_consumers:
             native = item.get("consumption_native")
             unit = item.get("unit", "kWh")
+            et = item.get("energy_type", "")
             if native is not None and native > 0:
                 display_val = f"{native:,.1f}&nbsp;{unit}"
             else:
                 display_val = f"{item.get('consumption_kwh', 0):,.1f}&nbsp;kWh"
             top_rows += (
                 f"<tr><td>{item.get('name', '')}</td>"
-                f"<td>{item.get('energy_type', '')}</td>"
+                f"<td>{ET_LABELS.get(et, et)}</td>"
                 f"<td class='num'>{display_val}</td></tr>"
             )
 
@@ -2413,9 +2497,10 @@ p {{ margin: 5pt 0; }}
         if balance:
             top = max(balance, key=lambda x: x["consumption_kwh"])
             if top["share_percent"] > 70:
+                _et_lbl = {"electricity": "Strom", "natural_gas": "Erdgas", "heating_oil": "Heizöl", "wood_pellets": "Holzpellets", "district_heating": "Fernwärme", "solar": "Solarstrom"}.get(top["energy_type"], top["energy_type"])
                 findings.append({
-                    "title": f"Hohe Abhängigkeit von {top['energy_type']}",
-                    "description": f"Der Energieträger {top['energy_type']} macht {top['share_percent']:.1f}% des Gesamtverbrauchs aus. Eine Diversifizierung sollte geprüft werden.",
+                    "title": f"Hohe Abhängigkeit von {_et_lbl}",
+                    "description": f"Der Energieträger {_et_lbl} macht {top['share_percent']:.1f}% des Gesamtverbrauchs aus. Eine Diversifizierung sollte geprüft werden.",
                     "severity": "mittel",
                     "category": "energy_mix",
                 })
@@ -2947,8 +3032,9 @@ p {{ margin: 5pt 0; }}
         balance = snapshot.get("energy_balance", [])
         if balance:
             top = max(balance, key=lambda x: x["consumption_kwh"])
+            _et_lbl2 = {"electricity": "Strom", "natural_gas": "Erdgas", "heating_oil": "Heizöl", "wood_pellets": "Holzpellets", "district_heating": "Fernwärme", "solar": "Solarstrom"}.get(top["energy_type"], top["energy_type"])
             parts.append(
-                f"Den größten Anteil am Energieverbrauch hat {top['energy_type']} "
+                f"Den größten Anteil am Energieverbrauch hat {_et_lbl2} "
                 f"mit {top['share_percent']:.1f}% ({top['consumption_kwh']:,.0f} kWh)."
             )
 
