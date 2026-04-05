@@ -140,20 +140,15 @@ async def factory_reset(db: AsyncSession, new_password_hash: str) -> dict:
             except Exception as e:
                 logger.warning("factory_reset_table_skip", table=table, error=str(e))
 
-        # Frischen Admin-Benutzer anlegen (Spaltenname: password_hash)
+        # Frischen Admin-Benutzer anlegen
         admin_id = str(uuid.uuid4())
         await db.execute(text("""
-            INSERT INTO users (id, username, email, password_hash, is_active, created_at, updated_at)
-            SELECT :id, 'admin', 'admin@local.host', :pw, true, NOW(), NOW()
+            INSERT INTO users (id, username, email, display_name, password_hash, is_active, role_id, created_at, updated_at)
+            SELECT :id, 'admin', 'admin@local.host', 'Administrator', :pw, true,
+                   (SELECT id FROM roles WHERE name = 'admin' LIMIT 1),
+                   NOW(), NOW()
             WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin')
         """), {"id": admin_id, "pw": new_password_hash})
-
-        # Admin-Rolle zuweisen
-        await db.execute(text("""
-            UPDATE users
-            SET role_id = (SELECT id FROM roles WHERE name = 'admin' LIMIT 1)
-            WHERE username = 'admin' AND role_id IS NULL
-        """))
 
         await db.commit()
 
