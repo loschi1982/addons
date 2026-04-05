@@ -102,7 +102,7 @@ async def delete_report(
     deleted = await service.delete_report(report_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Bericht nicht gefunden")
-    return DeleteResponse(message="Bericht gelöscht")
+    return DeleteResponse(message="Bericht gelöscht", id=report_id)
 
 
 @router.get("/{report_id}/status", response_model=ReportStatusResponse)
