@@ -94,6 +94,73 @@ EXPORT_TABLES: list[str] = [
 ]
 
 
+# Tabellen die beim Factory-Reset NICHT gelöscht werden (Seed-Daten)
+FACTORY_RESET_KEEP: set[str] = {
+    "roles",
+    "permissions",
+    "role_permissions",
+    "emission_factor_sources",
+    "emission_factors",
+    "weather_stations",
+}
+
+
+async def factory_reset(db: AsyncSession, new_password_hash: str) -> dict:
+    """
+    Setzt das System auf Werkseinstellungen zurück.
+
+    Behält: Rollen, Berechtigungen, Emissionsfaktoren, Wetterstationen.
+    Löscht: Alle Benutzer- und Messdaten, ISO-Daten, Einstellungen, Berichte usw.
+    Legt danach einen frischen Admin-Benutzer mit dem neuen Passwort-Hash an.
+
+    Args:
+        db: Datenbankverbindung.
+        admin_user_password_hash: Aktueller Hash des Admin-Passworts (bereits verifiziert).
+        new_password_hash: Hash des neuen Admin-Passworts (identisch wenn nicht geändert).
+
+    Returns:
+        Dict mit gelöschten Tabellen.
+    """
+    deleted: list[str] = []
+
+    await db.execute(text("SET session_replication_role = 'replica'"))
+    try:
+        for table in reversed(EXPORT_TABLES):
+            if table in FACTORY_RESET_KEEP:
+                continue
+            try:
+                await db.execute(text(f"TRUNCATE TABLE {table} CASCADE"))  # noqa: S608
+                deleted.append(table)
+            except Exception as e:
+                logger.warning("factory_reset_table_skip", table=table, error=str(e))
+
+        # Frischen Admin-Benutzer anlegen
+        admin_id = str(uuid.uuid4())
+        await db.execute(text("""
+            INSERT INTO users (id, username, email, hashed_password, is_active, created_at, updated_at)
+            SELECT :id, 'admin', 'admin@local.host', :pw, true, NOW(), NOW()
+            WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin')
+        """), {"id": admin_id, "pw": new_password_hash})
+
+        # Admin-Rolle zuweisen (falls vorhanden)
+        await db.execute(text("""
+            UPDATE users u
+            SET role_id = (SELECT id FROM roles WHERE name = 'admin' LIMIT 1)
+            WHERE username = 'admin' AND role_id IS NULL
+        """))
+
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.execute(text("SET session_replication_role = 'origin'"))
+        await db.commit()
+
+    logger.info("factory_reset_complete", deleted_tables=len(deleted))
+    return {"deleted_tables": deleted, "kept_tables": list(FACTORY_RESET_KEEP)}
+
+
 class _JsonEncoder(json.JSONEncoder):
     """JSON-Encoder mit Unterstützung für UUID, datetime, date, Decimal."""
 

@@ -10,16 +10,19 @@ import gzip
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_permission
+from app.core.security import verify_password, hash_password
 from app.models.user import User
 from app.services.backup_service import (
     BACKUP_FORMAT_VERSION,
     export_database,
+    factory_reset,
     import_database,
 )
 
@@ -127,4 +130,40 @@ async def inspect_backup(
         "total_rows": total_rows,
         "tables": table_summary,
         "skipped_tables": data.get("skipped_tables", []),
+    }
+
+
+@router.post("/factory-reset")
+async def reset_to_factory(
+    password: str = Body(..., embed=True),
+    current_user: User = Depends(require_permission("settings", "update")),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Setzt das System auf Werkseinstellungen zurück.
+
+    Alle Benutzer- und Messdaten werden gelöscht. Seed-Daten (Rollen,
+    Emissionsfaktoren, Wetterstationen) bleiben erhalten. Es wird ein
+    frischer Admin-Benutzer mit dem bestehenden Passwort angelegt.
+
+    Das aktuelle Administratorpasswort muss zur Bestätigung mitgeschickt werden.
+    """
+    # Passwort des aktuell angemeldeten Admins prüfen
+    if not verify_password(password, current_user.password_hash):
+        raise HTTPException(status_code=403, detail="Falsches Passwort. Werksreset abgebrochen.")
+
+    # Nur Admins dürfen zurücksetzen
+    role_name = current_user.role.name if current_user.role else ""
+    if role_name != "admin":
+        raise HTTPException(status_code=403, detail="Nur Administratoren können das System zurücksetzen.")
+
+    result = await factory_reset(
+        db=db,
+        new_password_hash=current_user.password_hash,
+    )
+
+    return {
+        "message": "System erfolgreich auf Werkseinstellungen zurückgesetzt.",
+        "deleted_tables": len(result["deleted_tables"]),
+        "kept_tables": result["kept_tables"],
     }
