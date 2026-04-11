@@ -15,6 +15,7 @@ from decimal import Decimal
 import structlog
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.cache import cached
 
@@ -59,7 +60,7 @@ class CO2Service:
         source_id: uuid.UUID | None = None,
     ) -> list:
         """Emissionsfaktoren auflisten."""
-        query = select(EmissionFactor)
+        query = select(EmissionFactor).options(selectinload(EmissionFactor.source))
         if energy_type:
             query = query.where(EmissionFactor.energy_type == energy_type)
         if year:

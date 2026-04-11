@@ -82,8 +82,27 @@ class MeterService:
         result = await self.db.execute(query)
         meters = result.scalars().all()
 
+        # Letzten Messwert pro Zähler laden
+        meter_ids = [m.id for m in meters]
+        latest_by_meter: dict[uuid.UUID, tuple[Decimal, datetime]] = {}
+        if meter_ids:
+            latest_query = (
+                select(
+                    MeterReading.meter_id,
+                    MeterReading.value,
+                    MeterReading.timestamp,
+                )
+                .where(MeterReading.meter_id.in_(meter_ids))
+                .distinct(MeterReading.meter_id)
+                .order_by(MeterReading.meter_id, MeterReading.timestamp.desc())
+            )
+            latest_result = await self.db.execute(latest_query)
+            for row in latest_result.all():
+                latest_by_meter[row.meter_id] = (row.value, row.timestamp)
+
         return {
             "items": list(meters),
+            "latest_by_meter": latest_by_meter,
             "total": total,
             "page": page,
             "page_size": page_size,
