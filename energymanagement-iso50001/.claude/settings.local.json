@@ -184,7 +184,8 @@
       "Bash(systemctl --user list-units --type=service)",
       "Bash(pct list:*)",
       "Read(//usr/sbin/**)",
-      "Read(//usr/bin/**)"
+      "Read(//usr/bin/**)",
+      "Bash(ls /var/data/python/bin/python*)"
     ]
   }
 }
