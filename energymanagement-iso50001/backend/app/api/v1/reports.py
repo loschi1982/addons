@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -134,6 +134,21 @@ async def generate_pdf(
 
     await service.generate_pdf(report_id)
     return {"message": "PDF-Generierung abgeschlossen", "report_id": str(report_id), "status": "ready"}
+
+
+@router.get("/{report_id}/preview", response_class=HTMLResponse)
+async def preview_report_html(
+    report_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """HTML-Vorschau des Berichts (für Debugging und Online-Ansicht)."""
+    service = ReportService(db)
+    report = await service.get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Bericht nicht gefunden")
+    html = service._render_template(report)
+    return HTMLResponse(content=html)
 
 
 @router.get("/{report_id}/pdf")
