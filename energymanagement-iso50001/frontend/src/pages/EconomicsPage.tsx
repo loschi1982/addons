@@ -222,8 +222,8 @@ export default function EconomicsPage() {
     setError(null);
     try {
       const [amortRes, priceRes] = await Promise.all([
-        apiClient.get('/economics/amortization'),
-        apiClient.get('/economics/price'),
+        apiClient.get('/api/v1/economics/amortization'),
+        apiClient.get('/api/v1/economics/price'),
       ]);
       setItems((amortRes.data as { items: AmortizationItem[] }).items);
       setPriceInfo(priceRes.data as PriceInfo);

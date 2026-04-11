@@ -761,10 +761,10 @@ function ObjectivesTab() {
               <div className="w-32">
                 <div className="flex justify-between text-xs text-gray-500 mb-1">
                   <span>Fortschritt</span>
-                  <span>{obj.progress_percent?.toFixed(0) || 0}%</span>
+                  <span>{Number(obj.progress_percent ?? 0).toFixed(0)}%</span>
                 </div>
                 <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                  <div className="h-full bg-[#1B5E7B] rounded-full transition-all" style={{ width: `${Math.min(obj.progress_percent || 0, 100)}%` }} />
+                  <div className="h-full bg-[#1B5E7B] rounded-full transition-all" style={{ width: `${Math.min(Number(obj.progress_percent ?? 0), 100)}%` }} />
                 </div>
               </div>
             </div>
