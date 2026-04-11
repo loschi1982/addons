@@ -354,15 +354,24 @@ class MeterService:
             consumption = consumption_by_meter.get(m.id, Decimal("0"))
             children = [build_node(c) for c in children_by_parent.get(m.id, [])]
 
-            # Nicht zugeordneter Verbrauch
-            children_consumption = sum(
-                Decimal(str(c.get("consumption", 0) or 0)) for c in children
-            )
-            unaccounted = None
-            if children and consumption > 0:
-                diff = float(round(consumption - children_consumption, 2))
-                if diff > 0:
-                    unaccounted = diff
+            vc = m.virtual_config or {}
+
+            # Doppelzählerstrecke (Parallelschaltung): Verbrauch = Summe der Kinderzähler
+            if vc.get("type") == "parallel" and children:
+                consumption = sum(
+                    Decimal(str(c.get("consumption", 0) or 0)) for c in children
+                )
+                unaccounted = None  # Alle Anteile sind den Kindern zugeordnet
+            else:
+                # Nicht zugeordneter Verbrauch
+                children_consumption = sum(
+                    Decimal(str(c.get("consumption", 0) or 0)) for c in children
+                )
+                unaccounted = None
+                if children and consumption > 0:
+                    diff = float(round(consumption - children_consumption, 2))
+                    if diff > 0:
+                        unaccounted = diff
 
             # Verbraucher
             consumers = [
@@ -383,6 +392,7 @@ class MeterService:
                 "energy_type": m.energy_type,
                 "unit": m.unit,
                 "schema_label": m.schema_label,
+                "virtual_config": vc if vc else None,
                 "consumption": float(consumption) if consumption else 0,
                 "cost": calc_cost(m, consumption) if consumption else None,
                 "unaccounted": unaccounted,

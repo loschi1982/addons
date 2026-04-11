@@ -32,6 +32,7 @@ interface TreeNode {
   energy_type: string;
   unit: string;
   schema_label: string | null;
+  virtual_config: { type: string; [key: string]: unknown } | null;
   consumption: number;
   cost: number | null;
   unaccounted: number | null;
@@ -451,10 +452,26 @@ function TreeView({
               ? Math.round((n.node.consumption / rootConsumption) * 100)
               : 0;
             const isRoot = n.node.id === tree.id;
+            const isParallel = n.node.virtual_config?.type === 'parallel';
 
             return (
+              <div key={n.node.id}>
+                {/* Schattenbox für Doppelzählerstrecke */}
+                {isParallel && (
+                  <div
+                    className="absolute rounded-lg border-2"
+                    style={{
+                      left: n.x + pad + 7,
+                      top: n.y + pad + 7,
+                      width: NODE_W,
+                      height: NODE_H,
+                      borderColor: color,
+                      backgroundColor: 'white',
+                      zIndex: 0,
+                    }}
+                  />
+                )}
               <div
-                key={n.node.id}
                 className="absolute rounded-lg border-2 bg-white shadow-sm p-2.5"
                 style={{
                   left: n.x + pad,
@@ -469,7 +486,12 @@ function TreeView({
                 {/* Zeile 1: Icon + Name */}
                 <div className="flex items-center gap-1.5 mb-1">
                   <Icon className="h-4 w-4 flex-shrink-0" style={{ color }} />
-                  <span className="text-xs font-semibold text-gray-700 truncate">{n.node.name}</span>
+                  <span className="text-xs font-semibold text-gray-700 truncate flex-1">{n.node.name}</span>
+                  {isParallel && (
+                    <span className="text-[9px] font-medium px-1 py-0.5 rounded" style={{ backgroundColor: `${color}20`, color }}>
+                      ∥
+                    </span>
+                  )}
                 </div>
 
                 {/* Zeile 2: Verbrauch + Kosten */}
@@ -549,6 +571,7 @@ function TreeView({
                     </div>
                   </div>
                 )}
+              </div>
               </div>
             );
           })}

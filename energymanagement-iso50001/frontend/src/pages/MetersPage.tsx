@@ -184,7 +184,7 @@ export default function MetersPage() {
       virtual_type: (vcfg.type as string) || 'difference',
       virtual_source_meter_id: (vcfg.source_meter_id as string) || '',
       virtual_subtract_meter_ids: (vcfg.subtract_meter_ids as string[]) || [],
-      virtual_sum_meter_ids: (vcfg.source_meter_ids as string[]) || [],
+      virtual_sum_meter_ids: ((vcfg.source_meter_ids ?? vcfg.parallel_meter_ids) as string[]) || [],
     });
     setFormError(null);
     setShowModal(true);
@@ -245,6 +245,11 @@ export default function MetersPage() {
         virtual_config = {
           type: 'sum',
           source_meter_ids: form.virtual_sum_meter_ids.filter(Boolean),
+        };
+      } else if (form.virtual_type === 'parallel') {
+        virtual_config = {
+          type: 'parallel',
+          parallel_meter_ids: form.virtual_sum_meter_ids.filter(Boolean),
         };
       }
     }
@@ -419,7 +424,9 @@ export default function MetersPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-gray-500">
-                    {meter.is_virtual ? 'Virtuell' : (DATA_SOURCES[meter.data_source] || meter.data_source)}
+                    {meter.is_virtual
+                      ? (meter.virtual_config?.type === 'parallel' ? 'Doppelzähler' : 'Virtuell')
+                      : (DATA_SOURCES[meter.data_source] || meter.data_source)}
                     {meter.is_feed_in && (
                       <span className="ml-1 inline-flex items-center rounded-full bg-green-50 px-1.5 py-0.5 text-xs text-green-700">PV</span>
                     )}
@@ -815,6 +822,7 @@ function MeterModal({
                 >
                   <option value="difference">Differenz (A minus B, C, ...)</option>
                   <option value="sum">Summe (A + B + C + ...)</option>
+                  <option value="parallel">Doppelzählerstrecke (Parallelschaltung)</option>
                 </select>
               </div>
 
@@ -874,10 +882,12 @@ function MeterModal({
                 </div>
               )}
 
-              {form.virtual_type === 'sum' && (
+              {(form.virtual_type === 'sum' || form.virtual_type === 'parallel') && (
                 <div className="space-y-3">
                   <div>
-                    <label className="label">Quellzähler</label>
+                    <label className="label">
+                      {form.virtual_type === 'parallel' ? 'Parallelzähler (z. B. KWZ 55, KWZ 56)' : 'Quellzähler'}
+                    </label>
                     <select
                       className="input mb-2"
                       value=""
@@ -912,7 +922,9 @@ function MeterModal({
                     })}
                   </div>
                   <p className="text-xs text-gray-500">
-                    Ergebnis = Summe aller Quellzähler
+                    {form.virtual_type === 'parallel'
+                      ? 'Gesamtverbrauch = Summe aller Parallelzähler. Im Schema als Doppelbox dargestellt.'
+                      : 'Ergebnis = Summe aller Quellzähler'}
                   </p>
                 </div>
               )}
