@@ -52,6 +52,10 @@ celery_app.conf.update(
             "task": "app.tasks.recalculate_co2",
             "schedule": 86400.0,
         },
+        "daily-maintenance": {
+            "task": "app.tasks.daily_maintenance",
+            "schedule": 86400.0,  # einmal täglich
+        },
         "poll-climate-every-5-min": {
             "task": "app.tasks.poll_climate_sensors",
             "schedule": 300.0,  # alle 5 Minuten
@@ -157,6 +161,29 @@ def generate_report_pdf(self, report_id: str):
         async with _task_db_session() as db:
             service = ReportService(db)
             return await service.generate_pdf(uuid.UUID(report_id))
+
+    return _run_async(_run())
+
+
+@celery_app.task(name="app.tasks.daily_maintenance")
+def daily_maintenance():
+    """Tägliche Wartungsaufgaben: Überziehungs-Status, SEU-Anteile."""
+    async def _run():
+        from app.services.iso_service import ISOService
+        from app.services.energy_review_service import EnergyReviewService
+
+        async with _task_db_session() as db:
+            iso = ISOService(db)
+            overdue = await iso.update_overdue_statuses()
+
+            review = EnergyReviewService(db)
+            seu_updated = await review.recalculate_shares()
+
+            return {
+                "overdue_objectives": overdue["objectives_updated"],
+                "overdue_plans": overdue["plans_updated"],
+                "seu_shares_updated": seu_updated,
+            }
 
     return _run_async(_run())
 

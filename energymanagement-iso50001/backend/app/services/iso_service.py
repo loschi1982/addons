@@ -263,6 +263,54 @@ class ISOService:
         await self.db.refresh(plan)
         return plan
 
+    async def update_overdue_statuses(self) -> dict:
+        """
+        Überziehungs-Status für Energieziele und Aktionspläne aktualisieren.
+
+        Setzt Status auf "overdue" wenn target_date überschritten und
+        nicht bereits abgeschlossen oder abgebrochen. Wird täglich per
+        Celery-Task ausgeführt.
+        """
+        today = date.today()
+        terminal_statuses = {"completed", "cancelled"}
+
+        # Energieziele prüfen
+        obj_result = await self.db.execute(
+            select(EnergyObjective).where(
+                EnergyObjective.target_date < today,
+                EnergyObjective.status.not_in(terminal_statuses | {"overdue"}),
+            )
+        )
+        objectives = obj_result.scalars().all()
+        objectives_updated = 0
+        for obj in objectives:
+            obj.status = "overdue"
+            objectives_updated += 1
+
+        # Aktionspläne prüfen
+        plan_result = await self.db.execute(
+            select(ActionPlan).where(
+                ActionPlan.target_date < today,
+                ActionPlan.status.not_in(terminal_statuses | {"overdue"}),
+                ActionPlan.completion_date.is_(None),
+            )
+        )
+        plans = plan_result.scalars().all()
+        plans_updated = 0
+        for plan in plans:
+            plan.status = "overdue"
+            plans_updated += 1
+
+        if objectives_updated or plans_updated:
+            await self.db.commit()
+
+        logger.info(
+            "overdue_statuses_updated",
+            objectives=objectives_updated,
+            action_plans=plans_updated,
+        )
+        return {"objectives_updated": objectives_updated, "plans_updated": plans_updated}
+
     # --- Risiken und Chancen (Kap. 6.1) ---
 
     async def list_risks(
