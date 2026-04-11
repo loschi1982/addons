@@ -27,8 +27,9 @@ from app.services.meter_service import MeterService
 router = APIRouter()
 
 
-def _meter_to_response(meter) -> MeterResponse:
+def _meter_to_response(meter, latest=None) -> MeterResponse:
     """Hilfsfunktion: Meter-Objekt → MeterResponse."""
+    latest_value, latest_ts = latest if latest else (None, None)
     return MeterResponse(
         id=meter.id,
         name=meter.name,
@@ -54,6 +55,8 @@ def _meter_to_response(meter) -> MeterResponse:
         schema_label=getattr(meter, 'schema_label', None),
         is_active=meter.is_active,
         created_at=meter.created_at,
+        latest_reading=latest_value,
+        latest_reading_date=latest_ts,
     )
 
 
@@ -86,8 +89,9 @@ async def list_meters(
     )
 
     total = result["total"]
+    latest_by_meter = result.get("latest_by_meter", {})
     return PaginatedResponse(
-        items=[_meter_to_response(m) for m in result["items"]],
+        items=[_meter_to_response(m, latest_by_meter.get(m.id)) for m in result["items"]],
         total=total,
         page=result["page"],
         page_size=result["page_size"],

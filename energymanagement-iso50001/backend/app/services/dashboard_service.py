@@ -9,10 +9,10 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.emission import CO2Calculation
+from app.models.emission import CO2Calculation, EmissionFactor
 from app.models.meter import Meter
 from app.models.reading import MeterReading
 
@@ -215,14 +215,57 @@ class DashboardService:
         return Decimal(str(round(float(total), 1)))
 
     async def _total_co2(self, start: date, end: date) -> Decimal:
-        """Gesamt-CO₂ in kg."""
+        """Gesamt-CO₂ in kg – aus vorberechneten Daten oder Echtzeit-Schätzung."""
         result = await self.db.execute(
             select(func.sum(CO2Calculation.co2_kg)).where(
                 CO2Calculation.period_start >= start,
                 CO2Calculation.period_end <= end,
             )
         )
-        return Decimal(str(round(float(result.scalar() or Decimal("0")), 1)))
+        co2_kg = result.scalar() or Decimal("0")
+        if co2_kg > 0:
+            return Decimal(str(round(float(co2_kg), 1)))
+
+        # Fallback: Schätzung aus Verbrauchsdaten × Emissionsfaktoren
+        try:
+            # Verbrauch je Energietyp laden
+            cons_result = await self.db.execute(
+                select(
+                    Meter.energy_type,
+                    Meter.unit,
+                    func.sum(MeterReading.consumption).label("consumption"),
+                )
+                .join(MeterReading, MeterReading.meter_id == Meter.id)
+                .where(
+                    Meter.is_active == True,  # noqa: E712
+                    Meter.is_feed_in != True,
+                    Meter.parent_meter_id.is_(None),
+                    MeterReading.consumption.isnot(None),
+                    MeterReading.timestamp >= datetime.combine(start, time.min, tzinfo=timezone.utc),
+                    MeterReading.timestamp < datetime.combine(end + timedelta(days=1), time.min, tzinfo=timezone.utc),
+                )
+                .group_by(Meter.energy_type, Meter.unit)
+            )
+            # Neuesten Emissionsfaktor je Energietyp laden
+            factors_result = await self.db.execute(
+                select(EmissionFactor.energy_type, func.max(EmissionFactor.co2_g_per_kwh).label("co2_factor"))
+                .group_by(EmissionFactor.energy_type)
+            )
+            factors: dict[str, Decimal] = {
+                row.energy_type: Decimal(str(row.co2_factor))
+                for row in factors_result.all()
+                if row.co2_factor
+            }
+            total = Decimal("0")
+            for row in cons_result.all():
+                consumption = row.consumption or Decimal("0")
+                conv = CONVERSION_FACTORS.get(row.unit, Decimal("1"))
+                kwh = consumption * conv
+                factor = factors.get(row.energy_type, Decimal("0"))
+                total += kwh * factor / Decimal("1000")
+            return Decimal(str(round(float(total), 1)))
+        except Exception:
+            return Decimal("0")
 
     async def _total_cost(self, start: date, end: date) -> Decimal:
         """Geschätzte Gesamtkosten aus Tarif-Informationen."""
@@ -266,11 +309,12 @@ class DashboardService:
         return result.scalar() or 0
 
     async def _get_energy_breakdown(self, start: date, end: date) -> list[dict]:
-        """Verbrauch nach Energietyp aufschlüsseln (mit Originaleinheiten)."""
+        """Verbrauch nach Energietyp aufschlüsseln (mit Originaleinheiten, Kosten, CO₂)."""
         query = (
             select(
                 Meter.energy_type,
                 Meter.unit,
+                Meter.tariff_info,
                 func.sum(MeterReading.consumption).label("consumption"),
             )
             .join(MeterReading, MeterReading.meter_id == Meter.id)
@@ -285,12 +329,23 @@ class DashboardService:
                     end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
                 ),
             )
-            .group_by(Meter.energy_type, Meter.unit)
+            .group_by(Meter.energy_type, Meter.unit, Meter.tariff_info)
         )
         result = await self.db.execute(query)
         rows = result.all()
 
-        # Pro Energietyp: kWh-Summe + Originalwerte tracken
+        # Emissionsfaktoren je Energietyp laden (neuester Jahreswert)
+        factors_result = await self.db.execute(
+            select(EmissionFactor.energy_type, func.max(EmissionFactor.co2_g_per_kwh).label("co2_factor"))
+            .group_by(EmissionFactor.energy_type)
+        )
+        factors: dict[str, Decimal] = {
+            row.energy_type: Decimal(str(row.co2_factor))
+            for row in factors_result.all()
+            if row.co2_factor
+        }
+
+        # Pro Energietyp: kWh-Summe + Originalwerte + Kosten + CO₂ tracken
         groups: dict[str, dict] = {}
         for row in rows:
             raw = row.consumption or Decimal("0")
@@ -301,11 +356,21 @@ class DashboardService:
                     "kwh": Decimal("0"),
                     "original_value": Decimal("0"),
                     "original_unit": row.unit,
+                    "cost_eur": Decimal("0"),
+                    "co2_kg": Decimal("0"),
                 }
             groups[row.energy_type]["kwh"] += kwh
             # Originalwert nur akkumulieren wenn gleiche Einheit
             if groups[row.energy_type]["original_unit"] == row.unit:
                 groups[row.energy_type]["original_value"] += raw
+            # Kosten aus Tarif berechnen
+            tariff = row.tariff_info or {}
+            price = tariff.get("price_per_kwh")
+            if price:
+                groups[row.energy_type]["cost_eur"] += kwh * Decimal(str(price))
+            # CO₂ schätzen
+            factor = factors.get(row.energy_type, Decimal("0"))
+            groups[row.energy_type]["co2_kg"] += kwh * factor / Decimal("1000")
 
         total = sum(g["kwh"] for g in groups.values())
         return [
@@ -314,6 +379,8 @@ class DashboardService:
                 "consumption_kwh": info["kwh"],
                 "original_value": info["original_value"],
                 "original_unit": info["original_unit"],
+                "cost_eur": info["cost_eur"] if info["cost_eur"] > 0 else None,
+                "co2_kg": round(info["co2_kg"], 1) if info["co2_kg"] > 0 else None,
                 "share_percent": Decimal(str(round(float(info["kwh"] / total * 100), 1))) if total > 0 else Decimal("0"),
             }
             for et, info in sorted(groups.items(), key=lambda x: -x[1]["kwh"])
@@ -351,8 +418,8 @@ class DashboardService:
                         end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
                     ),
                 )
-                .group_by(func.date_trunc(trunc, MeterReading.timestamp))
-                .order_by(func.date_trunc(trunc, MeterReading.timestamp))
+                .group_by(text("period"))
+                .order_by(text("period"))
             )
             result = await self.db.execute(query)
             rows = result.all()
