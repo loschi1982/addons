@@ -310,11 +310,12 @@ class DashboardService:
 
     async def _get_energy_breakdown(self, start: date, end: date) -> list[dict]:
         """Verbrauch nach Energietyp aufschlüsseln (mit Originaleinheiten, Kosten, CO₂)."""
+        # Schritt 1: Verbrauch je Zähler aggregieren (kein JSON im GROUP BY)
         query = (
             select(
+                Meter.id,
                 Meter.energy_type,
                 Meter.unit,
-                Meter.tariff_info,
                 func.sum(MeterReading.consumption).label("consumption"),
             )
             .join(MeterReading, MeterReading.meter_id == Meter.id)
@@ -329,12 +330,22 @@ class DashboardService:
                     end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
                 ),
             )
-            .group_by(Meter.energy_type, Meter.unit, Meter.tariff_info)
+            .group_by(Meter.id, Meter.energy_type, Meter.unit)
         )
         result = await self.db.execute(query)
         rows = result.all()
 
-        # Emissionsfaktoren je Energietyp laden (neuester Jahreswert)
+        if not rows:
+            return []
+
+        # Schritt 2: tariff_info je Zähler laden
+        meter_ids = [row.id for row in rows]
+        tariff_result = await self.db.execute(
+            select(Meter.id, Meter.tariff_info).where(Meter.id.in_(meter_ids))
+        )
+        tariffs: dict = {row.id: (row.tariff_info or {}) for row in tariff_result.all()}
+
+        # Schritt 3: Emissionsfaktoren je Energietyp laden (neuester Jahreswert)
         factors_result = await self.db.execute(
             select(EmissionFactor.energy_type, func.max(EmissionFactor.co2_g_per_kwh).label("co2_factor"))
             .group_by(EmissionFactor.energy_type)
@@ -345,7 +356,7 @@ class DashboardService:
             if row.co2_factor
         }
 
-        # Pro Energietyp: kWh-Summe + Originalwerte + Kosten + CO₂ tracken
+        # Schritt 4: Pro Energietyp aggregieren
         groups: dict[str, dict] = {}
         for row in rows:
             raw = row.consumption or Decimal("0")
@@ -364,7 +375,7 @@ class DashboardService:
             if groups[row.energy_type]["original_unit"] == row.unit:
                 groups[row.energy_type]["original_value"] += raw
             # Kosten aus Tarif berechnen
-            tariff = row.tariff_info or {}
+            tariff = tariffs.get(row.id, {})
             price = tariff.get("price_per_kwh")
             if price:
                 groups[row.energy_type]["cost_eur"] += kwh * Decimal(str(price))
