@@ -15,6 +15,7 @@ from app.api.v1 import (
     backup,
     climate,
     consumers,
+    contracts,
     dashboard,
     economics,
     emissions,
@@ -53,6 +54,7 @@ api_router.include_router(imports.router, prefix="/imports", tags=["Datenimport"
 
 # Wirtschaftlichkeit
 api_router.include_router(economics.router, prefix="/economics", tags=["Wirtschaftlichkeit"])
+api_router.include_router(contracts.router, prefix="/contracts", tags=["Energielieferverträge"])
 
 # Analysen und Berichte
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
