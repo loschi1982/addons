@@ -11,7 +11,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.common import BaseSchema
 
@@ -21,15 +21,30 @@ from app.schemas.common import BaseSchema
 # ---------------------------------------------------------------------------
 
 class ReadingCreate(BaseModel):
-    """Einzelnen Zählerstand manuell erfassen."""
+    """Einzelnen Zählerstand manuell erfassen.
+
+    Entweder ``value`` (absoluter Zählerstand) oder ``consumption_direct``
+    (nur Verbrauch, z.B. aus Monatsrechnung) muss angegeben sein.
+    Bei ``consumption_direct`` wird der Zählerstand aus dem letzten bekannten
+    Stand geschätzt und quality auf ``estimated`` gesetzt.
+    """
     meter_id: uuid.UUID
     timestamp: datetime
-    value: Decimal = Field(..., description="Zählerstand in der Zählereinheit")
+    value: Decimal | None = Field(None, description="Absoluter Zählerstand in der Zählereinheit")
+    consumption_direct: Decimal | None = Field(None, description="Nur Verbrauch (ohne Zählerstand), z.B. aus Monatsabrechnung")
     source: str = Field("manual", max_length=50)
     quality: str = Field("measured", max_length=50)
     cost_gross: Decimal | None = Field(None, description="Bruttokosten in €")
     vat_rate: Decimal | None = Field(None, description="MwSt-Satz in % (z.B. 19)")
     notes: str | None = None
+
+    @model_validator(mode="after")
+    def check_value_or_consumption(self) -> "ReadingCreate":
+        if self.value is None and self.consumption_direct is None:
+            raise ValueError(
+                "Entweder 'value' (Zählerstand) oder 'consumption_direct' (Verbrauch) muss angegeben sein"
+            )
+        return self
 
 
 class ReadingBulkCreate(BaseModel):
