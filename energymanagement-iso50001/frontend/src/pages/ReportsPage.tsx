@@ -7,7 +7,7 @@ import {
   Building2, Gauge, Zap,
 } from 'lucide-react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import SankeyDiagram from '@/components/charts/SankeyDiagram';
 import { apiClient } from '@/utils/api';
@@ -716,49 +716,58 @@ function CreateReportModal({
 
 const MONTHS_SHORT = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
 
-function YoyChart({ charts }: { charts: Record<string, unknown> }) {
-  const yoy = charts.yoy_comparison as Record<string, unknown> | undefined;
-  if (!yoy) return null;
-  const p1 = yoy.period1 as Record<string, unknown> | undefined;
-  const p2 = yoy.period2 as Record<string, unknown> | undefined;
-  const p1data = p1?.data as Record<string, { period: string; value: number }[]> | undefined;
-  const p2data = p2?.data as Record<string, { period: string; value: number }[]> | undefined;
-  if (!p1data || !p2data) return null;
+function YoyChart({ snapshot }: { snapshot: Record<string, unknown> }) {
+  const rows = snapshot.energy_yoy_table as { label: string; unit: string; prev_native: number; curr_native: number; delta_pct: number | null }[] | undefined;
+  if (!rows?.length) return null;
+  const hasData = rows.some((r) => r.prev_native > 0 || r.curr_native > 0);
+  if (!hasData) return null;
 
-  const sums1: Record<number, number> = {};
-  const sums2: Record<number, number> = {};
-  Object.values(p1data).forEach((entries) =>
-    entries.forEach((e) => { const m = new Date(e.period).getMonth(); sums1[m] = (sums1[m] || 0) + e.value; })
-  );
-  Object.values(p2data).forEach((entries) =>
-    entries.forEach((e) => { const m = new Date(e.period).getMonth(); sums2[m] = (sums2[m] || 0) + e.value; })
-  );
-  const allMonths = [...new Set([...Object.keys(sums1), ...Object.keys(sums2)].map(Number))].sort((a, b) => a - b);
-  if (allMonths.length === 0) return null;
-  const chartData = allMonths.map((m) => ({
-    monat: MONTHS_SHORT[m],
-    Vorjahr: Math.round((sums1[m] || 0) * 10) / 10,
-    Aktuell: Math.round((sums2[m] || 0) * 10) / 10,
-  }));
-  const p1Year = String(p1?.start || '').slice(0, 4);
-  const p2Year = String(p2?.start || '').slice(0, 4);
+  const periodStart = snapshot.period_start as string | undefined;
+  const periodEnd = snapshot.period_end as string | undefined;
+  const prevYear = periodStart ? String(parseInt(periodStart.slice(0, 4)) - 1) : 'Vorjahr';
+  const currYear = periodEnd ? periodEnd.slice(0, 4) : 'Aktuell';
 
   return (
     <div>
       <h3 className="text-base font-semibold text-gray-900 mb-3">
-        Jahresvergleich{p1Year && p2Year ? ` ${p1Year} vs. ${p2Year}` : ''}
+        Vorjahresvergleich nach Energieträger ({prevYear} vs. {currYear})
       </h3>
-      <ResponsiveContainer width="100%" height={220}>
-        <BarChart data={chartData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-          <XAxis dataKey="monat" tick={{ fontSize: 11 }} />
-          <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
-          <Tooltip formatter={(v: number) => [`${v.toLocaleString('de-DE')} kWh`]} />
-          <Legend />
-          <Bar dataKey="Vorjahr" fill="#9CA3AF" radius={[2, 2, 0, 0]} />
-          <Bar dataKey="Aktuell" fill="#1B5E7B" radius={[2, 2, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
+      <div className="space-y-3">
+        {rows.filter((r) => r.prev_native > 0 || r.curr_native > 0).map((row, idx) => {
+          const delta = row.delta_pct;
+          const maxVal = Math.max(row.prev_native, row.curr_native, 1);
+          return (
+            <div key={idx} className="rounded-lg border p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium text-gray-700">{row.label}</span>
+                <span className={`text-sm font-bold ${delta == null ? 'text-gray-400' : delta > 5 ? 'text-red-600' : delta < -5 ? 'text-green-600' : 'text-gray-700'}`}>
+                  {delta != null ? `${delta > 0 ? '+' : ''}${delta.toFixed(1)}%` : '–'}
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                <div>
+                  <div className="flex justify-between text-xs text-gray-500 mb-0.5">
+                    <span>{prevYear}</span>
+                    <span className="font-mono">{row.prev_native.toLocaleString('de-DE', { maximumFractionDigits: 1 })} {row.unit}</span>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full">
+                    <div className="h-2 bg-gray-400 rounded-full" style={{ width: `${Math.min((row.prev_native / maxVal) * 100, 100)}%` }} />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-xs text-gray-700 mb-0.5">
+                    <span>{currYear}</span>
+                    <span className="font-mono font-medium">{row.curr_native.toLocaleString('de-DE', { maximumFractionDigits: 1 })} {row.unit}</span>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full">
+                    <div className="h-2 rounded-full" style={{ width: `${Math.min((row.curr_native / maxVal) * 100, 100)}%`, backgroundColor: delta != null && delta > 5 ? '#DC2626' : delta != null && delta < -5 ? '#16A34A' : '#1B5E7B' }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -875,6 +884,16 @@ function EnergyByTypeSection({ snapshot }: { snapshot: Record<string, unknown> }
   const energyByType = snapshot.energy_by_type as Record<string, EnergyTypeData> | undefined;
   if (!energyByType || Object.keys(energyByType).length === 0) return null;
 
+  const charts = (snapshot.charts || {}) as Record<string, unknown>;
+  const sankeyByType = (charts.sankey_by_type || {}) as Record<string, { nodes: { id: string; label: string; type: string; depth?: number }[]; links: { source: number; target: number; value: number; direction?: 'consumption' | 'feed_in' }[] }>;
+  const yoyTable = (snapshot.energy_yoy_table || []) as { energy_type: string; label: string; unit: string; prev_native: number; curr_native: number; delta_pct: number | null }[];
+  const yoyByType: Record<string, { prev_native: number; curr_native: number; delta_pct: number | null; unit: string }> = {};
+  yoyTable.forEach((r) => { yoyByType[r.energy_type] = r; });
+
+  const periodStart = snapshot.period_start as string | undefined;
+  const prevYear = periodStart ? String(parseInt(periodStart.slice(0, 4)) - 1) : 'Vorjahr';
+  const currYear = periodStart ? periodStart.slice(0, 4) : 'Aktuell';
+
   return (
     <div>
       <h3 className="text-base font-semibold text-gray-900 mb-3 flex items-center gap-2">
@@ -893,10 +912,12 @@ function EnergyByTypeSection({ snapshot }: { snapshot: Record<string, unknown> }
               monat: MONTHS_SHORT[d.month - 1],
               [et.unit]: Math.round(d.consumption_native * 10) / 10,
             }));
+          const yoy = yoyByType[key];
+          const sankeyData = sankeyByType[key];
           return (
             <div key={key} className="rounded-lg border overflow-hidden">
               {/* Header */}
-              <div className="px-4 py-2.5 flex items-center gap-2" style={{ backgroundColor: color + '18', borderBottom: `2px solid ${color}` }}>
+              <div className="px-4 py-2.5 flex items-center gap-2 flex-wrap" style={{ backgroundColor: color + '18', borderBottom: `2px solid ${color}` }}>
                 <span className="h-3 w-3 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
                 <span className="font-semibold text-gray-900">{et.label}</span>
                 <span className="ml-auto text-sm font-bold" style={{ color }}>
@@ -907,11 +928,39 @@ function EnergyByTypeSection({ snapshot }: { snapshot: Record<string, unknown> }
                     ({et.total_kwh_equiv.toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh-Äquiv.)
                   </span>
                 )}
+                {/* YoY-Delta direkt im Header */}
+                {yoy && yoy.prev_native > 0 && (
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                    yoy.delta_pct == null ? 'bg-gray-100 text-gray-500' :
+                    yoy.delta_pct > 5 ? 'bg-red-100 text-red-700' :
+                    yoy.delta_pct < -5 ? 'bg-green-100 text-green-700' :
+                    'bg-gray-100 text-gray-700'
+                  }`}>
+                    {yoy.delta_pct != null ? `${yoy.delta_pct > 0 ? '+' : ''}${yoy.delta_pct.toFixed(1)}% vs. ${prevYear}` : `vs. ${prevYear}: –`}
+                  </span>
+                )}
               </div>
-              <div className="p-4">
+              <div className="p-4 space-y-4">
+                {/* Vorjahresvergleich-Zeile */}
+                {yoy && yoy.prev_native > 0 && (
+                  <div className="grid grid-cols-2 gap-3 text-sm border-b pb-3">
+                    <div>
+                      <p className="text-xs text-gray-500">{prevYear}</p>
+                      <p className="font-mono font-medium text-gray-500">
+                        {yoy.prev_native.toLocaleString('de-DE', { maximumFractionDigits: 1 })} {yoy.unit}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">{currYear}</p>
+                      <p className="font-mono font-medium text-gray-800">
+                        {yoy.curr_native.toLocaleString('de-DE', { maximumFractionDigits: 1 })} {yoy.unit}
+                      </p>
+                    </div>
+                  </div>
+                )}
                 {/* Zähler-Liste */}
                 {et.top_meters.length > 0 && (
-                  <div className="mb-3">
+                  <div>
                     <p className="text-xs text-gray-500 mb-2">{et.meter_count} Zähler erfasst</p>
                     <div className="space-y-1.5">
                       {et.top_meters.map((m) => {
@@ -945,6 +994,15 @@ function EnergyByTypeSection({ snapshot }: { snapshot: Record<string, unknown> }
                       <Bar dataKey={et.unit} fill={color} radius={[2, 2, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
+                )}
+                {/* Energiefluss je Energieart */}
+                {sankeyData?.nodes?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 mb-2">Energiefluss {et.label}</p>
+                    <div className="rounded-lg border bg-gray-50 p-2 overflow-x-auto">
+                      <SankeyDiagram nodes={sankeyData.nodes} links={sankeyData.links} width={620} height={280} />
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -1576,8 +1634,8 @@ function ReportViewer({
             );
           })()}
 
-          {/* Jahresvergleich */}
-          <YoyChart charts={charts} />
+          {/* Jahresvergleich immer anzeigen (aus energy_yoy_table, immer im Snapshot) */}
+          <YoyChart snapshot={snapshot as Record<string, unknown>} />
 
           {/* KPI-Vergleichstabelle */}
           {(() => {
