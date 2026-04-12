@@ -327,6 +327,23 @@ class ReportService:
         charts = await self._collect_chart_data(
             period_start, period_end, meter_ids, scope_config
         )
+
+        # Sankey je Energieart sammeln (immer, unabhängig vom include_sankey-Toggle)
+        energy_by_type_keys = list((snapshot.get("energy_by_type") or {}).keys())
+        if energy_by_type_keys:
+            from app.services.analytics_service import AnalyticsService as _AS
+            _analytics = _AS(self.db)
+            sankey_by_type: dict = {}
+            for _et_key in energy_by_type_keys:
+                try:
+                    _sankey_et = await _analytics.get_sankey(period_start, period_end, energy_type=_et_key)
+                    if _sankey_et.get("nodes"):
+                        sankey_by_type[_et_key] = _sankey_et
+                except Exception as _e:
+                    logger.warning(f"sankey_by_type_{_et_key}_failed", error=str(_e))
+            if sankey_by_type:
+                charts["sankey_by_type"] = sankey_by_type
+
         if charts:
             snapshot["charts"] = charts
 
@@ -565,12 +582,13 @@ class ReportService:
                 render_monthly_cost_svg,
                 render_monthly_trend_svg,
                 render_sankey_svg,
+                render_yoy_table_svg,
             )
         except ImportError as e:
             logger.warning("chart_renderer_import_failed", error=str(e))
             render_bar_comparison_svg = render_heatmap_svg = render_meter_tree_svg = None  # type: ignore[assignment]
             render_monthly_trend_svg = render_monthly_cost_svg = render_sankey_svg = None  # type: ignore[assignment]
-            render_energy_type_trend_svg = None  # type: ignore[assignment]
+            render_energy_type_trend_svg = render_yoy_table_svg = None  # type: ignore[assignment]
 
         def safe_render(fn, data, name: str = "chart") -> str:
             """Renderer mit try/except aufrufen, leeren String bei Fehler."""
@@ -952,8 +970,12 @@ class ReportService:
 
         # ── Energieart-Trennung: Sektionen je Energieart ──
         schema_strands = snapshot.get("schema_strands", [])
+        sankey_by_type = charts.get("sankey_by_type", {})
 
-        # HTML je Energieart (mit SVG-Trend, Kennzahlen, Zählerliste)
+        # Vorjahresvergleich pro Energieart als Lookup {energy_type → row}
+        yoy_by_et: dict = {r["energy_type"]: r for r in energy_yoy_table}
+
+        # HTML je Energieart (mit SVG-Trend, Sankey, Kennzahlen, Zählerliste)
         energy_type_sections_html = ""
         for et_key, et_data in energy_by_type.items():
             et_label = et_data.get("label", et_key)
@@ -972,6 +994,34 @@ class ReportService:
                     et_svg = render_energy_type_trend_svg(et_monthly, unit=et_unit, color=et_color) or ""
                 except Exception as e:
                     logger.warning(f"chart_render_et_trend_{et_key}_failed", error=str(e))
+
+            # Sankey-SVG für diese Energieart
+            et_sankey_svg = ""
+            if render_sankey_svg and sankey_by_type.get(et_key):
+                try:
+                    et_sankey_svg = render_sankey_svg(sankey_by_type[et_key]) or ""
+                except Exception as e:
+                    logger.warning(f"chart_render_et_sankey_{et_key}_failed", error=str(e))
+
+            # Vorjahresvergleich-KPI für diese Energieart
+            yoy_row = yoy_by_et.get(et_key)
+            yoy_kpi_html = ""
+            if yoy_row and yoy_row.get("prev_native", 0) > 0:
+                delta = yoy_row.get("delta_pct")
+                delta_color = "#DC2626" if delta is not None and delta > 5 else "#16A34A" if delta is not None and delta < -5 else "#374151"
+                delta_str = f'<span style="color:{delta_color};font-weight:700">{delta:+.1f}%</span>' if delta is not None else "–"
+                yoy_kpi_html = (
+                    f"<div class='kpi-card'>"
+                    f"<div class='value' style='font-size:13pt'>{yoy_row['prev_native']:,.1f}</div>"
+                    f"<div class='unit'>{et_unit} (Vorjahr)</div>"
+                    f"<div class='label'>Vorjahreszeitraum</div>"
+                    f"</div>"
+                    f"<div class='kpi-card'>"
+                    f"<div class='value' style='font-size:13pt'>{delta_str}</div>"
+                    f"<div class='unit'>&nbsp;</div>"
+                    f"<div class='label'>Δ zum Vorjahr</div>"
+                    f"</div>"
+                )
 
             # Zähler-Tabelle
             et_meter_rows = ""
@@ -1001,9 +1051,11 @@ class ReportService:
         <div class="unit">Stk.</div>
         <div class="label">Zähler</div>
     </div>
+    {yoy_kpi_html}
 </div>
 {"<table><thead><tr><th>Zähler</th><th class='num'>Verbrauch</th>" + kwh_col + "</tr></thead><tbody>" + et_meter_rows + "</tbody></table>" if et_meter_rows else ""}
 {f'<figure>{et_svg}</figure>' if et_svg else ""}
+{f'<h3>Energiefluss {et_label}</h3><figure>{et_sankey_svg}</figure>' if et_sankey_svg else ""}
 """
 
         # HTML für Schema-Stränge
@@ -1035,7 +1087,11 @@ class ReportService:
         monthly_trend_svg = safe_render(
             render_monthly_trend_svg, snapshot.get("monthly_trend", []), "monthly_trend"
         )
-        yoy_svg = safe_render(render_bar_comparison_svg, charts.get("yoy_comparison"), "yoy")
+        # YoY-Vergleich immer aus energy_yoy_table rendern (immer im Snapshot)
+        yoy_svg = safe_render(render_yoy_table_svg, energy_yoy_table, "yoy_table")
+        if not yoy_svg:
+            # Fallback auf Analytics-Vergleich wenn yoy_table leer
+            yoy_svg = safe_render(render_bar_comparison_svg, charts.get("yoy_comparison"), "yoy")
         sankey_svg = safe_render(render_sankey_svg, charts.get("sankey"), "sankey")
         heatmap_svg = safe_render(render_heatmap_svg, charts.get("heatmap"), "heatmap")
         tree_svg = safe_render(render_meter_tree_svg, charts.get("meter_tree"), "tree")

@@ -829,3 +829,136 @@ def render_monthly_cost_svg(
     except Exception as e:
         logger.warning("render_monthly_cost_failed", error=str(e))
         return _fallback_svg(f"Kostenverlauf nicht verfügbar: {e}", width, height)
+
+
+def render_yoy_table_svg(
+    energy_yoy_table: list[dict],
+    width: int = 650,
+    height: int = 240,
+) -> str:
+    """
+    Vorjahresvergleich nach Energieträger als gruppiertes Balkendiagramm.
+
+    energy_yoy_table: Liste von {label, unit, prev_native, curr_native, delta_pct}
+    Direkt aus dem Snapshot – immer vorhanden, kein Analytics-API-Aufruf nötig.
+    """
+    try:
+        rows = [r for r in energy_yoy_table if r.get("prev_native", 0) > 0 or r.get("curr_native", 0) > 0]
+        if not rows:
+            return _fallback_svg("Keine Vorjahresdaten vorhanden", width, height)
+
+        margin_left = 70
+        margin_top = 20
+        margin_bottom = 70
+        margin_right = 15
+        chart_w = width - margin_left - margin_right
+        chart_h = height - margin_top - margin_bottom
+
+        max_val = max(
+            max(r.get("prev_native", 0) for r in rows),
+            max(r.get("curr_native", 0) for r in rows),
+        )
+        if max_val == 0:
+            max_val = 1
+
+        n = len(rows)
+        group_w = chart_w / n
+        bar_w = group_w * 0.35
+        gap = group_w * 0.05
+
+        COLOR_PREV = "#9CA3AF"  # Grau für Vorjahr
+        COLOR_CURR = "#1B5E7B"  # Petrol für aktuell
+
+        svg_parts = [
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+            f'style="width:{width}px;height:{height}px;font-family:Arial,sans-serif;font-size:9px">'
+        ]
+
+        # Raster
+        for i in range(5):
+            y = margin_top + chart_h * (1 - i / 4)
+            val = max_val * i / 4
+            svg_parts.append(
+                f'<line x1="{margin_left}" y1="{y:.1f}" x2="{width - margin_right}" '
+                f'y2="{y:.1f}" stroke="#E5E7EB" stroke-dasharray="3,3"/>'
+            )
+            svg_parts.append(
+                f'<text x="{margin_left - 5}" y="{y + 3:.1f}" text-anchor="end" '
+                f'fill="#6B7280">{val:,.0f}</text>'
+            )
+
+        # Balken
+        for idx, row in enumerate(rows):
+            x_group = margin_left + idx * group_w + gap
+            prev_val = row.get("prev_native", 0)
+            curr_val = row.get("curr_native", 0)
+            delta = row.get("delta_pct")
+            label = row.get("label", "")
+            unit = row.get("unit", "kWh")
+
+            # Vorjahr-Balken
+            if prev_val > 0:
+                bar_h = (prev_val / max_val) * chart_h
+                y_bar = margin_top + chart_h - bar_h
+                svg_parts.append(
+                    f'<rect x="{x_group:.1f}" y="{y_bar:.1f}" '
+                    f'width="{bar_w:.1f}" height="{bar_h:.1f}" fill="{COLOR_PREV}" rx="2"/>'
+                )
+
+            # Aktuell-Balken
+            if curr_val > 0:
+                bar_h = (curr_val / max_val) * chart_h
+                y_bar = margin_top + chart_h - bar_h
+                x_curr = x_group + bar_w + 2
+                svg_parts.append(
+                    f'<rect x="{x_curr:.1f}" y="{y_bar:.1f}" '
+                    f'width="{bar_w:.1f}" height="{bar_h:.1f}" fill="{COLOR_CURR}" rx="2"/>'
+                )
+
+            # Δ%-Label über dem höheren Balken
+            if delta is not None:
+                x_center = x_group + bar_w + 1
+                y_top = margin_top + chart_h - max(prev_val, curr_val) / max_val * chart_h - 4
+                delta_color = "#DC2626" if delta > 5 else "#16A34A" if delta < -5 else "#374151"
+                sign = "+" if delta > 0 else ""
+                svg_parts.append(
+                    f'<text x="{x_center:.1f}" y="{y_top:.1f}" text-anchor="middle" '
+                    f'fill="{delta_color}" font-weight="700" font-size="8">{sign}{delta:.1f}%</text>'
+                )
+
+            # X-Achse Label
+            x_label = x_group + bar_w + 1
+            y_label = margin_top + chart_h + 14
+            svg_parts.append(
+                f'<text x="{x_label:.1f}" y="{y_label}" text-anchor="middle" '
+                f'fill="#374151" font-size="8">{label}</text>'
+            )
+            svg_parts.append(
+                f'<text x="{x_label:.1f}" y="{y_label + 10}" text-anchor="middle" '
+                f'fill="#9CA3AF" font-size="7">{unit}</text>'
+            )
+
+        # X-Achse
+        svg_parts.append(
+            f'<line x1="{margin_left}" y1="{margin_top + chart_h}" '
+            f'x2="{width - margin_right}" y2="{margin_top + chart_h}" stroke="#D1D5DB"/>'
+        )
+
+        # Legende
+        legend_y = height - 18
+        legend_x = margin_left
+        svg_parts.append(
+            f'<rect x="{legend_x}" y="{legend_y - 8}" width="10" height="10" fill="{COLOR_PREV}" rx="2"/>'
+            f'<text x="{legend_x + 13}" y="{legend_y}" fill="#6B7280">Vorjahr</text>'
+        )
+        svg_parts.append(
+            f'<rect x="{legend_x + 65}" y="{legend_y - 8}" width="10" height="10" fill="{COLOR_CURR}" rx="2"/>'
+            f'<text x="{legend_x + 78}" y="{legend_y}" fill="#374151">Aktuell</text>'
+        )
+
+        svg_parts.append("</svg>")
+        return "\n".join(svg_parts)
+
+    except Exception as e:
+        logger.warning("render_yoy_table_failed", error=str(e))
+        return _fallback_svg(f"Vorjahresvergleich nicht verfügbar: {e}", width, height)
