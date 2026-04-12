@@ -185,7 +185,11 @@
       "Bash(pct list:*)",
       "Read(//usr/sbin/**)",
       "Read(//usr/bin/**)",
-      "Bash(ls /var/data/python/bin/python*)"
+      "Bash(ls /var/data/python/bin/python*)",
+      "Bash(grep -r \"justif\\\\|anomal.*reason\\\\|explanation\" /home/rico/addons/energymanagement-iso50001/backend/app/schemas --include=*.py)",
+      "Bash(grep -r \"wastewater\\\\|abwasser\\\\|water.*meter\\\\|water.*cost\" /home/rico/addons/energymanagement-iso50001/backend/app --include=*.py)",
+      "Bash(grep -r \"audit.*workflow\\\\|monitoring.*audit.*target\\\\|3.*step\" /home/rico/addons/energymanagement-iso50001 --include=*.py)",
+      "Bash(grep -n \"class.*Anomal\\\\|justify\\\\|explanation\\\\|reason.*anomal\" /home/rico/addons/energymanagement-iso50001/backend/app/models/*.py)"
     ]
   }
 }
