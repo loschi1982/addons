@@ -830,6 +830,69 @@ class ISOService:
         await self.db.refresh(plan)
         return plan
 
+    async def suggest_objective_from_finding(
+        self, finding_id: uuid.UUID
+    ) -> dict | None:
+        """
+        Energieziel + Aktionsplan aus Audit-Befund vorschlagen.
+
+        Gibt vorausgefüllte Entwürfe zurück, die der Nutzer prüfen und
+        absenden kann. Keine automatische Erstellung, da Zielwerte
+        (target_value, baseline_value) fachlich gesetzt werden müssen.
+        """
+        result = await self.db.execute(
+            select(AuditFinding).where(AuditFinding.id == finding_id)
+        )
+        finding = result.scalar_one_or_none()
+        if not finding:
+            return None
+
+        today = date.today()
+        # Zieldatum: due_date des Befundes oder 12 Monate ab heute
+        target_date = finding.due_date or date(today.year + 1, today.month, today.day)
+
+        objective_draft = {
+            "title": f"Verbesserung aus Audit-Befund (ISO {finding.iso_clause}): "
+                     f"{finding.description[:120]}",
+            "description": (
+                f"Abgeleitet aus Audit-Befund vom {today.isoformat()}.\n"
+                f"Befundtyp: {finding.finding_type}\n"
+                f"ISO-Klausel: {finding.iso_clause}\n\n"
+                f"Beschreibung: {finding.description}\n\n"
+                f"Korrekturmaßnahme: {finding.corrective_action or 'Noch zu definieren'}"
+            ),
+            "target_type": "reduction",          # Standardannahme: Reduzierung
+            "target_unit": "kWh",                # Nutzer kann anpassen
+            "target_value": 0,                   # Muss vom Nutzer gesetzt werden
+            "baseline_value": 0,                 # Muss vom Nutzer gesetzt werden
+            "baseline_period": str(today.year - 1),
+            "target_date": target_date.isoformat(),
+            "responsible_person": finding.responsible_person or "",
+            "status": "planned",
+        }
+
+        action_plan_draft = {
+            "title": (
+                f"Korrekturmaßnahme: {finding.description[:100]}"
+            ),
+            "description": finding.corrective_action or finding.description,
+            "responsible_person": finding.responsible_person or "",
+            "start_date": today.isoformat(),
+            "target_date": target_date.isoformat(),
+            "status": "planned",
+            "verification_method": (
+                f"Überprüfung Audit-Befund {str(finding_id)[:8]} – "
+                f"ISO {finding.iso_clause}"
+            ),
+        }
+
+        return {
+            "finding_id": str(finding_id),
+            "finding_description": finding.description,
+            "objective_draft": objective_draft,
+            "action_plan_draft": action_plan_draft,
+        }
+
     # --- Managementbewertung (Kap. 9.3) ---
 
     async def list_reviews(

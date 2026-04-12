@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.cache import cached
+from app.models.allocation import MeterUnitAllocation
 from app.models.consumer import Consumer, meter_consumer
 from app.models.emission import CO2Calculation, EmissionFactor
 from app.models.meter import Meter
@@ -1418,4 +1419,135 @@ class AnalyticsService:
             "totals": {et: {k: round(v, 2) for k, v in t.items()} for et, t in totals.items()},
             "grand_total_kwh": round(grand_total_kwh, 2),
             "grand_total_cost_net": round(grand_total_cost_net, 2),
+        }
+
+    async def get_cost_allocation(
+        self,
+        start_date: date,
+        end_date: date,
+        meter_ids: list[uuid.UUID] | None = None,
+    ) -> dict:
+        """
+        Kostenumlage auf Nutzungseinheiten basierend auf MeterUnitAllocation.
+
+        Liest alle aktiven Zähler-Nutzungseinheit-Zuordnungen,
+        berechnet den anteiligen Verbrauch und die anteiligen Kosten
+        je Nutzungseinheit (allocation_type + factor berücksichtigt).
+
+        Rückgabe: Liste der Nutzungseinheiten mit anteiligen kWh und Kosten,
+        sortiert nach Gesamtkosten absteigend.
+        """
+        # Alle MeterUnitAllocations mit ihren Nutzungseinheiten laden
+        alloc_q = (
+            select(MeterUnitAllocation)
+            .options(
+                selectinload(MeterUnitAllocation.meter),
+                selectinload(MeterUnitAllocation.usage_unit),
+            )
+        )
+        if meter_ids:
+            alloc_q = alloc_q.where(MeterUnitAllocation.meter_id.in_(meter_ids))
+        alloc_result = await self.db.execute(alloc_q)
+        allocations = alloc_result.scalars().all()
+
+        if not allocations:
+            return {
+                "period_start": start_date.isoformat(),
+                "period_end": end_date.isoformat(),
+                "units": [],
+                "grand_total_kwh": 0.0,
+                "grand_total_cost_net": 0.0,
+                "data_available": False,
+            }
+
+        # Verbrauch + Kosten je Zähler im Zeitraum
+        meter_ids_in_allocs = list({a.meter_id for a in allocations})
+        reading_q = (
+            select(
+                MeterReading.meter_id,
+                func.sum(MeterReading.consumption).label("total_kwh"),
+                func.sum(MeterReading.cost_net).label("total_cost_net"),
+                func.sum(MeterReading.cost_gross).label("total_cost_gross"),
+            )
+            .where(
+                MeterReading.meter_id.in_(meter_ids_in_allocs),
+                MeterReading.timestamp >= start_date,
+                MeterReading.timestamp < end_date,
+            )
+            .group_by(MeterReading.meter_id)
+        )
+        reading_result = await self.db.execute(reading_q)
+        meter_data: dict[uuid.UUID, dict] = {
+            row.meter_id: {
+                "kwh": Decimal(str(row.total_kwh or 0)),
+                "cost_net": Decimal(str(row.total_cost_net or 0)),
+                "cost_gross": Decimal(str(row.total_cost_gross or 0)),
+            }
+            for row in reading_result.all()
+        }
+
+        # Anteile je Nutzungseinheit aggregieren
+        unit_totals: dict[uuid.UUID, dict] = {}
+        for alloc in allocations:
+            md = meter_data.get(alloc.meter_id)
+            if not md:
+                continue
+
+            sign = Decimal("-1") if alloc.allocation_type == "subtract" else Decimal("1")
+            factor = alloc.factor or Decimal("1")
+            kwh_share = md["kwh"] * factor * sign
+            cost_net_share = md["cost_net"] * factor * sign
+            cost_gross_share = md["cost_gross"] * factor * sign
+
+            uid = alloc.usage_unit_id
+            if uid not in unit_totals:
+                unit = alloc.usage_unit
+                unit_totals[uid] = {
+                    "usage_unit_id": str(uid),
+                    "usage_unit_name": unit.name if unit else str(uid),
+                    "code": unit.code if unit else None,
+                    "area_m2": float(unit.area_m2) if unit and unit.area_m2 else None,
+                    "tenant_name": unit.tenant_name if unit else None,
+                    "kwh": Decimal("0"),
+                    "cost_net": Decimal("0"),
+                    "cost_gross": Decimal("0"),
+                    "meter_count": 0,
+                }
+            unit_totals[uid]["kwh"] += kwh_share
+            unit_totals[uid]["cost_net"] += cost_net_share
+            unit_totals[uid]["cost_gross"] += cost_gross_share
+            unit_totals[uid]["meter_count"] += 1
+
+        # Kostenumlage je m² berechnen (wenn Fläche vorhanden)
+        units_list = []
+        for u in unit_totals.values():
+            kwh = float(u["kwh"])
+            cost_net = float(u["cost_net"])
+            area = u["area_m2"]
+            units_list.append({
+                "usage_unit_id": u["usage_unit_id"],
+                "usage_unit_name": u["usage_unit_name"],
+                "code": u["code"],
+                "area_m2": area,
+                "tenant_name": u["tenant_name"],
+                "kwh": round(kwh, 2),
+                "cost_net": round(cost_net, 2),
+                "cost_gross": round(float(u["cost_gross"]), 2),
+                "kwh_per_m2": round(kwh / area, 2) if area and area > 0 else None,
+                "cost_per_m2": round(cost_net / area, 2) if area and area > 0 else None,
+                "meter_count": u["meter_count"],
+            })
+
+        units_list.sort(key=lambda x: x["cost_net"], reverse=True)
+
+        grand_kwh = round(sum(u["kwh"] for u in units_list), 2)
+        grand_cost = round(sum(u["cost_net"] for u in units_list), 2)
+
+        return {
+            "period_start": start_date.isoformat(),
+            "period_end": end_date.isoformat(),
+            "units": units_list,
+            "grand_total_kwh": grand_kwh,
+            "grand_total_cost_net": grand_cost,
+            "data_available": grand_cost != 0 or grand_kwh != 0,
         }

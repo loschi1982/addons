@@ -60,6 +60,10 @@ celery_app.conf.update(
             "task": "app.tasks.poll_climate_sensors",
             "schedule": 300.0,  # alle 5 Minuten
         },
+        "recalculate-enpis-daily": {
+            "task": "app.tasks.recalculate_enpis",
+            "schedule": 86400.0,  # einmal täglich (Vormonat + laufender Monat)
+        },
     },
 )
 
@@ -183,6 +187,46 @@ def daily_maintenance():
                 "overdue_objectives": overdue["objectives_updated"],
                 "overdue_plans": overdue["plans_updated"],
                 "seu_shares_updated": seu_updated,
+            }
+
+    return _run_async(_run())
+
+
+@celery_app.task(name="app.tasks.recalculate_enpis")
+def recalculate_enpis():
+    """
+    Alle aktiven EnPIs für den laufenden und den Vormonat berechnen.
+
+    Wird täglich ausgeführt, damit EnPI-Werte stets aktuell bleiben.
+    Der Vormonat wird mitberechnet, da Zählerstände oft verzögert eingehen.
+    """
+    async def _run():
+        from app.services.energy_review_service import EnergyReviewService
+
+        today = date.today()
+
+        # Laufender Monat
+        current_start = date(today.year, today.month, 1)
+        if today.month == 12:
+            current_end = date(today.year + 1, 1, 1)
+        else:
+            current_end = date(today.year, today.month + 1, 1)
+
+        # Vormonat
+        if today.month == 1:
+            prev_start = date(today.year - 1, 12, 1)
+            prev_end = date(today.year, 1, 1)
+        else:
+            prev_start = date(today.year, today.month - 1, 1)
+            prev_end = current_start
+
+        async with _task_db_session() as db:
+            service = EnergyReviewService(db)
+            result_prev = await service.calculate_all_enpis(prev_start, prev_end)
+            result_curr = await service.calculate_all_enpis(current_start, current_end)
+            return {
+                "prev_month": result_prev,
+                "current_month": result_curr,
             }
 
     return _run_async(_run())

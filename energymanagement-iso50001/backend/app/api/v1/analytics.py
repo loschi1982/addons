@@ -239,3 +239,23 @@ async def get_energy_balance(
     ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")] if meter_ids else None
     et_filter = [e.strip() for e in energy_types.split(",")] if energy_types else None
     return await service.get_energy_balance(start_date, end_date, et_filter, ids)
+
+
+@router.get("/cost-allocation")
+async def get_cost_allocation(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    meter_ids: str | None = Query(None, description="Kommagetrennte Zähler-IDs"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Kostenumlage auf Nutzungseinheiten (basierend auf MeterUnitAllocation).
+
+    Berechnet anteilige Verbräuche und Kosten je Nutzungseinheit
+    unter Berücksichtigung von Zuordnungstyp (add/subtract) und Faktor.
+    Rückgabe: {units: [{usage_unit_name, kwh, cost_net, kwh_per_m2, ...}]}
+    """
+    service = AnalyticsService(db)
+    ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")] if meter_ids else None
+    return await service.get_cost_allocation(start_date, end_date, ids)

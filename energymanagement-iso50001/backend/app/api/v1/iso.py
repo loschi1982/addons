@@ -555,6 +555,26 @@ async def create_nc_from_finding(
     return nc
 
 
+@router.get("/findings/{finding_id}/suggest-objective")
+async def suggest_objective_from_finding(
+    finding_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Energieziel + Aktionsplan aus Audit-Befund vorschlagen.
+
+    Gibt vorausgefüllte Entwürfe zurück (kein automatisches Erstellen).
+    Der Nutzer prüft die Daten und sendet sie über die regulären
+    Endpunkte /objectives und /action-plans ab.
+    """
+    service = ISOService(db)
+    suggestion = await service.suggest_objective_from_finding(finding_id)
+    if not suggestion:
+        raise HTTPException(status_code=404, detail="Befund nicht gefunden")
+    return suggestion
+
+
 @router.post(
     "/nonconformities/{nc_id}/create-action-plan",
     response_model=ActionPlanResponse,
