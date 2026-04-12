@@ -198,3 +198,44 @@ async def get_cumulative(
     service = AnalyticsService(db)
     ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")] if meter_ids else None
     return await service.get_cumulative(ids, energy_type, start_date, end_date)
+
+
+@router.get("/monthly-comparison")
+async def get_monthly_comparison(
+    year_a: int = Query(..., description="Basisjahr (z.B. 2024)"),
+    year_b: int = Query(..., description="Vergleichsjahr (z.B. 2025)"),
+    energy_types: str | None = Query(None, description="Kommagetrennte Energiearten (electricity,natural_gas,…)"),
+    meter_ids: str | None = Query(None, description="Kommagetrennte Zähler-IDs"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Monatlicher Vergleich zweier Jahre nach Energieträger.
+
+    Gibt für jeden Monat (1–12) und jeden Energieträger die nativen Verbräuche
+    beider Jahre sowie die prozentuale Abweichung zurück.
+    """
+    service = AnalyticsService(db)
+    ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")] if meter_ids else None
+    et_filter = [e.strip() for e in energy_types.split(",")] if energy_types else None
+    return await service.get_monthly_comparison(year_a, year_b, et_filter, ids)
+
+
+@router.get("/energy-balance")
+async def get_energy_balance(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    energy_types: str | None = Query(None, description="Kommagetrennte Energiearten"),
+    meter_ids: str | None = Query(None, description="Kommagetrennte Zähler-IDs"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Energiebilanz für einen Zeitraum – monatlich aufgeschlüsselt nach Energieträgern.
+
+    Rückgabe: {"energy_types": [...], "months": [...], "rows": [{month, label, values: {et: {native, kwh, cost}}}]}
+    """
+    service = AnalyticsService(db)
+    ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")] if meter_ids else None
+    et_filter = [e.strip() for e in energy_types.split(",")] if energy_types else None
+    return await service.get_energy_balance(start_date, end_date, et_filter, ids)

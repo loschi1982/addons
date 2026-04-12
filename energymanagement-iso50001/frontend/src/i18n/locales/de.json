@@ -38,6 +38,8 @@
     "consumers": "Verbraucher",
     "schema": "Energieschema",
     "analytics": "Analysen",
+    "monthlyComparison": "Jahresvergleich",
+    "energyBalance": "Energiebilanz",
     "economics": "Wirtschaftlichkeit",
     "emissions": "CO₂-Emissionen",
     "weather": "Wetterdaten",
