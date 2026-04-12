@@ -259,3 +259,24 @@ async def get_cost_allocation(
     service = AnalyticsService(db)
     ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")] if meter_ids else None
     return await service.get_cost_allocation(start_date, end_date, ids)
+
+
+@router.get("/load-profile")
+async def get_load_profile(
+    meter_ids: str = Query(..., description="Kommagetrennte Zähler-IDs (mind. 1)"),
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    max_demand_kw_contract: float | None = Query(None, description="Vertragliche Leistungsgrenze kW"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Lastprofil und Peak-Erkennung für einen oder mehrere Zähler.
+
+    Berechnet Leistung (kW) aus Verbrauch + Zeitdelta zwischen Ablesungen.
+    Rückgabe: Zeitreihe (ggf. auf stündlich aggregiert), Spitzenlast,
+    Tages-Peaks, Vergleich mit vertraglicher Leistungsgrenze.
+    """
+    service = AnalyticsService(db)
+    ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")]
+    return await service.get_load_profile(ids, start_date, end_date, max_demand_kw_contract)
