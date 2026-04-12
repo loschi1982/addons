@@ -87,8 +87,9 @@ class ReadingService:
         4. Speichern
         """
         meter_id = data["meter_id"]
-        value = Decimal(str(data["value"]))
+        value = Decimal(str(data["value"])) if data.get("value") is not None else None
         timestamp = data["timestamp"]
+        quality = data.get("quality", "measured")
 
         # Zähler muss existieren
         meter = await self.db.get(Meter, meter_id)
@@ -99,8 +100,17 @@ class ReadingService:
                 status_code=404,
             )
 
+        # Verbrauch-Direkteingabe (z.B. aus Monatsabrechnung ohne Zählerstand)
+        consumption_direct = data.get("consumption_direct")
+        if consumption_direct is not None and data.get("value") is None:
+            consumption = Decimal(str(consumption_direct))
+            # Letzten bekannten Stand laden und Zählerstand schätzen
+            prev = await self._get_previous_reading(meter_id, timestamp)
+            value = (prev.value + consumption) if prev else consumption
+            quality = "estimated"
+            warnings = []
         # Lieferungsbasiert: Wert IST der Verbrauch (keine Differenz)
-        if meter.is_delivery_based:
+        elif meter.is_delivery_based:
             warnings = []
             consumption = value
         else:
@@ -122,7 +132,7 @@ class ReadingService:
             value=value,
             consumption=consumption,
             source=data.get("source", "manual"),
-            quality=data.get("quality", "measured"),
+            quality=quality,
             cost_gross=cost_gross,
             vat_rate=vat_rate,
             cost_net=cost_net,

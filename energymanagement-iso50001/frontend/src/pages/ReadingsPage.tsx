@@ -30,10 +30,13 @@ interface Reading {
   import_batch_id: string | null;
 }
 
+type InputMode = 'meter_reading' | 'consumption';
+
 interface ReadingForm {
   meter_id: string;
   timestamp: string;
   value: string;
+  consumption: string;
   cost_gross: string;
   vat_rate: string;
   notes: string;
@@ -42,6 +45,8 @@ interface ReadingForm {
 interface BulkRow {
   timestamp: string;
   value: string;
+  consumption: string;
+  cost_gross: string;
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -69,10 +74,12 @@ export default function ReadingsPage() {
 
   // Einzelerfassung
   const [showSingleModal, setShowSingleModal] = useState(false);
+  const [singleInputMode, setSingleInputMode] = useState<InputMode>('meter_reading');
   const [singleForm, setSingleForm] = useState<ReadingForm>({
     meter_id: '',
     timestamp: new Date().toISOString().slice(0, 16),
     value: '',
+    consumption: '',
     cost_gross: '',
     vat_rate: '19',
     notes: '',
@@ -82,6 +89,7 @@ export default function ReadingsPage() {
 
   // Monatserfassung (Bulk)
   const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkInputMode, setBulkInputMode] = useState<InputMode>('meter_reading');
   const [bulkMeterId, setBulkMeterId] = useState('');
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
   const [bulkError, setBulkError] = useState<string | null>(null);
@@ -141,6 +149,7 @@ export default function ReadingsPage() {
       meter_id: selectedMeterId || '',
       timestamp: new Date().toISOString().slice(0, 16),
       value: '',
+      consumption: '',
       cost_gross: '',
       vat_rate: '19',
       notes: '',
@@ -156,16 +165,21 @@ export default function ReadingsPage() {
     try {
       const costGross = singleForm.cost_gross ? parseFloat(singleForm.cost_gross.replace(',', '.')) : null;
       const vatRate = singleForm.vat_rate ? parseFloat(singleForm.vat_rate.replace(',', '.')) : null;
-      await apiClient.post('/api/v1/readings', {
+      const body: Record<string, unknown> = {
         meter_id: singleForm.meter_id,
         timestamp: new Date(singleForm.timestamp).toISOString(),
-        value: parseFloat(singleForm.value.replace(',', '.')),
         source: 'manual',
-        quality: 'measured',
         cost_gross: costGross,
         vat_rate: vatRate,
         notes: singleForm.notes || null,
-      });
+      };
+      if (singleInputMode === 'consumption') {
+        body.consumption_direct = parseFloat(singleForm.consumption.replace(',', '.'));
+      } else {
+        body.value = parseFloat(singleForm.value.replace(',', '.'));
+        body.quality = 'measured';
+      }
+      await apiClient.post('/api/v1/readings', body);
       setShowSingleModal(false);
       if (singleForm.meter_id === selectedMeterId) loadReadings();
     } catch (err: unknown) {
@@ -188,6 +202,8 @@ export default function ReadingsPage() {
       rows.push({
         timestamp: d.toISOString().slice(0, 10),
         value: '',
+        consumption: '',
+        cost_gross: '',
       });
     }
     setBulkRows(rows);
@@ -201,20 +217,32 @@ export default function ReadingsPage() {
   const handleBulkSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBulkError(null);
-    const filled = bulkRows.filter((r) => r.value.trim() !== '');
+    const valueField = bulkInputMode === 'consumption' ? 'consumption' : 'value';
+    const filled = bulkRows.filter((r) => r[valueField].trim() !== '');
     if (filled.length === 0) {
       setBulkError('Bitte mindestens einen Wert eingeben');
       return;
     }
     setBulkSaving(true);
     try {
-      const readings = filled.map((r) => ({
-        meter_id: bulkMeterId,
-        timestamp: new Date(r.timestamp + 'T00:00:00').toISOString(),
-        value: parseFloat(r.value.replace(',', '.')),
-        source: 'manual',
-        quality: 'measured',
-      }));
+      const readings = filled.map((r) => {
+        const base: Record<string, unknown> = {
+          meter_id: bulkMeterId,
+          timestamp: new Date(r.timestamp + 'T00:00:00').toISOString(),
+          source: 'manual',
+        };
+        if (bulkInputMode === 'consumption') {
+          base.consumption_direct = parseFloat(r.consumption.replace(',', '.'));
+          if (r.cost_gross.trim()) {
+            base.cost_gross = parseFloat(r.cost_gross.replace(',', '.'));
+            base.vat_rate = 19;
+          }
+        } else {
+          base.value = parseFloat(r.value.replace(',', '.'));
+          base.quality = 'measured';
+        }
+        return base;
+      });
       await apiClient.post('/api/v1/readings/bulk', { readings });
       setShowBulkModal(false);
       if (bulkMeterId === selectedMeterId) loadReadings();
@@ -347,9 +375,11 @@ export default function ReadingsPage() {
                           onChange={(e) => setEditForm({ ...editForm, value: e.target.value })}
                         />
                       ) : (
-                        <>
+                        <span title={r.quality === 'estimated' ? 'Zählerstand geschätzt (aus Verbrauchsangabe)' : undefined}
+                          className={r.quality === 'estimated' ? 'text-amber-600' : undefined}>
                           {formatNumber(r.value)} {selectedMeter?.unit}
-                        </>
+                          {r.quality === 'estimated' && <span className="ml-1 text-xs">~</span>}
+                        </span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-right font-mono">
@@ -457,11 +487,37 @@ export default function ReadingsPage() {
       {showSingleModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
-            <h2 className="mb-4 text-lg font-bold">
+            <h2 className="mb-1 text-lg font-bold">
               {meters.find((m) => m.id === singleForm.meter_id)?.is_delivery_based
                 ? 'Neue Lieferung erfassen'
-                : 'Neuer Zählerstand'}
+                : 'Ablesung erfassen'}
             </h2>
+
+            {/* Eingabemodus-Toggle */}
+            {!meters.find((m) => m.id === singleForm.meter_id)?.is_delivery_based && (
+              <div className="mb-4 flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+                <button
+                  type="button"
+                  onClick={() => setSingleInputMode('meter_reading')}
+                  className={`flex-1 px-3 py-2 font-medium transition-colors ${singleInputMode === 'meter_reading' ? 'bg-primary-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                >
+                  Zählerstand
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSingleInputMode('consumption')}
+                  className={`flex-1 px-3 py-2 font-medium transition-colors ${singleInputMode === 'consumption' ? 'bg-primary-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                >
+                  Nur Verbrauch
+                </button>
+              </div>
+            )}
+            {singleInputMode === 'consumption' && (
+              <p className="mb-4 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Der Zählerstand wird aus dem letzten bekannten Stand geschätzt und als "~" markiert.
+                Geeignet für Monatsabrechnungen, bei denen nur der Verbrauch angegeben ist.
+              </p>
+            )}
 
             <form onSubmit={handleSingleSubmit} className="space-y-4">
               {singleError && (
@@ -497,27 +553,51 @@ export default function ReadingsPage() {
                   />
                 </div>
                 <div>
-                  <label className="label">
-                    {meters.find((m) => m.id === singleForm.meter_id)?.is_delivery_based
-                      ? 'Liefermenge *'
-                      : 'Zählerstand *'}{' '}
-                    {singleForm.meter_id && (
-                      <span className="font-normal text-gray-400">
-                        ({meters.find((m) => m.id === singleForm.meter_id)?.unit})
-                      </span>
-                    )}
-                  </label>
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder={meters.find((m) => m.id === singleForm.meter_id)?.is_delivery_based
-                      ? 'z.B. 2500'
-                      : 'z.B. 12345,67'}
-                    value={singleForm.value}
-                    onChange={(e) => setSingleForm({ ...singleForm, value: e.target.value })}
-                    required
-                    autoFocus
-                  />
+                  {singleInputMode === 'consumption' ? (
+                    <>
+                      <label className="label">
+                        Verbrauch *{' '}
+                        {singleForm.meter_id && (
+                          <span className="font-normal text-gray-400">
+                            ({meters.find((m) => m.id === singleForm.meter_id)?.unit})
+                          </span>
+                        )}
+                      </label>
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="z.B. 450,00"
+                        value={singleForm.consumption}
+                        onChange={(e) => setSingleForm({ ...singleForm, consumption: e.target.value })}
+                        required
+                        autoFocus
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <label className="label">
+                        {meters.find((m) => m.id === singleForm.meter_id)?.is_delivery_based
+                          ? 'Liefermenge *'
+                          : 'Zählerstand *'}{' '}
+                        {singleForm.meter_id && (
+                          <span className="font-normal text-gray-400">
+                            ({meters.find((m) => m.id === singleForm.meter_id)?.unit})
+                          </span>
+                        )}
+                      </label>
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder={meters.find((m) => m.id === singleForm.meter_id)?.is_delivery_based
+                          ? 'z.B. 2500'
+                          : 'z.B. 12345,67'}
+                        value={singleForm.value}
+                        onChange={(e) => setSingleForm({ ...singleForm, value: e.target.value })}
+                        required
+                        autoFocus
+                      />
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -580,9 +660,30 @@ export default function ReadingsPage() {
       {showBulkModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
-            <h2 className="mb-4 text-lg font-bold">Monatsablesung</h2>
+            <h2 className="mb-1 text-lg font-bold">Monatserfassung</h2>
+
+            {/* Eingabemodus-Toggle */}
+            <div className="mb-4 flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+              <button
+                type="button"
+                onClick={() => setBulkInputMode('meter_reading')}
+                className={`flex-1 px-3 py-2 font-medium transition-colors ${bulkInputMode === 'meter_reading' ? 'bg-primary-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+              >
+                Zählerstände
+              </button>
+              <button
+                type="button"
+                onClick={() => setBulkInputMode('consumption')}
+                className={`flex-1 px-3 py-2 font-medium transition-colors ${bulkInputMode === 'consumption' ? 'bg-primary-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+              >
+                Verbrauch + Kosten
+              </button>
+            </div>
+
             <p className="mb-4 text-sm text-gray-500">
-              Tragen Sie die monatlichen Zählerstände ein. Leere Zeilen werden übersprungen.
+              {bulkInputMode === 'consumption'
+                ? 'Verbrauch und optionale Kosten aus Monatsabrechnungen eintragen. Leere Zeilen werden übersprungen.'
+                : 'Monatliche Zählerstände eintragen. Leere Zeilen werden übersprungen.'}
             </p>
 
             <form onSubmit={handleBulkSubmit} className="space-y-4">
@@ -612,14 +713,28 @@ export default function ReadingsPage() {
                   <thead className="bg-gray-50 text-xs uppercase text-gray-500">
                     <tr>
                       <th className="px-4 py-2 text-left">Datum</th>
-                      <th className="px-4 py-2 text-left">
-                        Zählerstand{' '}
-                        {bulkMeterId && (
-                          <span className="normal-case font-normal text-gray-400">
-                            ({meters.find((m) => m.id === bulkMeterId)?.unit})
-                          </span>
-                        )}
-                      </th>
+                      {bulkInputMode === 'meter_reading' ? (
+                        <th className="px-4 py-2 text-left">
+                          Zählerstand{' '}
+                          {bulkMeterId && (
+                            <span className="normal-case font-normal text-gray-400">
+                              ({meters.find((m) => m.id === bulkMeterId)?.unit})
+                            </span>
+                          )}
+                        </th>
+                      ) : (
+                        <>
+                          <th className="px-4 py-2 text-left">
+                            Verbrauch{' '}
+                            {bulkMeterId && (
+                              <span className="normal-case font-normal text-gray-400">
+                                ({meters.find((m) => m.id === bulkMeterId)?.unit})
+                              </span>
+                            )}
+                          </th>
+                          <th className="px-4 py-2 text-left">Kosten brutto (€)</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y">
@@ -633,15 +748,38 @@ export default function ReadingsPage() {
                             onChange={(e) => handleBulkRowChange(idx, 'timestamp', e.target.value)}
                           />
                         </td>
-                        <td className="px-4 py-1.5">
-                          <input
-                            type="text"
-                            className="input"
-                            placeholder="z.B. 12345,67"
-                            value={row.value}
-                            onChange={(e) => handleBulkRowChange(idx, 'value', e.target.value)}
-                          />
-                        </td>
+                        {bulkInputMode === 'meter_reading' ? (
+                          <td className="px-4 py-1.5">
+                            <input
+                              type="text"
+                              className="input"
+                              placeholder="z.B. 12345,67"
+                              value={row.value}
+                              onChange={(e) => handleBulkRowChange(idx, 'value', e.target.value)}
+                            />
+                          </td>
+                        ) : (
+                          <>
+                            <td className="px-4 py-1.5">
+                              <input
+                                type="text"
+                                className="input"
+                                placeholder="z.B. 450,00"
+                                value={row.consumption}
+                                onChange={(e) => handleBulkRowChange(idx, 'consumption', e.target.value)}
+                              />
+                            </td>
+                            <td className="px-4 py-1.5">
+                              <input
+                                type="text"
+                                className="input"
+                                placeholder="z.B. 135,00"
+                                value={row.cost_gross}
+                                onChange={(e) => handleBulkRowChange(idx, 'cost_gross', e.target.value)}
+                              />
+                            </td>
+                          </>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -653,7 +791,12 @@ export default function ReadingsPage() {
                   Abbrechen
                 </button>
                 <button type="submit" className="btn-primary" disabled={bulkSaving}>
-                  {bulkSaving ? 'Speichern...' : `${bulkRows.filter((r) => r.value.trim()).length} Stände speichern`}
+                  {bulkSaving ? 'Speichern...' : (() => {
+                    const f = bulkInputMode === 'consumption'
+                      ? bulkRows.filter((r) => r.consumption.trim()).length
+                      : bulkRows.filter((r) => r.value.trim()).length;
+                    return `${f} ${bulkInputMode === 'consumption' ? 'Verbrauchswerte' : 'Stände'} speichern`;
+                  })()}
                 </button>
               </div>
             </form>
