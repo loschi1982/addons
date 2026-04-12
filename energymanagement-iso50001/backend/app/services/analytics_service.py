@@ -1551,3 +1551,168 @@ class AnalyticsService:
             "grand_total_cost_net": grand_cost,
             "data_available": grand_cost != 0 or grand_kwh != 0,
         }
+
+    async def get_load_profile(
+        self,
+        meter_ids: list[uuid.UUID],
+        start_date: date,
+        end_date: date,
+        max_demand_kw_contract: float | None = None,
+    ) -> dict:
+        """
+        Lastprofil und Peak-Erkennung für einen oder mehrere Zähler.
+
+        Berechnet die Leistung (kW) aus dem Verbrauch und dem Zeitdelta
+        zwischen aufeinanderfolgenden Ablesungen (LAG-Funktion).
+        Ergebnis: Zeitreihe, Spitzenlast und Tages-Peaks.
+
+        Bei mehr als 2000 Datenpunkten wird auf stündliche Maxima aggregiert,
+        um die API-Antwort schlank zu halten.
+        """
+        from sqlalchemy import literal_column
+
+        start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+        end_dt = datetime.combine(
+            end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+        )
+
+        # LAG-Abfrage: Zeitdelta und Leistung je Ablesung
+        # demand_kw = consumption_kwh / delta_stunden
+        raw_sql = text("""
+            WITH ranked AS (
+                SELECT
+                    meter_id,
+                    timestamp,
+                    consumption,
+                    LAG(timestamp) OVER (PARTITION BY meter_id ORDER BY timestamp) AS prev_ts
+                FROM meter_readings
+                WHERE meter_id = ANY(:meter_ids)
+                  AND timestamp >= :start_dt
+                  AND timestamp < :end_dt
+                  AND consumption IS NOT NULL
+                  AND consumption > 0
+            )
+            SELECT
+                meter_id,
+                timestamp,
+                consumption,
+                EXTRACT(EPOCH FROM (timestamp - prev_ts)) / 3600.0 AS delta_hours,
+                CASE
+                    WHEN prev_ts IS NOT NULL
+                         AND EXTRACT(EPOCH FROM (timestamp - prev_ts)) BETWEEN 1 AND 7200
+                    THEN consumption / (EXTRACT(EPOCH FROM (timestamp - prev_ts)) / 3600.0)
+                    ELSE NULL
+                END AS demand_kw
+            FROM ranked
+            ORDER BY timestamp
+        """)
+
+        result = await self.db.execute(
+            raw_sql,
+            {
+                "meter_ids": [str(m) for m in meter_ids],
+                "start_dt": start_dt,
+                "end_dt": end_dt,
+            },
+        )
+        rows = result.fetchall()
+
+        if not rows:
+            return {
+                "period_start": start_date.isoformat(),
+                "period_end": end_date.isoformat(),
+                "meter_count": len(meter_ids),
+                "data_points": [],
+                "peak_demand_kw": None,
+                "peak_timestamp": None,
+                "avg_demand_kw": None,
+                "daily_peaks": [],
+                "total_kwh": 0.0,
+                "resolution_minutes": None,
+                "max_demand_kw_contract": max_demand_kw_contract,
+                "contract_exceeded": False,
+            }
+
+        # Rohdaten → Python
+        points = []
+        for row in rows:
+            points.append({
+                "ts": row.timestamp,
+                "consumption": float(row.consumption),
+                "demand_kw": float(row.demand_kw) if row.demand_kw is not None else None,
+            })
+
+        # Mittleres Intervall schätzen (für Auflösungsangabe)
+        intervals = [
+            (points[i]["ts"] - points[i - 1]["ts"]).total_seconds() / 60
+            for i in range(1, min(50, len(points)))
+            if points[i]["demand_kw"] is not None
+        ]
+        avg_interval_min = round(sum(intervals) / len(intervals)) if intervals else None
+
+        # Peak-Statistiken
+        demand_values = [p["demand_kw"] for p in points if p["demand_kw"] is not None]
+        peak_demand_kw = max(demand_values) if demand_values else None
+        avg_demand_kw = round(sum(demand_values) / len(demand_values), 3) if demand_values else None
+        peak_ts = None
+        if peak_demand_kw is not None:
+            peak_ts = next(
+                p["ts"].isoformat() for p in points if p["demand_kw"] == peak_demand_kw
+            )
+
+        total_kwh = round(sum(p["consumption"] for p in points), 2)
+
+        # Tages-Peaks (Spitzenlast je Tag)
+        daily: dict[str, float] = {}
+        for p in points:
+            if p["demand_kw"] is None:
+                continue
+            day_key = p["ts"].strftime("%Y-%m-%d")
+            daily[day_key] = max(daily.get(day_key, 0.0), p["demand_kw"])
+        daily_peaks = [
+            {"date": d, "peak_kw": round(v, 3)}
+            for d, v in sorted(daily.items())
+        ]
+
+        # Wenn zu viele Punkte: auf stündliche Maxima aggregieren
+        MAX_POINTS = 2000
+        if len(points) > MAX_POINTS:
+            hourly: dict[str, dict] = {}
+            for p in points:
+                h_key = p["ts"].strftime("%Y-%m-%dT%H:00:00+00:00")
+                if h_key not in hourly:
+                    hourly[h_key] = {"ts": h_key, "demand_kw": None, "consumption": 0.0}
+                hourly[h_key]["consumption"] += p["consumption"]
+                if p["demand_kw"] is not None:
+                    current = hourly[h_key]["demand_kw"]
+                    hourly[h_key]["demand_kw"] = max(current, p["demand_kw"]) if current else p["demand_kw"]
+            chart_points = [
+                {"ts": v["ts"], "consumption": round(v["consumption"], 4), "demand_kw": round(v["demand_kw"], 3) if v["demand_kw"] else None}
+                for v in sorted(hourly.values(), key=lambda x: x["ts"])
+            ]
+        else:
+            chart_points = [
+                {"ts": p["ts"].isoformat(), "consumption": p["consumption"], "demand_kw": round(p["demand_kw"], 3) if p["demand_kw"] else None}
+                for p in points
+            ]
+
+        contract_exceeded = bool(
+            peak_demand_kw is not None
+            and max_demand_kw_contract is not None
+            and peak_demand_kw > max_demand_kw_contract
+        )
+
+        return {
+            "period_start": start_date.isoformat(),
+            "period_end": end_date.isoformat(),
+            "meter_count": len(meter_ids),
+            "data_points": chart_points,
+            "peak_demand_kw": round(peak_demand_kw, 3) if peak_demand_kw else None,
+            "peak_timestamp": peak_ts,
+            "avg_demand_kw": avg_demand_kw,
+            "daily_peaks": daily_peaks,
+            "total_kwh": total_kwh,
+            "resolution_minutes": avg_interval_min,
+            "max_demand_kw_contract": max_demand_kw_contract,
+            "contract_exceeded": contract_exceeded,
+        }

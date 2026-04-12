@@ -44,6 +44,7 @@ const navItems = [
   { path: '/energy-balance', labelKey: 'nav.energyBalance', icon: Table2 },
   { path: '/cost-allocation', labelKey: 'nav.costAllocation', icon: PieChart },
   { path: '/contracts', labelKey: 'nav.contracts', icon: Handshake },
+  { path: '/load-profile', labelKey: 'nav.loadProfile', icon: Activity },
   { path: '/economics', labelKey: 'nav.economics', icon: Euro },
   { path: '/emissions', labelKey: 'nav.emissions', icon: Leaf },
   { path: '/weather', labelKey: 'nav.weather', icon: Cloud },

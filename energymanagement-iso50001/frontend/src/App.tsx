@@ -29,6 +29,7 @@ import MonthlyComparisonPage from '@/pages/MonthlyComparisonPage';
 import EnergyBalancePage from '@/pages/EnergyBalancePage';
 import CostAllocationPage from '@/pages/CostAllocationPage';
 import ContractsPage from '@/pages/ContractsPage';
+import LoadProfilePage from '@/pages/LoadProfilePage';
 
 /**
  * Geschützte Route – leitet auf /login um wenn nicht authentifiziert.
@@ -92,6 +93,7 @@ export default function App() {
         <Route path="energy-balance" element={<EnergyBalancePage />} />
         <Route path="cost-allocation" element={<CostAllocationPage />} />
         <Route path="contracts" element={<ContractsPage />} />
+        <Route path="load-profile" element={<LoadProfilePage />} />
         <Route path="import" element={<ImportPage />} />
         <Route path="integrations" element={<Navigate to="/settings" replace />} />
         <Route path="settings" element={<SettingsPage />} />
