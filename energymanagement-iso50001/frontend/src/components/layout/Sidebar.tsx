@@ -25,6 +25,7 @@ import {
   GitCompare,
   Table2,
   PieChart,
+  Handshake,
 } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
 import { toggleSidebar } from '@/store/slices/uiSlice';
@@ -42,6 +43,7 @@ const navItems = [
   { path: '/monthly-comparison', labelKey: 'nav.monthlyComparison', icon: GitCompare },
   { path: '/energy-balance', labelKey: 'nav.energyBalance', icon: Table2 },
   { path: '/cost-allocation', labelKey: 'nav.costAllocation', icon: PieChart },
+  { path: '/contracts', labelKey: 'nav.contracts', icon: Handshake },
   { path: '/economics', labelKey: 'nav.economics', icon: Euro },
   { path: '/emissions', labelKey: 'nav.emissions', icon: Leaf },
   { path: '/weather', labelKey: 'nav.weather', icon: Cloud },
