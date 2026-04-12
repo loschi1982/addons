@@ -1134,3 +1134,288 @@ class AnalyticsService:
             })
 
         return series
+
+    # ── Monatlicher Jahresvergleich (CAFM-Anforderung) ──
+
+    async def get_monthly_comparison(
+        self,
+        year_a: int,
+        year_b: int,
+        energy_types: list[str] | None = None,
+        meter_ids: list[uuid.UUID] | None = None,
+    ) -> dict:
+        """
+        Monatlicher Verbrauchsvergleich zweier Jahre, aufgeschlüsselt nach Energieträgern.
+
+        Rückgabe:
+          {
+            "year_a": 2024, "year_b": 2025,
+            "energy_types": [{"key": "electricity", "label": "Strom", "unit": "kWh", "color": "#F59E0B"}],
+            "months": [{"month": 1, "label": "Jan"}, ...],
+            "rows": [{
+              "month": 1, "label": "Jan",
+              "values": {
+                "electricity": {"year_a": 1234.5, "year_b": 1100.0, "delta_pct": -10.9, "unit": "kWh"}
+              }
+            }]
+          }
+        """
+        ET_LABELS: dict[str, str] = {
+            "electricity": "Strom", "natural_gas": "Erdgas", "heating_oil": "Heizöl",
+            "district_heating": "Fernwärme", "district_cooling": "Kälte",
+            "water": "Wasser", "solar": "Solar", "lpg": "Flüssiggas",
+            "wood_pellets": "Holzpellets", "compressed_air": "Druckluft",
+            "steam": "Dampf", "other": "Sonstige",
+        }
+        ET_COLORS: dict[str, str] = {
+            "electricity": "#F59E0B", "natural_gas": "#3B82F6", "heating_oil": "#8B5CF6",
+            "district_heating": "#F97316", "district_cooling": "#0EA5E9",
+            "water": "#06B6D4", "solar": "#10B981", "lpg": "#EC4899",
+            "wood_pellets": "#84CC16", "compressed_air": "#6B7280",
+            "steam": "#EF4444", "other": "#9CA3AF",
+        }
+
+        # Zähler laden
+        meter_query = select(Meter).where(Meter.is_active == True)  # noqa: E712
+        if meter_ids:
+            meter_query = meter_query.where(Meter.id.in_(meter_ids))
+        if energy_types:
+            meter_query = meter_query.where(Meter.energy_type.in_(energy_types))
+        meters_result = await self.db.execute(meter_query)
+        meters = list(meters_result.scalars().all())
+
+        if not meters:
+            return {"year_a": year_a, "year_b": year_b, "energy_types": [], "months": [], "rows": []}
+
+        # Alle vorhandenen Energiearten bestimmen
+        et_set: dict[str, str] = {}  # energy_type → primary_unit
+        for m in meters:
+            if m.energy_type not in et_set:
+                et_set[m.energy_type] = m.unit or "kWh"
+
+        # Monatliche Verbräuche für beide Jahre je Energieart abfragen
+        async def _monthly_by_et(year: int) -> dict[str, dict[int, float]]:
+            """Ergibt {energy_type: {month: native_consumption}}"""
+            result: dict[str, dict[int, float]] = {et: {} for et in et_set}
+            for energy_type, primary_unit in et_set.items():
+                et_meters = [m for m in meters if m.energy_type == energy_type]
+                for month_num in range(1, 13):
+                    m_start = datetime(year, month_num, 1, tzinfo=timezone.utc)
+                    if month_num == 12:
+                        m_end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+                    else:
+                        m_end = datetime(year, month_num + 1, 1, tzinfo=timezone.utc)
+
+                    total = Decimal("0")
+                    for meter in et_meters:
+                        q = select(func.sum(MeterReading.consumption)).where(
+                            MeterReading.meter_id == meter.id,
+                            MeterReading.timestamp >= m_start,
+                            MeterReading.timestamp < m_end,
+                            MeterReading.consumption.isnot(None),
+                        )
+                        val = (await self.db.execute(q)).scalar() or Decimal("0")
+                        total += val
+                    result[energy_type][month_num] = float(total)
+            return result
+
+        data_a = await _monthly_by_et(year_a)
+        data_b = await _monthly_by_et(year_b)
+
+        months_meta = [{"month": m, "label": MONTH_LABELS[m - 1]} for m in range(1, 13)]
+
+        rows = []
+        for month_num in range(1, 13):
+            values: dict[str, dict] = {}
+            for et, unit in et_set.items():
+                val_a = data_a[et].get(month_num, 0)
+                val_b = data_b[et].get(month_num, 0)
+                delta_pct = None
+                if val_a > 0:
+                    delta_pct = round((val_b - val_a) / val_a * 100, 1)
+                values[et] = {
+                    "year_a": round(val_a, 2),
+                    "year_b": round(val_b, 2),
+                    "delta_pct": delta_pct,
+                    "unit": unit,
+                }
+            rows.append({
+                "month": month_num,
+                "label": MONTH_LABELS[month_num - 1],
+                "values": values,
+            })
+
+        et_meta = [
+            {
+                "key": et,
+                "label": ET_LABELS.get(et, et),
+                "unit": unit,
+                "color": ET_COLORS.get(et, "#1B5E7B"),
+            }
+            for et, unit in et_set.items()
+        ]
+
+        return {
+            "year_a": year_a,
+            "year_b": year_b,
+            "energy_types": et_meta,
+            "months": months_meta,
+            "rows": rows,
+        }
+
+    # ── Energiebilanz (CAFM-Anforderung) ──
+
+    async def get_energy_balance(
+        self,
+        start_date: date,
+        end_date: date,
+        energy_types: list[str] | None = None,
+        meter_ids: list[uuid.UUID] | None = None,
+    ) -> dict:
+        """
+        Energiebilanz für einen Zeitraum – monatlich aufgeschlüsselt nach Energieträgern.
+
+        Rückgabe:
+          {
+            "period_start": "2025-01-01", "period_end": "2025-12-31",
+            "energy_types": [{"key": ..., "label": ..., "unit": ..., "color": ...}],
+            "rows": [{
+              "month": "2025-01",
+              "label": "Jan 2025",
+              "values": {"electricity": {"native": 1234.5, "kwh": 1234.5, "cost_net": 185.0}},
+              "total_kwh": 1234.5,
+              "total_cost_net": 185.0,
+            }],
+            "totals": {"electricity": {"native": ..., "kwh": ..., "cost_net": ...}, ...},
+            "grand_total_kwh": ...,
+            "grand_total_cost_net": ...,
+          }
+        """
+        ET_LABELS: dict[str, str] = {
+            "electricity": "Strom", "natural_gas": "Erdgas", "heating_oil": "Heizöl",
+            "district_heating": "Fernwärme", "district_cooling": "Kälte",
+            "water": "Wasser", "solar": "Solar", "lpg": "Flüssiggas",
+            "wood_pellets": "Holzpellets", "compressed_air": "Druckluft",
+            "steam": "Dampf", "other": "Sonstige",
+        }
+        ET_COLORS: dict[str, str] = {
+            "electricity": "#F59E0B", "natural_gas": "#3B82F6", "heating_oil": "#8B5CF6",
+            "district_heating": "#F97316", "district_cooling": "#0EA5E9",
+            "water": "#06B6D4", "solar": "#10B981", "lpg": "#EC4899",
+            "wood_pellets": "#84CC16", "compressed_air": "#6B7280",
+            "steam": "#EF4444", "other": "#9CA3AF",
+        }
+
+        # Zähler laden
+        meter_query = select(Meter).where(Meter.is_active == True)  # noqa: E712
+        if meter_ids:
+            meter_query = meter_query.where(Meter.id.in_(meter_ids))
+        if energy_types:
+            meter_query = meter_query.where(Meter.energy_type.in_(energy_types))
+        meters_result = await self.db.execute(meter_query)
+        meters = list(meters_result.scalars().all())
+
+        if not meters:
+            return {
+                "period_start": start_date.isoformat(),
+                "period_end": end_date.isoformat(),
+                "energy_types": [],
+                "rows": [],
+                "totals": {},
+                "grand_total_kwh": 0,
+                "grand_total_cost_net": 0,
+            }
+
+        # Energiearten ermitteln
+        et_set: dict[str, str] = {}  # energy_type → primary_unit
+        for m in meters:
+            if m.energy_type not in et_set:
+                et_set[m.energy_type] = m.unit or "kWh"
+
+        # Alle Monate im Zeitraum generieren
+        months: list[tuple[int, int]] = []  # (year, month)
+        y, mo = start_date.year, start_date.month
+        while (y, mo) <= (end_date.year, end_date.month):
+            months.append((y, mo))
+            mo += 1
+            if mo > 12:
+                mo = 1
+                y += 1
+
+        rows = []
+        totals: dict[str, dict] = {et: {"native": 0.0, "kwh": 0.0, "cost_net": 0.0} for et in et_set}
+        grand_total_kwh = 0.0
+        grand_total_cost_net = 0.0
+
+        for year, month_num in months:
+            m_start = datetime(year, month_num, 1, tzinfo=timezone.utc)
+            if month_num == 12:
+                m_end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+            else:
+                m_end = datetime(year, month_num + 1, 1, tzinfo=timezone.utc)
+
+            values: dict[str, dict] = {}
+            row_total_kwh = 0.0
+            row_total_cost = 0.0
+
+            for et, primary_unit in et_set.items():
+                et_meters = [m for m in meters if m.energy_type == et]
+                native_total = Decimal("0")
+                cost_total = Decimal("0")
+
+                for meter in et_meters:
+                    q = select(
+                        func.sum(MeterReading.consumption),
+                        func.sum(MeterReading.cost_net),
+                    ).where(
+                        MeterReading.meter_id == meter.id,
+                        MeterReading.timestamp >= m_start,
+                        MeterReading.timestamp < m_end,
+                        MeterReading.consumption.isnot(None),
+                    )
+                    row = (await self.db.execute(q)).one()
+                    native_total += row[0] or Decimal("0")
+                    cost_total += row[1] or Decimal("0")
+
+                conv = CONVERSION_FACTORS.get(primary_unit, Decimal("1"))
+                kwh_val = float(native_total * conv)
+                native_val = float(native_total)
+                cost_val = float(cost_total)
+
+                values[et] = {"native": round(native_val, 2), "kwh": round(kwh_val, 2), "cost_net": round(cost_val, 2)}
+                totals[et]["native"] += native_val
+                totals[et]["kwh"] += kwh_val
+                totals[et]["cost_net"] += cost_val
+                row_total_kwh += kwh_val
+                row_total_cost += cost_val
+
+            grand_total_kwh += row_total_kwh
+            grand_total_cost_net += row_total_cost
+
+            rows.append({
+                "month": f"{year}-{month_num:02d}",
+                "label": f"{MONTH_LABELS[month_num - 1]} {year}",
+                "values": values,
+                "total_kwh": round(row_total_kwh, 2),
+                "total_cost_net": round(row_total_cost, 2),
+            })
+
+        et_meta = [
+            {
+                "key": et,
+                "label": ET_LABELS.get(et, et),
+                "unit": unit,
+                "color": ET_COLORS.get(et, "#1B5E7B"),
+            }
+            for et, unit in et_set.items()
+        ]
+
+        return {
+            "period_start": start_date.isoformat(),
+            "period_end": end_date.isoformat(),
+            "energy_types": et_meta,
+            "rows": rows,
+            "totals": {et: {k: round(v, 2) for k, v in t.items()} for et, t in totals.items()},
+            "grand_total_kwh": round(grand_total_kwh, 2),
+            "grand_total_cost_net": round(grand_total_cost_net, 2),
+        }

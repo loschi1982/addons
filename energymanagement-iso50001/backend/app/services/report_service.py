@@ -614,6 +614,7 @@ class ReportService:
         renewable_pct = snapshot.get("renewable_pct", 0.0)
         renewable_kwh_snap = snapshot.get("renewable_kwh", 0.0)
         prev_total_kwh_snap = snapshot.get("prev_total_kwh", 0.0)
+        yoy_total_delta_pct_snap = snapshot.get("yoy_total_delta_pct")
 
         # ── Kennzahlen ──
         total_kwh = snapshot.get("total_consumption_kwh", 0)

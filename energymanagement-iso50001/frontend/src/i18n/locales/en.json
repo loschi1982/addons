@@ -38,6 +38,8 @@
     "consumers": "Consumers",
     "schema": "Energy Schema",
     "analytics": "Analytics",
+    "monthlyComparison": "Annual Comparison",
+    "energyBalance": "Energy Balance",
     "economics": "Economics",
     "emissions": "CO₂ Emissions",
     "weather": "Weather Data",
