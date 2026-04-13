@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Plus, Trash2, ArrowLeft, Search, Calendar,
-  Gauge, Zap, Droplets, Flame, Sun, X, Users,
+  Gauge, Zap, Droplets, Flame, Sun, X, Users, FileDown,
 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS } from '@/types';
@@ -349,6 +349,36 @@ function TreeView({
   onBack: () => void;
 }) {
   const [popoverNode, setPopoverNode] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportPdf = async () => {
+    setExporting(true);
+    try {
+      const token = localStorage.getItem('access_token');
+      const params = new URLSearchParams({
+        period_start: periodStart,
+        period_end: periodEnd,
+        schema_label: label,
+      });
+      const res = await fetch(
+        `/api/v1/meters/${tree.id}/subtree-pdf?${params}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) throw new Error('Export fehlgeschlagen');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const ct = res.headers.get('content-type') || '';
+      a.download = `schema_${label.replace(/\s+/g, '_')}_${periodStart}_${periodEnd}${ct.includes('html') ? '.html' : '.pdf'}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('PDF-Export fehlgeschlagen.');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const layout = layoutTree(tree);
   const nodes = flattenLayout(layout);
@@ -368,6 +398,15 @@ function TreeView({
           <button onClick={onBack} className="btn-secondary text-sm flex items-center gap-1">
             <ArrowLeft className="h-4 w-4" />
             Zurück
+          </button>
+          <button
+            onClick={handleExportPdf}
+            disabled={exporting}
+            className="btn-secondary text-sm flex items-center gap-1"
+            title="Auswertung als PDF exportieren"
+          >
+            <FileDown className="h-4 w-4" />
+            {exporting ? 'Exportiere…' : 'PDF'}
           </button>
           <h2 className="font-semibold text-gray-900">{label}</h2>
           <div className="flex items-center gap-2 ml-3 text-xs text-gray-400">

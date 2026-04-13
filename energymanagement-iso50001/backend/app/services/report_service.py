@@ -530,7 +530,7 @@ class ReportService:
             "scope_1": "Scope 1", "scope_2": "Scope 2", "scope_3": "Scope 3",
         }
 
-        # SVG-Charts serverseitig rendern
+        # SVG-Charts serverseitig rendern – jeder Renderer in eigenem try/except
         snap = report.data_snapshot or {}
         charts = snap.get("charts", {})
         monthly_trend_svg = ""
@@ -539,22 +539,40 @@ class ReportService:
         yoy_svg = ""
         try:
             from app.services.reporting.chart_renderer import (
-                render_monthly_trend_svg,
-                render_monthly_cost_svg,
-                render_sankey_svg,
                 render_bar_comparison_svg,
+                render_monthly_cost_svg,
+                render_monthly_trend_svg,
+                render_sankey_svg,
             )
-            if snap.get("monthly_trend"):
-                monthly_trend_svg = render_monthly_trend_svg(snap["monthly_trend"])
-            cost_summary = snap.get("cost_summary", {})
-            if cost_summary.get("available") and cost_summary.get("monthly_costs"):
-                monthly_cost_svg = render_monthly_cost_svg(cost_summary["monthly_costs"])
-            if charts.get("sankey"):
-                sankey_svg = render_sankey_svg(charts["sankey"])
-            if charts.get("yoy_comparison"):
-                yoy_svg = render_bar_comparison_svg(charts["yoy_comparison"])
-        except Exception as e:
-            logger.warning("chart_render_failed_in_template", error=str(e))
+        except ImportError as e:
+            logger.warning("chart_renderer_import_failed_template", error=str(e))
+            render_monthly_trend_svg = render_monthly_cost_svg = None  # type: ignore[assignment]
+            render_sankey_svg = render_bar_comparison_svg = None  # type: ignore[assignment]
+
+        if render_monthly_trend_svg and snap.get("monthly_trend"):
+            try:
+                monthly_trend_svg = render_monthly_trend_svg(snap["monthly_trend"]) or ""
+            except Exception as e:
+                logger.warning("chart_render_monthly_trend_failed", error=str(e))
+
+        cost_summary = snap.get("cost_summary", {})
+        if render_monthly_cost_svg and cost_summary.get("available") and cost_summary.get("monthly_costs"):
+            try:
+                monthly_cost_svg = render_monthly_cost_svg(cost_summary["monthly_costs"]) or ""
+            except Exception as e:
+                logger.warning("chart_render_monthly_cost_failed", error=str(e))
+
+        if render_sankey_svg and charts.get("sankey"):
+            try:
+                sankey_svg = render_sankey_svg(charts["sankey"]) or ""
+            except Exception as e:
+                logger.warning("chart_render_sankey_failed", error=str(e))
+
+        if render_bar_comparison_svg and charts.get("yoy_comparison"):
+            try:
+                yoy_svg = render_bar_comparison_svg(charts["yoy_comparison"]) or ""
+            except Exception as e:
+                logger.warning("chart_render_yoy_failed", error=str(e))
 
         return template.render(
             report=report,
