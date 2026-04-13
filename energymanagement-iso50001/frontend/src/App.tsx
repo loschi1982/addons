@@ -30,6 +30,9 @@ import EnergyBalancePage from '@/pages/EnergyBalancePage';
 import CostAllocationPage from '@/pages/CostAllocationPage';
 import ContractsPage from '@/pages/ContractsPage';
 import LoadProfilePage from '@/pages/LoadProfilePage';
+import BenchmarkingPage from '@/pages/BenchmarkingPage';
+import TrainingsPage from '@/pages/TrainingsPage';
+import ControlStrategiesPage from '@/pages/ControlStrategiesPage';
 
 /**
  * Geschützte Route – leitet auf /login um wenn nicht authentifiziert.
@@ -94,6 +97,9 @@ export default function App() {
         <Route path="cost-allocation" element={<CostAllocationPage />} />
         <Route path="contracts" element={<ContractsPage />} />
         <Route path="load-profile" element={<LoadProfilePage />} />
+        <Route path="benchmarking" element={<BenchmarkingPage />} />
+        <Route path="trainings" element={<TrainingsPage />} />
+        <Route path="control-strategies" element={<ControlStrategiesPage />} />
         <Route path="import" element={<ImportPage />} />
         <Route path="integrations" element={<Navigate to="/settings" replace />} />
         <Route path="settings" element={<SettingsPage />} />
