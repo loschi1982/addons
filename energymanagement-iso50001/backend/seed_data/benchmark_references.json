@@ -1,0 +1,47 @@
+[
+  {"building_type": "office", "energy_type": "electricity", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 30, "value_medium": 55, "value_poor": 90, "description": "Bürogebäude Strombedarf (Beleuchtung, IT, Klimatisierung)"},
+  {"building_type": "office", "energy_type": "natural_gas", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 40, "value_medium": 80, "value_poor": 130, "description": "Bürogebäude Heizwärmebedarf"},
+  {"building_type": "office", "energy_type": "district_heating", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 40, "value_medium": 75, "value_poor": 120, "description": "Bürogebäude Fernwärmebedarf"},
+  {"building_type": "office", "energy_type": "total", "source": "BAFA", "unit": "kwh_per_m2_a", "value_good": 70, "value_medium": 130, "value_poor": 220, "description": "Bürogebäude Gesamtenergiebedarf (BAFA Richtwert)"},
+
+  {"building_type": "school", "energy_type": "electricity", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 15, "value_medium": 30, "value_poor": 55, "description": "Schulgebäude Strombedarf"},
+  {"building_type": "school", "energy_type": "natural_gas", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 50, "value_medium": 90, "value_poor": 150, "description": "Schulgebäude Heizwärmebedarf"},
+  {"building_type": "school", "energy_type": "district_heating", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 50, "value_medium": 85, "value_poor": 140, "description": "Schulgebäude Fernwärmebedarf"},
+  {"building_type": "school", "energy_type": "total", "source": "BAFA", "unit": "kwh_per_m2_a", "value_good": 65, "value_medium": 120, "value_poor": 200, "description": "Schulgebäude Gesamtenergiebedarf"},
+
+  {"building_type": "hospital", "energy_type": "electricity", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 60, "value_medium": 110, "value_poor": 180, "description": "Krankenhäuser Strombedarf (Geräte, Beleuchtung, Klimatisierung)"},
+  {"building_type": "hospital", "energy_type": "natural_gas", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 80, "value_medium": 140, "value_poor": 220, "description": "Krankenhäuser Heizwärmebedarf"},
+  {"building_type": "hospital", "energy_type": "district_heating", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 80, "value_medium": 135, "value_poor": 210, "description": "Krankenhäuser Fernwärmebedarf"},
+  {"building_type": "hospital", "energy_type": "total", "source": "BAFA", "unit": "kwh_per_m2_a", "value_good": 150, "value_medium": 260, "value_poor": 400, "description": "Krankenhäuser Gesamtenergiebedarf"},
+
+  {"building_type": "residential", "energy_type": "electricity", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 20, "value_medium": 40, "value_poor": 65, "description": "Wohngebäude Strombedarf"},
+  {"building_type": "residential", "energy_type": "natural_gas", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 60, "value_medium": 110, "value_poor": 170, "description": "Wohngebäude Heizwärmebedarf"},
+  {"building_type": "residential", "energy_type": "district_heating", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 55, "value_medium": 100, "value_poor": 160, "description": "Wohngebäude Fernwärmebedarf"},
+  {"building_type": "residential", "energy_type": "total", "source": "EnEV", "unit": "kwh_per_m2_a", "value_good": 75, "value_medium": 150, "value_poor": 250, "description": "Wohngebäude Primärenergiebedarf (EnEV-Referenz)"},
+
+  {"building_type": "retail", "energy_type": "electricity", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 40, "value_medium": 80, "value_poor": 140, "description": "Einzelhandel / Geschäftshäuser Strombedarf"},
+  {"building_type": "retail", "energy_type": "natural_gas", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 30, "value_medium": 60, "value_poor": 100, "description": "Einzelhandel Heizwärmebedarf"},
+  {"building_type": "retail", "energy_type": "total", "source": "BAFA", "unit": "kwh_per_m2_a", "value_good": 80, "value_medium": 150, "value_poor": 250, "description": "Einzelhandel Gesamtenergiebedarf"},
+
+  {"building_type": "warehouse", "energy_type": "electricity", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 15, "value_medium": 30, "value_poor": 55, "description": "Lagerhallen / Logistik Strombedarf"},
+  {"building_type": "warehouse", "energy_type": "natural_gas", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 25, "value_medium": 50, "value_poor": 90, "description": "Lagerhallen Heizwärmebedarf"},
+  {"building_type": "warehouse", "energy_type": "total", "source": "BAFA", "unit": "kwh_per_m2_a", "value_good": 40, "value_medium": 80, "value_poor": 145, "description": "Lagerhallen Gesamtenergiebedarf"},
+
+  {"building_type": "production", "energy_type": "electricity", "source": "GEFMA_124", "unit": "kwh_per_m2_a", "value_good": 40, "value_medium": 90, "value_poor": 160, "description": "Produktionshallen Strombedarf (GEFMA 124 Titel 5)"},
+  {"building_type": "production", "energy_type": "natural_gas", "source": "GEFMA_124", "unit": "kwh_per_m2_a", "value_good": 50, "value_medium": 100, "value_poor": 180, "description": "Produktionshallen Gasverbrauch"},
+  {"building_type": "production", "energy_type": "total", "source": "GEFMA_124", "unit": "kwh_per_m2_a", "value_good": 100, "value_medium": 200, "value_poor": 350, "description": "Produktionshallen Gesamtenergiebedarf"},
+
+  {"building_type": "hotel", "energy_type": "electricity", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 50, "value_medium": 90, "value_poor": 150, "description": "Hotels Strombedarf"},
+  {"building_type": "hotel", "energy_type": "natural_gas", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 70, "value_medium": 120, "value_poor": 190, "description": "Hotels Heizwärmebedarf"},
+  {"building_type": "hotel", "energy_type": "total", "source": "BAFA", "unit": "kwh_per_m2_a", "value_good": 130, "value_medium": 220, "value_poor": 360, "description": "Hotels Gesamtenergiebedarf"},
+
+  {"building_type": "sports_hall", "energy_type": "electricity", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 20, "value_medium": 45, "value_poor": 80, "description": "Sporthallen Strombedarf (Beleuchtung, Technik)"},
+  {"building_type": "sports_hall", "energy_type": "natural_gas", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 60, "value_medium": 110, "value_poor": 175, "description": "Sporthallen Heizwärmebedarf"},
+  {"building_type": "sports_hall", "energy_type": "total", "source": "BAFA", "unit": "kwh_per_m2_a", "value_good": 80, "value_medium": 155, "value_poor": 260, "description": "Sporthallen Gesamtenergiebedarf"},
+
+  {"building_type": "data_center", "energy_type": "electricity", "source": "custom", "unit": "kwh_per_m2_a", "value_good": 400, "value_medium": 700, "value_poor": 1200, "description": "Rechenzentren Strombedarf (PUE-basiert, Richtwert)"},
+
+  {"building_type": "public_building", "energy_type": "electricity", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 25, "value_medium": 50, "value_poor": 90, "description": "Öffentliche Gebäude (Verwaltung) Strombedarf"},
+  {"building_type": "public_building", "energy_type": "natural_gas", "source": "VDI_3807", "unit": "kwh_per_m2_a", "value_good": 45, "value_medium": 85, "value_poor": 140, "description": "Öffentliche Gebäude Heizwärmebedarf"},
+  {"building_type": "public_building", "energy_type": "total", "source": "BAFA", "unit": "kwh_per_m2_a", "value_good": 75, "value_medium": 140, "value_poor": 235, "description": "Öffentliche Gebäude Gesamtenergiebedarf"}
+]

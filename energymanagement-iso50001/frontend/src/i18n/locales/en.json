@@ -51,6 +51,9 @@
     "import": "Data Import",
     "integrations": "Integrations",
     "iso": "ISO 50001",
+    "benchmarking": "Benchmarking",
+    "trainings": "Trainings",
+    "controlStrategies": "Control Strategies",
     "users": "Users",
     "settings": "Settings"
   },

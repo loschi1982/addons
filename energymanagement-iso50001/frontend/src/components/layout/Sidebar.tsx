@@ -26,6 +26,9 @@ import {
   Table2,
   PieChart,
   Handshake,
+  BookOpen,
+  GraduationCap,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
 import { toggleSidebar } from '@/store/slices/uiSlice';
@@ -52,6 +55,9 @@ const navItems = [
   { path: '/reports', labelKey: 'nav.reports', icon: FileText },
   { path: '/import', labelKey: 'nav.import', icon: Upload },
   { path: '/iso', labelKey: 'nav.iso', icon: Shield },
+  { path: '/benchmarking', labelKey: 'nav.benchmarking', icon: BookOpen },
+  { path: '/trainings', labelKey: 'nav.trainings', icon: GraduationCap },
+  { path: '/control-strategies', labelKey: 'nav.controlStrategies', icon: SlidersHorizontal },
   { path: '/users', labelKey: 'nav.users', icon: Users },
   { path: '/settings', labelKey: 'nav.settings', icon: Settings },
 ];

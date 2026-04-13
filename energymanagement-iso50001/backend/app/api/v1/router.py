@@ -13,9 +13,11 @@ from app.api.v1 import (
     audit,
     auth,
     backup,
+    benchmarks,
     climate,
     consumers,
     contracts,
+    control_strategies,
     dashboard,
     economics,
     emissions,
@@ -31,6 +33,7 @@ from app.api.v1 import (
     settings,
     sites,
     system,
+    trainings,
     users,
     weather,
 )
@@ -67,6 +70,9 @@ api_router.include_router(reports.router, prefix="/reports", tags=["Berichte"])
 
 # ISO 50001 Management
 api_router.include_router(iso.router, prefix="/iso", tags=["ISO 50001"])
+api_router.include_router(benchmarks.router, prefix="/benchmarks", tags=["Benchmarking"])
+api_router.include_router(trainings.router, prefix="/trainings", tags=["Schulungen"])
+api_router.include_router(control_strategies.router, prefix="/control-strategies", tags=["Regelstrategien"])
 
 # Energiebewertung (EnPI, Baseline, SEU, Variablen)
 api_router.include_router(
