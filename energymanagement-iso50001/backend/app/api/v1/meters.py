@@ -9,6 +9,7 @@ import uuid
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -200,6 +201,44 @@ async def get_meter_subtree(
     """Zählerbaum ab einem bestimmten Zähler mit Verbrauchsdaten aufbauen."""
     service = MeterService(db)
     return await service.get_subtree(meter_id, period_start, period_end)
+
+
+@router.get("/{meter_id}/subtree-pdf")
+async def export_subtree_pdf(
+    meter_id: uuid.UUID,
+    period_start: date = Query(...),
+    period_end: date = Query(...),
+    schema_label: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Energieschema-Auswertung als PDF exportieren."""
+    from app.services.reporting.schema_report import generate_schema_pdf
+
+    service = MeterService(db)
+    tree = await service.get_subtree(meter_id, period_start, period_end)
+
+    pdf_bytes = await generate_schema_pdf(
+        tree=tree,
+        period_start=period_start,
+        period_end=period_end,
+        schema_label=schema_label,
+    )
+
+    name = (schema_label or tree.get("name", "schema")).replace(" ", "_")
+    filename = f"schema_{name}_{period_start}_{period_end}.pdf"
+
+    # Wenn WeasyPrint nicht verfügbar, HTML zurückgeben
+    content_type = "application/pdf"
+    if not pdf_bytes[:4] == b"%PDF":
+        content_type = "text/html; charset=utf-8"
+        filename = filename.replace(".pdf", ".html")
+
+    return Response(
+        content=pdf_bytes,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{meter_id}", response_model=MeterDetailResponse)
