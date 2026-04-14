@@ -166,82 +166,81 @@ class ReportService:
         meter_ids: list[uuid.UUID] | None,
         scope_config: dict,
     ) -> dict:
-        """Diagramm-Daten für aktivierte Charts sammeln."""
+        """Diagramm-Daten für alle Charts sammeln."""
         from app.services.analytics_service import AnalyticsService
         analytics = AnalyticsService(self.db)
         charts = {}
 
-        if scope_config.get("include_sankey"):
-            try:
-                charts["sankey"] = await analytics.get_sankey(period_start, period_end)
-            except Exception as e:
-                logger.warning("chart_sankey_failed", error=str(e))
+        # Sankey – immer sammeln
+        try:
+            charts["sankey"] = await analytics.get_sankey(period_start, period_end)
+        except Exception as e:
+            logger.warning("chart_sankey_failed", error=str(e))
 
-        if scope_config.get("include_heatmap"):
-            try:
-                heatmap_meter_id = meter_ids[0] if meter_ids else None
-                if not heatmap_meter_id:
-                    first_result = await self.db.execute(
-                        select(Meter.id).where(
-                            Meter.is_active == True,  # noqa: E712
-                            Meter.parent_meter_id.is_(None),
-                        ).limit(1)
-                    )
-                    row = first_result.first()
-                    heatmap_meter_id = row[0] if row else None
-                if heatmap_meter_id:
-                    charts["heatmap"] = await analytics.get_heatmap(
-                        heatmap_meter_id, period_start, period_end
-                    )
-            except Exception as e:
-                logger.warning("chart_heatmap_failed", error=str(e))
-
-        if scope_config.get("include_yoy_comparison"):
-            try:
-                prev_start = date(period_start.year - 1, period_start.month, period_start.day)
-                prev_end = date(period_end.year - 1, period_end.month, period_end.day)
-                # get_comparison bricht bei meter_ids=None früh ab → alle Root-Zähler laden
-                yoy_meter_ids = meter_ids
-                if not yoy_meter_ids:
-                    root_result = await self.db.execute(
-                        select(Meter.id).where(
-                            Meter.is_active == True,  # noqa: E712
-                            Meter.is_feed_in != True,
-                            Meter.parent_meter_id.is_(None),
-                        )
-                    )
-                    yoy_meter_ids = [row[0] for row in root_result.all()]
-                charts["yoy_comparison"] = await analytics.get_comparison(
-                    meter_ids=yoy_meter_ids,
-                    period1_start=prev_start,
-                    period1_end=prev_end,
-                    period2_start=period_start,
-                    period2_end=period_end,
-                    granularity="monthly",
+        # Heatmap – immer sammeln (erster Zähler als Basis)
+        try:
+            heatmap_meter_id = meter_ids[0] if meter_ids else None
+            if not heatmap_meter_id:
+                first_result = await self.db.execute(
+                    select(Meter.id).where(
+                        Meter.is_active == True,  # noqa: E712
+                        Meter.parent_meter_id.is_(None),
+                    ).limit(1)
                 )
-            except Exception as e:
-                logger.warning("chart_yoy_failed", error=str(e))
+                row = first_result.first()
+                heatmap_meter_id = row[0] if row else None
+            if heatmap_meter_id:
+                charts["heatmap"] = await analytics.get_heatmap(
+                    heatmap_meter_id, period_start, period_end
+                )
+        except Exception as e:
+            logger.warning("chart_heatmap_failed", error=str(e))
 
-        if scope_config.get("include_meter_tree"):
-            try:
-                # Zählerbaum-Struktur aufbauen
-                query = select(Meter).where(Meter.is_active == True)  # noqa: E712
-                if meter_ids:
-                    query = query.where(Meter.id.in_(meter_ids))
-                result = await self.db.execute(query)
-                meters = list(result.scalars().all())
-                tree_nodes = []
-                for m in meters:
-                    tree_nodes.append({
-                        "id": str(m.id),
-                        "name": m.name,
-                        "energy_type": m.energy_type,
-                        "parent_id": str(m.parent_meter_id) if m.parent_meter_id else None,
-                        "unit": m.unit,
-                    })
+        # Jahresvergleich – immer sammeln
+        try:
+            prev_start = date(period_start.year - 1, period_start.month, period_start.day)
+            prev_end = date(period_end.year - 1, period_end.month, period_end.day)
+            yoy_meter_ids = meter_ids
+            if not yoy_meter_ids:
+                root_result = await self.db.execute(
+                    select(Meter.id).where(
+                        Meter.is_active == True,  # noqa: E712
+                        Meter.is_feed_in != True,
+                        Meter.parent_meter_id.is_(None),
+                    )
+                )
+                yoy_meter_ids = [row[0] for row in root_result.all()]
+            charts["yoy_comparison"] = await analytics.get_comparison(
+                meter_ids=yoy_meter_ids,
+                period1_start=prev_start,
+                period1_end=prev_end,
+                period2_start=period_start,
+                period2_end=period_end,
+                granularity="monthly",
+            )
+        except Exception as e:
+            logger.warning("chart_yoy_failed", error=str(e))
+
+        # Zählerbaum – immer sammeln
+        try:
+            query = select(Meter).where(Meter.is_active == True)  # noqa: E712
+            if meter_ids:
+                query = query.where(Meter.id.in_(meter_ids))
+            result = await self.db.execute(query)
+            meters = list(result.scalars().all())
+            tree_nodes = []
+            for m in meters:
+                tree_nodes.append({
+                    "id": str(m.id),
+                    "name": m.name,
+                    "energy_type": m.energy_type,
+                    "parent_id": str(m.parent_meter_id) if m.parent_meter_id else None,
+                    "unit": m.unit,
+                })
+            if tree_nodes:
                 charts["meter_tree"] = tree_nodes
-            except Exception as e:
-                logger.warning("chart_meter_tree_failed", error=str(e))
+        except Exception as e:
+            logger.warning("chart_tree_failed", error=str(e))
 
         return charts
 
@@ -472,7 +471,15 @@ class ReportService:
             await self.db.commit()
 
             # Template rendern
-            html_content = self._render_template(report)
+            try:
+                html_content = self._render_template(report)
+            except Exception as render_err:
+                logger.error("template_render_failed", error=str(render_err), report_id=str(report_id))
+                html_content = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body>
+    <h1>{report.title}</h1>
+    <p>Fehler bei der HTML-Generierung: {render_err}</p>
+    <p>Zeitraum: {report.period_start} bis {report.period_end}</p>
+    </body></html>"""
 
             # PDF erzeugen
             logger.info("pdf_dir_debug", pdf_dir=str(PDF_DIR), cwd=str(__import__("os").getcwd()))
@@ -1584,8 +1591,8 @@ tfoot td {{ font-weight: 700; border-top: 2px solid #1B5E7B; padding: 5pt 7pt; }
 .recommendation {{ border-left-color: #1B5E7B; }}
 .savings {{ color: #16A34A; font-weight: 600; font-size: 9pt; margin-top: 3pt; }}
 
-figure {{ page-break-inside: avoid; margin: 10pt 0; }}
-figure svg {{ max-width: 100%; height: auto; display: block; }}
+figure {{ margin: 8pt 0; page-break-inside: avoid; }}
+figure svg {{ width: 100% !important; height: auto !important; display: block; max-width: 100%; }}
 
 p {{ margin: 5pt 0; }}
 .text-secondary {{ color: #6B7280; }}
