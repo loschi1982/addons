@@ -381,8 +381,8 @@ function CreateReportModal({
   const [includeEnpi, setIncludeEnpi] = useState(true);
   const [includeAnomalies, setIncludeAnomalies] = useState(true);
   // Diagramm-Toggles
-  const [includeMeterTree, setIncludeMeterTree] = useState(false);
-  const [includeHeatmap, setIncludeHeatmap] = useState(false);
+  const [includeMeterTree, setIncludeMeterTree] = useState(true);
+  const [includeHeatmap, setIncludeHeatmap] = useState(true);
   const [includeSankey, setIncludeSankey] = useState(true);
   const [includeYoyComparison, setIncludeYoyComparison] = useState(true);
   const [includeCostOverview, setIncludeCostOverview] = useState(false);

@@ -25,7 +25,7 @@ MONTH_LABELS = [
 WEEKDAY_LABELS = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"]
 
 
-def _fallback_svg(message: str, width: int = 500, height: int = 50) -> str:
+def _fallback_svg(message: str, width: int = 520, height: int = 50) -> str:
     """Einfaches SVG mit Hinweistext als Fallback."""
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
@@ -37,7 +37,7 @@ def _fallback_svg(message: str, width: int = 500, height: int = 50) -> str:
     )
 
 
-def render_heatmap_svg(heatmap_data: list[dict], width: int = 600, height: int = 220) -> str:
+def render_heatmap_svg(heatmap_data: list[dict], width: int = 520, height: int = 220) -> str:
     """
     Heatmap als SVG rendern: Stunde (x) × Wochentag (y).
 
@@ -131,7 +131,7 @@ def render_heatmap_svg(heatmap_data: list[dict], width: int = 600, height: int =
 
 def render_bar_comparison_svg(
     comparison_data: dict,
-    width: int = 600,
+    width: int = 520,
     height: int = 300,
 ) -> str:
     """
@@ -260,7 +260,7 @@ def render_bar_comparison_svg(
 
 def render_meter_tree_svg(
     tree_nodes: list[dict],
-    width: int = 600,
+    width: int = 520,
     height: int = 0,
 ) -> str:
     """
@@ -371,7 +371,7 @@ def render_meter_tree_svg(
 
 def render_sankey_svg(
     sankey_data: dict,
-    width: int = 700,
+    width: int = 520,
     height: int = 400,
 ) -> str:
     """
@@ -538,7 +538,7 @@ def render_sankey_svg(
 
 def render_monthly_trend_svg(
     monthly_data: list[dict],
-    width: int = 650,
+    width: int = 520,
     height: int = 260,
 ) -> str:
     """
@@ -642,7 +642,7 @@ def render_energy_type_trend_svg(
     monthly_data: list[dict],
     unit: str = "kWh",
     color: str = "#1B5E7B",
-    width: int = 650,
+    width: int = 520,
     height: int = 200,
 ) -> str:
     """
@@ -736,7 +736,7 @@ def render_energy_type_trend_svg(
 
 def render_monthly_cost_svg(
     monthly_costs: list[dict],
-    width: int = 650,
+    width: int = 520,
     height: int = 220,
 ) -> str:
     """
@@ -833,7 +833,7 @@ def render_monthly_cost_svg(
 
 def render_yoy_table_svg(
     energy_yoy_table: list[dict],
-    width: int = 650,
+    width: int = 520,
     height: int = 240,
 ) -> str:
     """
