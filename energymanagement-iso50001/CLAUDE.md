@@ -1,7 +1,7 @@
 # Energiemanagement ISO 50001 – CLAUDE.md
 
 ## Projektübersicht
-Home Assistant Add-on für ein ISO 50001 konformes Energiemanagementsystem.
+Standalone-Webanwendung für ein ISO 50001 konformes Energiemanagementsystem.
 Verwaltet Energieverbräuche, CO₂-Emissionen, Witterungskorrektur und
 das komplette ISO 50001 Managementsystem (Audits, Ziele, Dokumente).
 
@@ -11,13 +11,13 @@ das komplette ISO 50001 Managementsystem (Audits, Ziele, Dokumente).
 - **Task Queue**: Celery + Redis
 - **Frontend**: React 18, TypeScript (strict), Redux Toolkit, Tailwind CSS, Recharts
 - **PDF**: WeasyPrint + Jinja2 Templates
-- **Deployment**: Docker, Home Assistant Add-on
+- **Deployment**: Docker (Standalone via docker-compose)
 
 ## Projektstruktur
 ```
 energymanagement-iso50001/
-├── config.yaml, build.yaml, Dockerfile, run.sh    # HA Add-on
-├── docker-compose.dev.yml                          # Dev-Umgebung
+├── Dockerfile, docker-compose.dev.yml              # Container
+├── deploy/standalone/                              # Produktions-Deployment
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                                 # FastAPI App
@@ -70,15 +70,15 @@ docker-compose -f docker-compose.dev.yml up
 - [x] Pydantic Schemas
 - [x] API Router (14 Module)
 - [x] Service Stubs
-- [x] Integration Stubs (Shelly, Modbus, KNX, HA, BrightSky, Electricity Maps)
+- [x] Integration Stubs (Shelly, Modbus, KNX, BrightSky, Electricity Maps, HomeAssistant optional)
 - [x] Frontend Scaffolding (React + Redux + Tailwind)
 - [x] Seed-Daten (Rollen, Emissionsfaktoren, DWD-Stationen)
 - [x] Service-Implementierungen (17/17 Services implementiert)
 - [x] Alembic-Migrationen (initiale Migration für alle 40+ Tabellen)
 - [x] Backend-Tests (291 Tests, 285 grün, 6 API-Fixture-Konflikte)
-- [x] Docker-Build verifiziert (Dockerfile, docker-compose, run.sh)
+- [x] Docker-Build verifiziert (Dockerfile, docker-compose, entrypoint.sh)
 - [x] Frontend-Komponenten implementieren (17/17 Seiten, TypeScript fehlerfrei, Production-Build OK)
 - [x] E2E-Tests (11 Tests: Auth, Sites, Meters, Consumers, ISO 50001)
-- [x] Integration-Tests (Shelly, Modbus, BrightSky, HomeAssistant, Electricity Maps)
+- [x] Integration-Tests (Shelly, Modbus, BrightSky, Electricity Maps)
 - [x] Zähler-Zuordnungen (MeterUnitAllocation: Add/Subtract-Semantik, anteilige Faktoren)
 - [x] Service-Tests (Dashboard, Weather, Climate, Report, Import, Permission, Schema)

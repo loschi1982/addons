@@ -73,11 +73,9 @@ services:
       UPLOAD_DIR: /data/uploads
       REPORT_PDF_DIR: /data/reports
       DEPLOYMENT_MODE: standalone
-      # Home Assistant Integration (optional)
+      # Home Assistant als optionale Datenquelle (leer lassen wenn nicht genutzt)
       HA_ACCESS_TOKEN: ${HA_ACCESS_TOKEN:-}
       HA_BASE_URL: ${HA_BASE_URL:-}
-      HA_AUTH_ENABLED: ${HA_AUTH_ENABLED:-false}
-      HA_DEFAULT_ROLE: ${HA_DEFAULT_ROLE:-viewer}
       # Externe APIs
       ELECTRICITY_MAPS_API_KEY: ${ELECTRICITY_MAPS_API_KEY:-}
       BRIGHT_SKY_ENABLED: ${BRIGHT_SKY_ENABLED:-true}
