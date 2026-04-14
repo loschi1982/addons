@@ -190,7 +190,10 @@
       "Bash(grep -r \"wastewater\\\\|abwasser\\\\|water.*meter\\\\|water.*cost\" /home/rico/addons/energymanagement-iso50001/backend/app --include=*.py)",
       "Bash(grep -r \"audit.*workflow\\\\|monitoring.*audit.*target\\\\|3.*step\" /home/rico/addons/energymanagement-iso50001 --include=*.py)",
       "Bash(grep -n \"class.*Anomal\\\\|justify\\\\|explanation\\\\|reason.*anomal\" /home/rico/addons/energymanagement-iso50001/backend/app/models/*.py)",
-      "Bash(grep -E \"error TS|✓|^$\")"
+      "Bash(grep -E \"error TS|✓|^$\")",
+      "Bash(systemctl list-units:*)",
+      "Bash(rm -rf /home/rico/addons/energymanagement-iso50001/deploy/ha-addon/)",
+      "Bash(rm /home/rico/addons/energymanagement-iso50001/run.sh)"
     ]
   }
 }

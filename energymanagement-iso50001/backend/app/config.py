@@ -5,7 +5,7 @@ Alle Einstellungen werden aus Umgebungsvariablen gelesen. Pydantic-Settings
 validiert die Werte automatisch und gibt sinnvolle Fehlermeldungen, wenn
 eine Pflicht-Variable fehlt oder einen ungültigen Wert hat.
 
-In der Produktion (als HA Add-on) setzt das run.sh-Skript die Variablen.
+In der Produktion setzt docker-compose die Umgebungsvariablen.
 In der Entwicklung können sie in einer .env-Datei definiert werden.
 """
 
@@ -58,27 +58,20 @@ class Settings(BaseSettings):
     # Wie lange ein Refresh Token gültig ist (in Tagen).
     refresh_token_expire_days: int = 7
 
-    # ── Home Assistant ──
-    # Access Token für die HA-API.
-    # Im Add-on: SUPERVISOR_TOKEN (wird automatisch gesetzt)
-    # Standalone: Long-Lived Access Token (aus HA Profil)
+    # ── Home Assistant Integration (optional) ──
+    # Wenn ein Home Assistant als Datenquelle genutzt wird:
+    # Long-Lived Access Token aus HA Profil → HA_ACCESS_TOKEN
     ha_access_token: str = ""
+    ha_supervisor_token: str = ""  # veraltet, für Rückwärtskompatibilität
 
-    # Rückwärtskompatibilität: ha_supervisor_token wird als Alias akzeptiert
-    ha_supervisor_token: str = ""
-
-    # Basis-URL der HA-API
-    # Im Add-on: http://supervisor/core
-    # Standalone: z.B. http://192.168.1.100:8123
+    # Basis-URL der HA-API, z.B. http://192.168.1.100:8123
     ha_base_url: str = ""
 
-    # Deployment-Modus: "standalone" oder "ha-addon"
-    deployment_mode: str = "ha-addon"
+    # Deployment-Modus (informativ)
+    deployment_mode: str = "standalone"
 
-    # Soll HA-Authentifizierung als Alternative zum eigenen Login erlaubt sein?
+    # HA-Authentifizierung als Alternative zum eigenen Login (Standard: deaktiviert)
     ha_auth_enabled: bool = False
-
-    # Standard-Rolle für automatisch angelegte HA-Benutzer
     ha_default_role: str = "viewer"
 
     # ── Externe APIs ──
