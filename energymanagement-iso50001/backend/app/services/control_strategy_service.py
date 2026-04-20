@@ -49,7 +49,7 @@ class ControlStrategyService:
         total = (await self.db.execute(count_q)).scalar() or 0
         query = query.offset((page - 1) * page_size).limit(page_size)
         result = await self.db.execute(query)
-        return {"items": list(result.scalars().all()), "total": total, "page": page, "page_size": page_size}
+        return {"items": list(result.scalars().all()), "total": total, "page": page, "page_size": page_size, "total_pages": max(1, (total + page_size - 1) // page_size)}
 
     async def get_strategy(self, strategy_id: uuid.UUID) -> ControlStrategy:
         result = await self.db.execute(
