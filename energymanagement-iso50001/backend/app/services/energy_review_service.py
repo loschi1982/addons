@@ -580,10 +580,13 @@ class EnergyReviewService:
     async def get_latest_enpi_value(
         self, enpi_id: uuid.UUID
     ) -> Decimal | None:
-        """Letzten berechneten EnPI-Wert laden."""
+        """Letzten berechneten EnPI-Wert laden (ignoriert Nullwerte ohne Verbrauch)."""
         result = await self.db.execute(
             select(EnPIValue.enpi_value)
-            .where(EnPIValue.enpi_id == enpi_id)
+            .where(
+                EnPIValue.enpi_id == enpi_id,
+                EnPIValue.numerator_value > 0,
+            )
             .order_by(EnPIValue.period_end.desc())
             .limit(1)
         )

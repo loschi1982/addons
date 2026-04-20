@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, lazy, Suspense } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area,
   ComposedChart, PieChart, Pie, Cell,
@@ -10,6 +11,9 @@ import InfoTip from '@/components/ui/InfoTip';
 import SankeyDiagram from '@/components/charts/SankeyDiagram';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
+
+const MonthlyComparisonPage = lazy(() => import('./MonthlyComparisonPage'));
+const EnergyBalancePage = lazy(() => import('./EnergyBalancePage'));
 
 /* ── Typen ── */
 
@@ -98,6 +102,8 @@ const CHART_COLORS = [
 const TABS = [
   { key: 'timeseries', label: 'Zeitreihen' },
   { key: 'comparison', label: 'Vergleich' },
+  { key: 'monthly_comparison', label: 'Jahresvergleich' },
+  { key: 'energy_balance', label: 'Energiebilanz' },
   { key: 'distribution', label: 'Verteilung' },
   { key: 'self_consumption', label: 'Eigenverbrauch' },
   { key: 'heatmap', label: 'Heatmap' },
@@ -139,8 +145,17 @@ function yearStart(): string {
 /* ── Hauptkomponente ── */
 
 export default function AnalyticsPage() {
-  const [tab, setTab] = useState<TabKey>('timeseries');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = (searchParams.get('tab') as TabKey) || 'timeseries';
+  const [tab, setTab] = useState<TabKey>(
+    TABS.some(t => t.key === initialTab) ? initialTab : 'timeseries'
+  );
   const [meters, setMeters] = useState<Meter[]>([]);
+
+  const handleTabChange = (key: TabKey) => {
+    setTab(key);
+    setSearchParams(key === 'timeseries' ? {} : { tab: key }, { replace: true });
+  };
 
   useEffect(() => {
     apiClient.get('/api/v1/meters').then((res) => {
@@ -161,7 +176,7 @@ export default function AnalyticsPage() {
         {TABS.map((t) => (
           <button
             key={t.key}
-            onClick={() => setTab(t.key)}
+            onClick={() => handleTabChange(t.key)}
             className={`px-3 py-2 text-sm font-medium transition-colors ${
               tab === t.key
                 ? 'border-b-2 border-primary-600 text-primary-600'
@@ -176,6 +191,16 @@ export default function AnalyticsPage() {
       <div className="mt-6">
         {tab === 'timeseries' && <TimeSeriesTab meters={meters} />}
         {tab === 'comparison' && <ComparisonTab meters={meters} />}
+        {tab === 'monthly_comparison' && (
+          <Suspense fallback={<div className="py-8 text-center text-gray-400">Laden...</div>}>
+            <MonthlyComparisonPage />
+          </Suspense>
+        )}
+        {tab === 'energy_balance' && (
+          <Suspense fallback={<div className="py-8 text-center text-gray-400">Laden...</div>}>
+            <EnergyBalancePage />
+          </Suspense>
+        )}
         {tab === 'distribution' && <DistributionTab />}
         {tab === 'self_consumption' && <SelfConsumptionTab />}
         {tab === 'heatmap' && <HeatmapTab meters={meters} />}

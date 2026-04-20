@@ -51,7 +51,13 @@ class ContractService:
         result = await self.db.execute(query)
         items = result.scalars().all()
 
-        return {"items": items, "total": total, "page": page, "page_size": page_size}
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": max(1, (total + page_size - 1) // page_size),
+        }
 
     async def get_contract(self, contract_id: uuid.UUID) -> EnergyContract:
         """Einzelnen Vertrag laden."""

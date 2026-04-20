@@ -25,8 +25,7 @@ import SettingsPage from '@/pages/SettingsPage';
 import MeterMapPage from '@/pages/MeterMapPage';
 import EnergyReviewPage from '@/pages/EnergyReviewPage';
 import EconomicsPage from '@/pages/EconomicsPage';
-import MonthlyComparisonPage from '@/pages/MonthlyComparisonPage';
-import EnergyBalancePage from '@/pages/EnergyBalancePage';
+// MonthlyComparisonPage und EnergyBalancePage sind jetzt Tabs in AnalyticsPage
 import CostAllocationPage from '@/pages/CostAllocationPage';
 import ContractsPage from '@/pages/ContractsPage';
 import LoadProfilePage from '@/pages/LoadProfilePage';
@@ -92,8 +91,8 @@ export default function App() {
         <Route path="iso/*" element={<ISOPage />} />
         <Route path="users" element={<UsersPage />} />
         <Route path="economics" element={<EconomicsPage />} />
-        <Route path="monthly-comparison" element={<MonthlyComparisonPage />} />
-        <Route path="energy-balance" element={<EnergyBalancePage />} />
+        <Route path="monthly-comparison" element={<Navigate to="/analytics?tab=monthly_comparison" replace />} />
+        <Route path="energy-balance" element={<Navigate to="/analytics?tab=energy_balance" replace />} />
         <Route path="cost-allocation" element={<CostAllocationPage />} />
         <Route path="contracts" element={<ContractsPage />} />
         <Route path="load-profile" element={<LoadProfilePage />} />

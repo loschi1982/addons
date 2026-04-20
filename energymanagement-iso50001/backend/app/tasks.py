@@ -64,6 +64,10 @@ celery_app.conf.update(
             "task": "app.tasks.recalculate_enpis",
             "schedule": 86400.0,  # einmal täglich (Vormonat + laufender Monat)
         },
+        "recalculate-objectives-daily": {
+            "task": "app.tasks.recalculate_objectives",
+            "schedule": 86400.0,  # einmal täglich
+        },
     },
 )
 
@@ -228,6 +232,24 @@ def recalculate_enpis():
                 "prev_month": result_prev,
                 "current_month": result_curr,
             }
+
+    return _run_async(_run())
+
+
+@celery_app.task(name="app.tasks.recalculate_objectives")
+def recalculate_objectives():
+    """
+    Fortschritt aller aktiven Energieziele aus Zählerdaten berechnen.
+
+    Wird täglich ausgeführt. Ziele mit zugeordneten Zählern (related_meter_ids)
+    erhalten automatisch current_value und progress_percent.
+    """
+    async def _run():
+        from app.services.iso_service import ISOService
+
+        async with _task_db_session() as db:
+            service = ISOService(db)
+            return await service.recalculate_objective_progress()
 
     return _run_async(_run())
 

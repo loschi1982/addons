@@ -350,6 +350,40 @@ function TreeView({
 }) {
   const [popoverNode, setPopoverNode] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [creatingReport, setCreatingReport] = useState(false);
+
+  const handleCreateReport = async () => {
+    setCreatingReport(true);
+    try {
+      // Bericht anlegen
+      const res = await apiClient.post('/api/v1/reports', {
+        title: `${label} – ${periodStart} bis ${periodEnd}`,
+        report_type: 'custom',
+        period_start: periodStart,
+        period_end: periodEnd,
+        root_meter_id: tree.id,
+        include_co2: true,
+        include_weather_correction: false,
+        include_seu: true,
+        include_enpi: true,
+        include_sankey: true,
+        include_yoy_comparison: true,
+        include_meter_tree: true,
+      });
+      const reportId = res.data.id;
+      // PDF generieren
+      await apiClient.post(`/api/v1/reports/${reportId}/generate`, {
+        template: 'default',
+        language: 'de',
+      });
+      // Zur Berichtsseite navigieren
+      window.location.href = `/reports`;
+    } catch {
+      alert('Bericht konnte nicht erstellt werden.');
+    } finally {
+      setCreatingReport(false);
+    }
+  };
 
   const handleExportPdf = async () => {
     setExporting(true);
@@ -403,10 +437,19 @@ function TreeView({
             onClick={handleExportPdf}
             disabled={exporting}
             className="btn-secondary text-sm flex items-center gap-1"
-            title="Auswertung als PDF exportieren"
+            title="Schema-Auswertung als PDF exportieren"
           >
             <FileDown className="h-4 w-4" />
             {exporting ? 'Exportiere…' : 'PDF'}
+          </button>
+          <button
+            onClick={handleCreateReport}
+            disabled={creatingReport}
+            className="btn-primary text-sm flex items-center gap-1"
+            title="Vollständigen Bericht für diesen Strang erstellen"
+          >
+            <FileDown className="h-4 w-4" />
+            {creatingReport ? 'Erstelle…' : 'Bericht erstellen'}
           </button>
           <h2 className="font-semibold text-gray-900">{label}</h2>
           <div className="flex items-center gap-2 ml-3 text-xs text-gray-400">
