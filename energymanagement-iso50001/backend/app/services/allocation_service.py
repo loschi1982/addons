@@ -66,6 +66,7 @@ class AllocationService:
             "total": total,
             "page": page,
             "page_size": page_size,
+            "total_pages": max(1, (total + page_size - 1) // page_size),
         }
 
     async def create_allocation(self, data: dict) -> MeterUnitAllocation:

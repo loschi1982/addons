@@ -246,10 +246,22 @@ class DashboardService:
                 )
                 .group_by(Meter.energy_type, Meter.unit)
             )
-            # Neuesten Emissionsfaktor je Energietyp laden
-            factors_result = await self.db.execute(
-                select(EmissionFactor.energy_type, func.max(EmissionFactor.co2_g_per_kwh).label("co2_factor"))
+            # Neuesten Emissionsfaktor je Energietyp laden (nach Jahr/Monat, nicht max-Wert)
+            latest_year_sub = (
+                select(
+                    EmissionFactor.energy_type,
+                    func.max(EmissionFactor.year * 100 + func.coalesce(EmissionFactor.month, 0)).label("max_period"),
+                )
                 .group_by(EmissionFactor.energy_type)
+                .subquery()
+            )
+            factors_result = await self.db.execute(
+                select(EmissionFactor.energy_type, EmissionFactor.co2_g_per_kwh.label("co2_factor"))
+                .join(
+                    latest_year_sub,
+                    (EmissionFactor.energy_type == latest_year_sub.c.energy_type)
+                    & ((EmissionFactor.year * 100 + func.coalesce(EmissionFactor.month, 0)) == latest_year_sub.c.max_period),
+                )
             )
             factors: dict[str, Decimal] = {
                 row.energy_type: Decimal(str(row.co2_factor))
@@ -346,9 +358,21 @@ class DashboardService:
         tariffs: dict = {row.id: (row.tariff_info or {}) for row in tariff_result.all()}
 
         # Schritt 3: Emissionsfaktoren je Energietyp laden (neuester Jahreswert)
-        factors_result = await self.db.execute(
-            select(EmissionFactor.energy_type, func.max(EmissionFactor.co2_g_per_kwh).label("co2_factor"))
+        latest_year_sub = (
+            select(
+                EmissionFactor.energy_type,
+                func.max(EmissionFactor.year * 100 + func.coalesce(EmissionFactor.month, 0)).label("max_period"),
+            )
             .group_by(EmissionFactor.energy_type)
+            .subquery()
+        )
+        factors_result = await self.db.execute(
+            select(EmissionFactor.energy_type, EmissionFactor.co2_g_per_kwh.label("co2_factor"))
+            .join(
+                latest_year_sub,
+                (EmissionFactor.energy_type == latest_year_sub.c.energy_type)
+                & ((EmissionFactor.year * 100 + func.coalesce(EmissionFactor.month, 0)) == latest_year_sub.c.max_period),
+            )
         )
         factors: dict[str, Decimal] = {
             row.energy_type: Decimal(str(row.co2_factor))

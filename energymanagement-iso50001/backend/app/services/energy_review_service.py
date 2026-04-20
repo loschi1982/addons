@@ -6,7 +6,7 @@ Verwaltung relevanter Variablen (ISO 50001 Kap. 6.3–6.5).
 """
 
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import structlog
@@ -56,7 +56,7 @@ class EnergyReviewService:
         result = await self.db.execute(query)
         items = result.scalars().all()
 
-        return {"items": items, "total": total, "page": page, "page_size": page_size}
+        return {"items": items, "total": total, "page": page, "page_size": page_size, "total_pages": max(1, (total + page_size - 1) // page_size)}
 
     async def get_variable(self, variable_id: uuid.UUID) -> RelevantVariable:
         """Einzelne Variable laden."""
@@ -206,7 +206,7 @@ class EnergyReviewService:
         result = await self.db.execute(query)
         items = result.scalars().all()
 
-        return {"items": items, "total": total, "page": page, "page_size": page_size}
+        return {"items": items, "total": total, "page": page, "page_size": page_size, "total_pages": max(1, (total + page_size - 1) // page_size)}
 
     async def get_seu(self, seu_id: uuid.UUID) -> SignificantEnergyUse:
         """Einzelnen SEU laden."""
@@ -321,9 +321,15 @@ class EnergyReviewService:
         return suggestions
 
     async def recalculate_shares(self) -> int:
-        """Verbrauchsanteile aller aktiven SEUs neu berechnen."""
+        """Verbrauchsanteile aller aktiven SEUs neu berechnen (letzte 12 Monate)."""
+        # Zeitfenster: letzte 12 Monate (ISO 50001 Bewertungszeitraum)
+        twelve_months_ago = datetime.combine(
+            date.today() - timedelta(days=365), datetime.min.time(), tzinfo=timezone.utc
+        )
+
         total_q = select(func.sum(MeterReading.consumption)).where(
-            MeterReading.consumption.isnot(None)
+            MeterReading.consumption.isnot(None),
+            MeterReading.timestamp >= twelve_months_ago,
         )
         total = (await self.db.execute(total_q)).scalar() or Decimal("0")
         if total <= 0:
@@ -341,7 +347,7 @@ class EnergyReviewService:
             if not seu.consumer_id:
                 continue
 
-            # Verbrauch des Consumers über zugeordnete Zähler
+            # Verbrauch des Consumers über zugeordnete Zähler (letzte 12 Monate)
             consumption_q = (
                 select(func.sum(MeterReading.consumption))
                 .join(
@@ -351,6 +357,7 @@ class EnergyReviewService:
                 .where(
                     meter_consumer.c.consumer_id == seu.consumer_id,
                     MeterReading.consumption.isnot(None),
+                    MeterReading.timestamp >= twelve_months_ago,
                 )
             )
             consumption = (await self.db.execute(consumption_q)).scalar() or Decimal("0")
@@ -382,7 +389,7 @@ class EnergyReviewService:
         result = await self.db.execute(query)
         items = result.scalars().all()
 
-        return {"items": items, "total": total, "page": page, "page_size": page_size}
+        return {"items": items, "total": total, "page": page, "page_size": page_size, "total_pages": max(1, (total + page_size - 1) // page_size)}
 
     async def get_enpi(self, enpi_id: uuid.UUID) -> EnergyPerformanceIndicator:
         """Einzelnen EnPI laden."""
