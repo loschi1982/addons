@@ -109,6 +109,14 @@
     {"module": "system", "action": "view", "category": "System"},
     {"module": "system", "action": "update", "category": "System"},
     {"module": "settings", "action": "view", "category": "Einstellungen"},
-    {"module": "settings", "action": "update", "category": "Einstellungen"}
+    {"module": "settings", "action": "update", "category": "Einstellungen"},
+    {"module": "settings", "action": "write", "category": "Einstellungen"},
+    {"module": "audit", "action": "view", "category": "Audit-Log"},
+    {"module": "economics", "action": "view", "category": "Wirtschaftlichkeit"},
+    {"module": "economics", "action": "write", "category": "Wirtschaftlichkeit"},
+    {"module": "allocations", "action": "view", "category": "Zuordnungen"},
+    {"module": "allocations", "action": "create", "category": "Zuordnungen"},
+    {"module": "allocations", "action": "update", "category": "Zuordnungen"},
+    {"module": "allocations", "action": "delete", "category": "Zuordnungen"}
   ]
 }

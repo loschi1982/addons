@@ -95,9 +95,34 @@ async def load_roles_permissions():
         existing_roles = (await session.execute(select(Role))).scalars().all()
         existing_role_names = {r.name for r in existing_roles}
 
+        # Bestehende RolePermissions laden für Duplikatprüfung
+        existing_rp = (await session.execute(select(RolePermission))).scalars().all()
+        existing_rp_keys = {(rp.role_id, rp.permission_id) for rp in existing_rp}
+        role_map = {r.name: r for r in existing_roles}
+
         new_role_count = 0
         for role_data in data.get("roles", []):
             if role_data["name"] in existing_role_names:
+                # Bestehende Rolle: fehlende Berechtigungen nachträglich zuordnen
+                role = role_map[role_data["name"]]
+                role_perms = role_data.get("permissions", [])
+                target_perm_ids = set()
+                for perm_key in role_perms:
+                    if perm_key == "*":
+                        target_perm_ids = {p.id for p in perm_map.values()}
+                        break
+                    elif perm_key.endswith(".*"):
+                        module = perm_key[:-2]
+                        for key, p in perm_map.items():
+                            if key.startswith(f"{module}."):
+                                target_perm_ids.add(p.id)
+                    elif perm_key in perm_map:
+                        target_perm_ids.add(perm_map[perm_key].id)
+
+                for pid in target_perm_ids:
+                    if (role.id, pid) not in existing_rp_keys:
+                        session.add(RolePermission(role_id=role.id, permission_id=pid))
+                        existing_rp_keys.add((role.id, pid))
                 continue
 
             role = Role(

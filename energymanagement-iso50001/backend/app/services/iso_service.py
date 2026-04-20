@@ -224,6 +224,73 @@ class ISOService:
         await self.db.refresh(obj)
         return obj
 
+    async def recalculate_objective_progress(self) -> dict:
+        """
+        Automatische Fortschrittsberechnung für alle aktiven Ziele
+        mit zugeordneten Zählern. Berechnet current_value aus
+        Readings für das laufende Jahr vs. baseline_period.
+        """
+        from app.models.reading import MeterReading
+
+        result = await self.db.execute(
+            select(EnergyObjective).where(
+                EnergyObjective.status.in_(["planned", "in_progress", "overdue"]),
+                EnergyObjective.related_meter_ids.isnot(None),
+            )
+        )
+        objectives = list(result.scalars().all())
+        updated = 0
+
+        today = date.today()
+        year_start = date(today.year, 1, 1)
+
+        for obj in objectives:
+            meter_ids = obj.related_meter_ids or []
+            if not meter_ids:
+                continue
+
+            try:
+                meter_uuids = [uuid.UUID(m) for m in meter_ids]
+            except (ValueError, TypeError):
+                continue
+
+            # Aktueller Verbrauch im laufenden Jahr
+            consumption_q = select(func.sum(MeterReading.consumption)).where(
+                MeterReading.meter_id.in_(meter_uuids),
+                MeterReading.timestamp >= year_start,
+                MeterReading.timestamp < today,
+                MeterReading.consumption.isnot(None),
+            )
+            current = (await self.db.execute(consumption_q)).scalar()
+            if current is None:
+                continue
+
+            from decimal import Decimal
+            obj.current_value = round(Decimal(str(current)), 4)
+
+            # Fortschritt berechnen
+            if obj.baseline_value and obj.target_value:
+                diff_target = float(obj.target_value) - float(obj.baseline_value)
+                if diff_target != 0:
+                    diff_actual = float(obj.current_value) - float(obj.baseline_value)
+                    obj.progress_percent = round(
+                        min(max((diff_actual / diff_target) * 100, 0), 100), 1
+                    )
+
+            # Status aktualisieren
+            if obj.progress_percent and float(obj.progress_percent) >= 100:
+                obj.status = "completed"
+            elif obj.target_date < today and obj.status != "completed":
+                obj.status = "overdue"
+            elif obj.status == "planned" and obj.current_value:
+                obj.status = "in_progress"
+
+            updated += 1
+
+        await self.db.commit()
+        logger.info("objectives_recalculated", updated=updated, total=len(objectives))
+        return {"updated": updated, "total": len(objectives)}
+
     # --- Aktionspläne ---
 
     async def list_action_plans(self, objective_id: uuid.UUID) -> list[ActionPlan]:
