@@ -181,6 +181,224 @@ function AlertBanner({ alerts }: { alerts: Alert[] }) {
   );
 }
 
+/* ── Jahresvergleich-Mini-Chart ── */
+
+interface YearComparisonPoint {
+  label: string;
+  vorjahr: number;
+  aktuell: number;
+}
+
+function YearComparisonCard() {
+  const [data, setData] = useState<YearComparisonPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const thisYear = new Date().getFullYear();
+    apiClient.get('/api/v1/analytics/comparison', {
+      params: {
+        period1_start: `${thisYear - 1}-01-01`,
+        period1_end: `${thisYear - 1}-12-31`,
+        period2_start: `${thisYear}-01-01`,
+        period2_end: `${thisYear}-12-31`,
+        granularity: 'monthly',
+        energy_type: 'electricity',
+      },
+    }).then((res) => {
+      const months = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+      const p1 = (res.data.period1 as Record<string, unknown>)?.data as Record<string, { period: string; value: number }[]> | undefined;
+      const p2 = (res.data.period2 as Record<string, unknown>)?.data as Record<string, { period: string; value: number }[]> | undefined;
+      if (p1 && p2) {
+        const agg1 = new Array(12).fill(0);
+        const agg2 = new Array(12).fill(0);
+        for (const series of Object.values(p1)) {
+          series.forEach((pt, i) => { if (i < 12) agg1[i] += pt.value || 0; });
+        }
+        for (const series of Object.values(p2)) {
+          series.forEach((pt, i) => { if (i < 12) agg2[i] += pt.value || 0; });
+        }
+        setData(months.map((m, i) => ({ label: m, vorjahr: agg1[i], aktuell: agg2[i] })));
+      }
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const thisYear = new Date().getFullYear();
+
+  return (
+    <div className="card">
+      <h2 className="mb-4 text-lg font-semibold text-gray-900">
+        Jahresvergleich Strom
+        <span className="ml-2 text-sm font-normal text-gray-400">{thisYear - 1} vs. {thisYear}</span>
+      </h2>
+      {loading ? (
+        <div className="flex h-48 items-center justify-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
+        </div>
+      ) : data.length > 0 && data.some((d) => d.vorjahr > 0 || d.aktuell > 0) ? (
+        <ResponsiveContainer width="100%" height={200}>
+          <BarChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+            <YAxis tick={{ fontSize: 10 }} />
+            <Tooltip formatter={(value: number) => [`${formatNumber(value)} kWh`, '']} />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Bar dataKey="vorjahr" name={`${thisYear - 1}`} fill="#94a3b8" radius={[3, 3, 0, 0]} />
+            <Bar dataKey="aktuell" name={`${thisYear}`} fill="#1B5E7B" radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      ) : (
+        <div className="flex h-48 items-center justify-center text-sm text-gray-400">
+          Nicht genug Daten für Jahresvergleich
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Automatische Zusammenfassung ── */
+
+function InsightsSummary({ data }: { data: DashboardData }) {
+  const insights: { text: string; type: 'positive' | 'negative' | 'neutral' }[] = [];
+
+  // Verbrauchstrend analysieren
+  const consumption = data.kpi_cards.find((c) => c.label === 'Gesamtverbrauch');
+  if (consumption?.trend_percent != null) {
+    const pct = Math.abs(Number(consumption.trend_percent)).toFixed(1);
+    if (Number(consumption.trend_percent) < -3) {
+      insights.push({ text: `Ihr Energieverbrauch ist ${pct}% niedriger als im Vorjahr – gute Entwicklung.`, type: 'positive' });
+    } else if (Number(consumption.trend_percent) > 3) {
+      insights.push({ text: `Ihr Energieverbrauch ist ${pct}% höher als im Vorjahr – prüfen Sie die Ursachen.`, type: 'negative' });
+    } else {
+      insights.push({ text: `Ihr Energieverbrauch ist stabil (${pct}% Abweichung zum Vorjahr).`, type: 'neutral' });
+    }
+  }
+
+  // CO₂-Trend
+  const co2 = data.kpi_cards.find((c) => c.label === 'CO₂-Emissionen');
+  if (co2?.trend_percent != null && Number(co2.trend_percent) < -5) {
+    insights.push({ text: `CO₂-Emissionen um ${Math.abs(Number(co2.trend_percent)).toFixed(1)}% reduziert.`, type: 'positive' });
+  } else if (co2?.trend_percent != null && Number(co2.trend_percent) > 5) {
+    insights.push({ text: `CO₂-Emissionen um ${Math.abs(Number(co2.trend_percent)).toFixed(1)}% gestiegen.`, type: 'negative' });
+  }
+
+  // Kosten-Trend
+  const cost = data.kpi_cards.find((c) => c.label === 'Energiekosten');
+  if (cost?.trend_percent != null && Number(cost.trend_percent) > 5) {
+    insights.push({ text: `Energiekosten sind ${Math.abs(Number(cost.trend_percent)).toFixed(1)}% höher als im Vorjahr.`, type: 'negative' });
+  }
+
+  // Top-Verbraucher Hinweis
+  if (data.top_consumers.length >= 2) {
+    const top = data.top_consumers[0];
+    const totalTop = data.top_consumers.reduce((s, c) => s + c.consumption_kwh, 0);
+    const topShare = totalTop > 0 ? ((top.consumption_kwh / totalTop) * 100).toFixed(0) : 0;
+    if (Number(topShare) > 40) {
+      insights.push({ text: `"${top.name}" macht ${topShare}% der Top-5 Verbraucher aus – Optimierungspotenzial prüfen.`, type: 'neutral' });
+    }
+  }
+
+  // Warnungen
+  if (data.alerts.length > 0) {
+    insights.push({ text: `${data.alerts.length} Zähler haben seit über 7 Tagen keine Daten geliefert.`, type: 'negative' });
+  }
+
+  if (insights.length === 0) return null;
+
+  return (
+    <div className="mt-6 rounded-lg border border-primary-100 bg-primary-50/50 p-4">
+      <h2 className="text-sm font-semibold text-primary-800 mb-2">Zusammenfassung</h2>
+      <ul className="space-y-1">
+        {insights.map((ins, i) => (
+          <li key={i} className="flex items-start gap-2 text-sm">
+            <span className={`mt-0.5 h-2 w-2 flex-shrink-0 rounded-full ${
+              ins.type === 'positive' ? 'bg-green-500' : ins.type === 'negative' ? 'bg-red-400' : 'bg-gray-400'
+            }`} />
+            <span className="text-gray-700">{ins.text}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/* ── EnPI-Karte mit echten Kennzahlen ── */
+
+interface RealEnPI {
+  id: string;
+  name: string;
+  formula_type: string;
+  unit: string;
+  latest_value: number | null;
+  target_value: number | null;
+  target_direction: string;
+}
+
+function EnPIOverviewCard() {
+  const [enpis, setEnpis] = useState<RealEnPI[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiClient.get('/api/v1/energy-review/enpi')
+      .then((res) => setEnpis((res.data.items || []).filter((e: RealEnPI) => e.latest_value != null)))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const getStatus = (enpi: RealEnPI): { label: string; color: string } => {
+    if (enpi.target_value == null || enpi.latest_value == null) return { label: 'Kein Ziel', color: 'bg-gray-100 text-gray-500' };
+    const better = enpi.target_direction === 'lower'
+      ? enpi.latest_value <= enpi.target_value
+      : enpi.latest_value >= enpi.target_value;
+    return better
+      ? { label: 'Ziel erreicht', color: 'bg-green-100 text-green-700' }
+      : { label: 'Ziel verfehlt', color: 'bg-red-100 text-red-700' };
+  };
+
+  return (
+    <div className="card">
+      <h2 className="mb-4 text-lg font-semibold text-gray-900">
+        Energiekennzahlen (EnPI)
+        <InfoTip title="EnPI" formula="Verbrauch_kWh ÷ Bezugsgröße">
+          Echte Energieleistungskennzahlen, z.B. kWh/m² oder kWh/Stück. Misst die Effizienz bezogen auf eine relevante Variable.
+        </InfoTip>
+      </h2>
+      {loading ? (
+        <div className="flex h-40 items-center justify-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
+        </div>
+      ) : enpis.length > 0 ? (
+        <div className="space-y-3">
+          {enpis.slice(0, 6).map((enpi) => {
+            const status = getStatus(enpi);
+            return (
+              <div key={enpi.id} className="flex items-center justify-between">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-gray-700 truncate">{enpi.name}</p>
+                  <p className="text-xs text-gray-400">
+                    {enpi.target_value != null ? `Ziel: ${Number(enpi.target_value).toFixed(2)} ${enpi.unit}` : enpi.unit}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 ml-3">
+                  <span className="text-lg font-bold text-gray-900">
+                    {Number(enpi.latest_value).toFixed(2)}
+                  </span>
+                  <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${status.color}`}>
+                    {status.label}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="text-center text-sm text-gray-400 py-4">
+          Noch keine EnPIs definiert. Erstellen Sie Kennzahlen unter Energiebewertung → EnPI.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /* ── Hauptseite ── */
 
 export default function DashboardPage() {
@@ -283,6 +501,9 @@ export default function DashboardPage() {
           <KPICardComponent key={card.label} card={card} />
         ))}
       </div>
+
+      {/* Automatische Zusammenfassung */}
+      <InsightsSummary data={data} />
 
       {/* Charts-Bereich */}
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -391,6 +612,11 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Jahresvergleich */}
+      <div className="mt-6">
+        <YearComparisonCard />
+      </div>
+
       {/* Untere Reihe: Top-Verbraucher + EnPI */}
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Top-5 Verbraucher */}
@@ -422,54 +648,8 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* EnPI-Übersicht */}
-        <div className="card">
-          <h2 className="mb-4 text-lg font-semibold text-gray-900">Energiekennzahlen (EnPI)</h2>
-          {data.enpi_overview.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-gray-500">
-                    <th className="pb-2 font-medium">Zähler</th>
-                    <th className="pb-2 font-medium">Typ</th>
-                    <th className="pb-2 font-medium text-right">Verbrauch</th>
-                    <th className="pb-2 font-medium text-center">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.enpi_overview.map((enpi: Record<string, unknown>, idx: number) => (
-                    <tr key={idx} className="border-b last:border-0">
-                      <td className="py-2 font-medium text-gray-700">
-                        {enpi.meter_name as string}
-                      </td>
-                      <td className="py-2 text-gray-500">
-                        {ENERGY_TYPE_LABELS[(enpi.energy_type as string) as keyof typeof ENERGY_TYPE_LABELS] || (enpi.energy_type as string)}
-                      </td>
-                      <td className="py-2 text-right text-gray-700">
-                        {formatNumber(enpi.enpi_value as number)} {enpi.enpi_unit as string}
-                      </td>
-                      <td className="py-2 text-center">
-                        <span
-                          className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-                            enpi.status === 'on_track'
-                              ? 'bg-green-100 text-green-700'
-                              : enpi.status === 'at_risk'
-                              ? 'bg-amber-100 text-amber-700'
-                              : 'bg-red-100 text-red-700'
-                          }`}
-                        >
-                          {enpi.status === 'on_track' ? 'Auf Kurs' : enpi.status === 'at_risk' ? 'Gefährdet' : 'Abweichung'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="text-center text-gray-400">Keine EnPI-Daten vorhanden</p>
-          )}
-        </div>
+        {/* Echte EnPI-Übersicht */}
+        <EnPIOverviewCard />
       </div>
     </div>
   );
