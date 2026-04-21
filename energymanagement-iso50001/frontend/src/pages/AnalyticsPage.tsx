@@ -99,23 +99,53 @@ const CHART_COLORS = [
   '#8B5CF6', '#F97316', '#EC4899', '#84CC16',
 ];
 
-const TABS = [
-  { key: 'timeseries', label: 'Zeitreihen' },
-  { key: 'comparison', label: 'Vergleich' },
-  { key: 'monthly_comparison', label: 'Jahresvergleich' },
-  { key: 'energy_balance', label: 'Energiebilanz' },
-  { key: 'distribution', label: 'Verteilung' },
-  { key: 'self_consumption', label: 'Eigenverbrauch' },
-  { key: 'heatmap', label: 'Heatmap' },
-  { key: 'sankey', label: 'Energiefluss' },
-  { key: 'duration_curve', label: 'Dauerlinie' },
-  { key: 'cumulative', label: 'Summenlinie' },
-  { key: 'weather', label: 'Witterungskorrektur' },
-  { key: 'co2path', label: 'CO₂-Pfad' },
-  { key: 'anomalies', label: 'Anomalien' },
-] as const;
+interface TabDef {
+  key: string;
+  label: string;
+}
 
-type TabKey = (typeof TABS)[number]['key'];
+interface TabGroup {
+  label: string;
+  description: string;
+  tabs: TabDef[];
+}
+
+const TAB_GROUPS: TabGroup[] = [
+  {
+    label: 'Verbrauch',
+    description: 'Verbrauchsdaten auswerten und vergleichen',
+    tabs: [
+      { key: 'timeseries', label: 'Zeitreihen' },
+      { key: 'comparison', label: 'Periodenvergleich' },
+      { key: 'monthly_comparison', label: 'Jahresvergleich' },
+      { key: 'distribution', label: 'Verteilung' },
+      { key: 'cumulative', label: 'Summenlinie' },
+    ],
+  },
+  {
+    label: 'Effizienz',
+    description: 'Lastprofile, Muster und Optimierungspotenziale',
+    tabs: [
+      { key: 'heatmap', label: 'Lastprofil' },
+      { key: 'duration_curve', label: 'Dauerlinie' },
+      { key: 'sankey', label: 'Energiefluss' },
+      { key: 'self_consumption', label: 'Eigenverbrauch' },
+      { key: 'weather', label: 'Witterungskorrektur' },
+    ],
+  },
+  {
+    label: 'Klima & Ziele',
+    description: 'CO₂-Reduktion, Energiebilanz und Auffälligkeiten',
+    tabs: [
+      { key: 'energy_balance', label: 'Energiebilanz' },
+      { key: 'co2path', label: 'CO₂-Pfad' },
+      { key: 'anomalies', label: 'Auffälligkeiten' },
+    ],
+  },
+];
+
+const ALL_TABS = TAB_GROUPS.flatMap((g) => g.tabs);
+type TabKey = string;
 
 /* ── Hilfsfunktionen ── */
 
@@ -148,7 +178,7 @@ export default function AnalyticsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = (searchParams.get('tab') as TabKey) || 'timeseries';
   const [tab, setTab] = useState<TabKey>(
-    TABS.some(t => t.key === initialTab) ? initialTab : 'timeseries'
+    ALL_TABS.some(t => t.key === initialTab) ? initialTab : 'timeseries'
   );
   const [meters, setMeters] = useState<Meter[]>([]);
 
@@ -156,6 +186,9 @@ export default function AnalyticsPage() {
     setTab(key);
     setSearchParams(key === 'timeseries' ? {} : { tab: key }, { replace: true });
   };
+
+  // Aktive Gruppe ermitteln
+  const activeGroup = TAB_GROUPS.find((g) => g.tabs.some((t) => t.key === tab)) || TAB_GROUPS[0];
 
   useEffect(() => {
     apiClient.get('/api/v1/meters').then((res) => {
@@ -171,9 +204,26 @@ export default function AnalyticsPage() {
         Erweiterte Auswertungen und Visualisierungen der Energiedaten.
       </p>
 
-      {/* Tabs */}
-      <div className="mt-4 flex flex-wrap gap-1 border-b">
-        {TABS.map((t) => (
+      {/* Kategorien */}
+      <div className="mt-4 flex gap-2">
+        {TAB_GROUPS.map((group) => (
+          <button
+            key={group.label}
+            onClick={() => handleTabChange(group.tabs[0].key)}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              activeGroup.label === group.label
+                ? 'bg-primary-600 text-white shadow-sm'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            {group.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Untertabs der aktiven Kategorie */}
+      <div className="mt-3 flex flex-wrap gap-1 border-b">
+        {activeGroup.tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => handleTabChange(t.key)}
@@ -188,7 +238,10 @@ export default function AnalyticsPage() {
         ))}
       </div>
 
-      <div className="mt-6">
+      {/* Kategorie-Beschreibung */}
+      <p className="mt-2 text-xs text-gray-400">{activeGroup.description}</p>
+
+      <div className="mt-4">
         {tab === 'timeseries' && <TimeSeriesTab meters={meters} />}
         {tab === 'comparison' && <ComparisonTab meters={meters} />}
         {tab === 'monthly_comparison' && (

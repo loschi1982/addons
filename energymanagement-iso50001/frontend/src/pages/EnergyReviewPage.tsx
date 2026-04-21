@@ -123,6 +123,29 @@ interface Meter {
 
 type Tab = 'seu' | 'enpi' | 'baseline' | 'variables';
 
+const TAB_EXPLANATIONS: Record<Tab, { what: string; why: string; todo: string }> = {
+  seu: {
+    what: 'Wesentliche Energieeinsätze (SEU) sind die Bereiche mit dem größten Energieverbrauch oder dem größten Einsparpotenzial.',
+    why: 'ISO 50001 verlangt, dass Sie die größten Energieverbraucher identifizieren, um gezielt Maßnahmen einzuleiten.',
+    todo: 'Lassen Sie Vorschläge generieren oder legen Sie manuell SEUs an. Das System berechnet die Verbrauchsanteile automatisch.',
+  },
+  enpi: {
+    what: 'Energieleistungskennzahlen (EnPI) messen die Energieeffizienz, z.B. kWh pro m² Fläche oder kWh pro produzierter Einheit.',
+    why: 'Nur mit einer Bezugsgröße können Sie erkennen, ob eine Verbrauchsänderung durch Effizienz oder durch geänderte Nutzung entstand.',
+    todo: 'Erstellen Sie eine Kennzahl, wählen Sie Zähler und Bezugsgröße, dann klicken Sie „Berechnen".',
+  },
+  baseline: {
+    what: 'Die energetische Ausgangsbasis (EnB) ist der Referenzwert, gegen den Sie Verbesserungen messen.',
+    why: 'Ohne Baseline können Sie nicht nachweisen, dass sich Ihre Energieleistung tatsächlich verbessert hat.',
+    todo: 'Wählen Sie einen EnPI und einen Referenzzeitraum (z.B. Vorjahr). Der Baseline-Wert wird automatisch berechnet.',
+  },
+  variables: {
+    what: 'Relevante Variablen beeinflussen Ihren Energieverbrauch, z.B. Heizgradtage, Produktionsmengen oder Gebäudefläche.',
+    why: 'Variablen als Bezugsgröße in EnPIs sorgen dafür, dass Verbrauchsänderungen fair bewertet werden.',
+    todo: 'Legen Sie Variablen an und pflegen Sie monatliche Werte ein. Bei Heizgradtagen kann der automatische Import genutzt werden.',
+  },
+};
+
 const VARIABLE_TYPES: Record<string, string> = {
   weather_hdd: 'Heizgradtage',
   production: 'Produktionsmenge',
@@ -179,6 +202,24 @@ export default function EnergyReviewPage() {
             </button>
           ))}
         </nav>
+      </div>
+
+      {/* Erklärungsbox */}
+      <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50/50 p-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div>
+            <p className="text-xs font-semibold text-blue-800 uppercase mb-1">Was ist das?</p>
+            <p className="text-xs text-blue-700">{TAB_EXPLANATIONS[activeTab].what}</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-blue-800 uppercase mb-1">Wozu brauche ich das?</p>
+            <p className="text-xs text-blue-700">{TAB_EXPLANATIONS[activeTab].why}</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-blue-800 uppercase mb-1">Was muss ich tun?</p>
+            <p className="text-xs text-blue-700">{TAB_EXPLANATIONS[activeTab].todo}</p>
+          </div>
+        </div>
       </div>
 
       <div className="mt-4">
