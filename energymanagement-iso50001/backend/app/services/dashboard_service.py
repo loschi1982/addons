@@ -424,59 +424,56 @@ class DashboardService:
     async def _get_consumption_chart(
         self, start: date, end: date, granularity: str
     ) -> list[dict]:
-        """Verbrauchszeitreihe für die Hauptzähler."""
+        """Verbrauchszeitreihe für die Hauptzähler – eine aggregierte Abfrage."""
         trunc_map = {"daily": "day", "weekly": "week", "monthly": "month", "yearly": "year"}
         trunc = trunc_map.get(granularity, "month")
 
-        meters_result = await self.db.execute(
-            select(Meter).where(
+        ts_start = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
+        ts_end = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+
+        # Alle Zähler in einer Abfrage
+        query = (
+            select(
+                Meter.id,
+                Meter.name,
+                Meter.energy_type,
+                Meter.unit,
+                func.date_trunc(trunc, MeterReading.timestamp).label("period"),
+                func.sum(MeterReading.consumption).label("consumption"),
+            )
+            .join(MeterReading, MeterReading.meter_id == Meter.id)
+            .where(
                 Meter.is_active == True,  # noqa: E712
-                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
+                Meter.is_feed_in != True,
                 Meter.parent_meter_id.is_(None),
+                MeterReading.timestamp >= ts_start,
+                MeterReading.timestamp < ts_end,
             )
+            .group_by(Meter.id, Meter.name, Meter.energy_type, Meter.unit, text("period"))
+            .order_by(Meter.id, text("period"))
         )
-        meters = list(meters_result.scalars().all())
+        result = await self.db.execute(query)
+        rows = result.all()
 
-        charts = []
-        for meter in meters:
-            query = (
-                select(
-                    func.date_trunc(trunc, MeterReading.timestamp).label("period"),
-                    func.sum(MeterReading.consumption).label("consumption"),
-                )
-                .where(
-                    MeterReading.meter_id == meter.id,
-                    MeterReading.timestamp >= datetime.combine(
-                        start, datetime.min.time(), tzinfo=timezone.utc
-                    ),
-                    MeterReading.timestamp < datetime.combine(
-                        end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
-                    ),
-                )
-                .group_by(text("period"))
-                .order_by(text("period"))
-            )
-            result = await self.db.execute(query)
-            rows = result.all()
-
-            conv = CONVERSION_FACTORS.get(meter.unit, Decimal("1"))
-            data = [
-                {
-                    "label": row.period.strftime("%b %Y") if row.period else "",
-                    "value": (row.consumption or Decimal("0")) * conv,
+        # Ergebnisse nach Zähler gruppieren
+        charts: dict = {}
+        for row in rows:
+            mid = row.id
+            if mid not in charts:
+                charts[mid] = {
+                    "meter_id": mid,
+                    "meter_name": row.name,
+                    "energy_type": row.energy_type,
+                    "unit": "kWh",
+                    "data": [],
                 }
-                for row in rows
-            ]
-
-            charts.append({
-                "meter_id": meter.id,
-                "meter_name": meter.name,
-                "energy_type": meter.energy_type,
-                "unit": "kWh",
-                "data": data,
+            conv = CONVERSION_FACTORS.get(row.unit, Decimal("1"))
+            charts[mid]["data"].append({
+                "label": row.period.strftime("%b %Y") if row.period else "",
+                "value": (row.consumption or Decimal("0")) * conv,
             })
 
-        return charts
+        return list(charts.values())
 
     async def _get_top_consumers(self, start: date, end: date) -> list[dict]:
         """Top-5 Verbraucher nach Verbrauch."""
@@ -518,28 +515,35 @@ class DashboardService:
         ]
 
     async def _get_alerts(self) -> list[dict]:
-        """Aktive Warnungen (Zähler ohne aktuelle Daten)."""
-        alerts = []
+        """Aktive Warnungen (Zähler ohne aktuelle Daten) – eine aggregierte Abfrage."""
         cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
-        meters_result = await self.db.execute(
-            select(Meter).where(Meter.is_active == True)  # noqa: E712
-        )
-        for meter in meters_result.scalars().all():
-            last_reading = await self.db.execute(
-                select(func.max(MeterReading.timestamp)).where(
-                    MeterReading.meter_id == meter.id
-                )
+        # Eine einzige Abfrage: letzter Messwert je Zähler
+        subq = (
+            select(
+                MeterReading.meter_id,
+                func.max(MeterReading.timestamp).label("last_ts"),
             )
-            last_ts = last_reading.scalar()
+            .where(MeterReading.timestamp >= datetime.now(timezone.utc) - timedelta(days=30))
+            .group_by(MeterReading.meter_id)
+            .subquery()
+        )
+        result = await self.db.execute(
+            select(Meter.id, Meter.name, subq.c.last_ts)
+            .outerjoin(subq, Meter.id == subq.c.meter_id)
+            .where(Meter.is_active == True)  # noqa: E712
+        )
+        alerts = []
+        for row in result.all():
+            last_ts = row.last_ts
             if last_ts and last_ts.tzinfo is None:
                 last_ts = last_ts.replace(tzinfo=timezone.utc)
             if not last_ts or last_ts < cutoff:
                 alerts.append({
                     "type": "no_data",
                     "severity": "warnung",
-                    "message": f"Zähler '{meter.name}' hat seit >7 Tagen keine Daten",
-                    "meter_id": str(meter.id),
+                    "message": f"Zähler '{row.name}' hat seit >7 Tagen keine Daten",
+                    "meter_id": str(row.id),
                 })
 
         return alerts[:10]
