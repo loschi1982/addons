@@ -7,27 +7,33 @@ unter ihrem jeweiligen Elternobjekt erreichbar.
 """
 
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_permission
+from app.models.site import Site
 from app.models.user import User
 from app.schemas.common import DeleteResponse, PaginatedResponse
 from app.schemas.site import (
+    AnnotatedMeterTreeNode,
     BuildingCreate,
     BuildingDetailResponse,
     BuildingResponse,
     BuildingUpdate,
+    SiteConsumptionResponse,
     SiteCreate,
     SiteDetailResponse,
+    SiteExitPointDetail,
     SiteResponse,
     SiteUpdate,
     UsageUnitCreate,
     UsageUnitResponse,
     UsageUnitUpdate,
 )
+from app.services.site_consumption_service import SiteConsumptionService
 from app.services.site_service import SiteService
 
 router = APIRouter()
@@ -202,6 +208,70 @@ async def delete_site(
     service = SiteService(db)
     await service.delete_site(site_id)
     return DeleteResponse(id=site_id)
+
+
+# ---------------------------------------------------------------------------
+# Standort-Nettoverbrauch (cross-site Zählerbäume)
+# ---------------------------------------------------------------------------
+
+@router.get("/{site_id}/consumption", response_model=SiteConsumptionResponse)
+async def get_site_consumption(
+    site_id: uuid.UUID,
+    period_start: date = Query(...),
+    period_end: date = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Nettoverbrauch eines Standorts berechnen.
+
+    Subtrahiert den Verbrauch von Fremdzählern, die physisch im Strang des
+    Standorts hängen (ExitSet), vom Bruttoverbrauch der PhysicalRoots.
+    """
+    # Site-Name laden
+    site = await db.get(Site, site_id)
+    site_name = site.name if site else str(site_id)
+
+    service = SiteConsumptionService(db)
+    result = await service.get_site_net_consumption(site_id, period_start, period_end)
+
+    return SiteConsumptionResponse(
+        site_id=site_id,
+        site_name=site_name,
+        period_start=period_start,
+        period_end=period_end,
+        gross_consumption_kwh=result["gross_consumption_kwh"],
+        cross_site_exit_kwh=result["cross_site_exit_kwh"],
+        net_consumption_kwh=result["net_consumption_kwh"],
+        exit_points=[
+            SiteExitPointDetail(
+                meter_id=ep["meter_id"],
+                meter_name=ep["meter_name"],
+                owner_site_id=ep["owner_site_id"],
+                owner_site_name=ep["owner_site_name"],
+                consumption_kwh=ep["consumption_kwh"],
+            )
+            for ep in result["exit_points"]
+        ],
+    )
+
+
+@router.get("/{site_id}/meter-tree", response_model=list[AnnotatedMeterTreeNode])
+async def get_site_meter_tree(
+    site_id: uuid.UUID,
+    energy_type: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Zählerbaum eines Standorts als verschachtelte Struktur.
+
+    Enthält alle eigenen Zähler plus direkt angehängte Fremdzähler (ExitSet).
+    Fremdzähler sind mit cross_site_boundary=True markiert.
+    """
+    service = SiteConsumptionService(db)
+    tree = await service.get_site_meter_tree_annotated(site_id, energy_type)
+    return tree
 
 
 # ---------------------------------------------------------------------------
