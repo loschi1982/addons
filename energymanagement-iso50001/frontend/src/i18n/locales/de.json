@@ -35,6 +35,7 @@
     "sites": "Standorte",
     "meters": "Zähler",
     "readings": "Zählerstände",
+    "outliers": "Ausreißer-Erkennung",
     "consumers": "Verbraucher",
     "schema": "Energieschema",
     "analytics": "Analysen",
