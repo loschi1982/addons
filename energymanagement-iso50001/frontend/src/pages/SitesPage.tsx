@@ -69,6 +69,11 @@ interface AnnotatedMeterNode {
   virtual_config: Record<string, unknown> | null;
   schema_label: string | null;
   notes: string | null;
+  display_name?: string | null;
+  serial_number?: string | null;
+  installation_date?: string | null;
+  removal_date?: string | null;
+  calibration_date?: string | null;
   cross_site_boundary: boolean;
   owner_site_name: string | null;
   children: AnnotatedMeterNode[];
@@ -114,6 +119,8 @@ interface MeterForm {
   schema_label: string; notes: string;
   source_host: string; source_channel: string; source_entity_id: string;
   source_register: string; source_topic: string; source_broker: string;
+  display_name: string; serial_number: string;
+  installation_date: string; removal_date: string; calibration_date: string;
 }
 
 const emptySiteForm: SiteForm = { name: '', street: '', zip_code: '', city: '', country: 'DE', latitude: '', longitude: '' };
@@ -126,6 +133,7 @@ const emptyMeterForm: MeterForm = {
   is_virtual: false, is_feed_in: false, is_delivery_based: false, is_weather_corrected: false,
   schema_label: '', notes: '',
   source_host: '', source_channel: '0', source_entity_id: '', source_register: '', source_topic: '', source_broker: '',
+  display_name: '', serial_number: '', installation_date: '', removal_date: '', calibration_date: '',
 };
 
 // ── Konstanten ──
@@ -224,6 +232,11 @@ function buildMeterPayload(form: MeterForm): Record<string, unknown> {
   if (form.parent_meter_id) payload.parent_meter_id = form.parent_meter_id;
   if (form.schema_label) payload.schema_label = form.schema_label;
   if (form.notes) payload.notes = form.notes;
+  if (form.display_name) payload.display_name = form.display_name;
+  if (form.serial_number) payload.serial_number = form.serial_number;
+  if (form.installation_date) payload.installation_date = form.installation_date;
+  if (form.removal_date) payload.removal_date = form.removal_date;
+  if (form.calibration_date) payload.calibration_date = form.calibration_date;
 
   // source_config je nach Datenquelle
   if (form.data_source === 'shelly' && form.source_host) {
@@ -324,8 +337,12 @@ function MeterTreeRow({
                   <ChevronRight className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-90' : ''}`} />
                 </button>
               : <span className="mr-1 w-3.5 inline-block flex-shrink-0" />}
-            <span className={`font-medium truncate text-sm ${node.cross_site_boundary ? 'text-amber-800' : 'text-gray-900'}`} title={node.name}>
+            <span className={`font-medium truncate text-sm ${node.cross_site_boundary ? 'text-amber-800' : 'text-gray-900'}`}
+              title={node.display_name ? `${node.name}\n${node.display_name}` : node.name}>
               {node.name}
+              {node.display_name && (
+                <span className="block text-xs font-normal text-gray-400 truncate">{node.display_name}</span>
+              )}
             </span>
             {node.cross_site_boundary && (
               <span className="ml-1.5 flex-shrink-0 inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 border border-amber-200">
@@ -682,6 +699,42 @@ function MeterModal({
             </div>
           </div>
 
+          {/* Technische Daten */}
+          <details className="rounded-lg border border-gray-200">
+            <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg">
+              Technische Daten (Einbau, Eichfrist, Seriennummer)
+            </summary>
+            <div className="px-3 pb-3 pt-2 grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <label className="label">Klarname</label>
+                <input type="text" className="input" value={form.display_name}
+                  onChange={e => setForm({ ...form, display_name: e.target.value })}
+                  placeholder="z.B. WC Allgemein EG A-00/81/82" />
+              </div>
+              <div>
+                <label className="label">Seriennummer / akt. Zählernummer</label>
+                <input type="text" className="input" value={form.serial_number}
+                  onChange={e => setForm({ ...form, serial_number: e.target.value })}
+                  placeholder="z.B. 12345678" />
+              </div>
+              <div>
+                <label className="label">Einbaudatum</label>
+                <input type="date" className="input" value={form.installation_date}
+                  onChange={e => setForm({ ...form, installation_date: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Ausbaudatum / Tausch</label>
+                <input type="date" className="input" value={form.removal_date}
+                  onChange={e => setForm({ ...form, removal_date: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Eichfrist</label>
+                <input type="date" className="input" value={form.calibration_date}
+                  onChange={e => setForm({ ...form, calibration_date: e.target.value })} />
+              </div>
+            </div>
+          </details>
+
           <div className="flex justify-end gap-3 pt-2 border-t">
             <button type="button" onClick={onClose} className="btn-secondary">Abbrechen</button>
             <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Speichern...' : editingId ? 'Speichern' : 'Anlegen'}</button>
@@ -879,6 +932,11 @@ export default function SitesPage() {
       source_register: String(sourceConfig.register ?? ''),
       source_topic: (sourceConfig.topic || '') as string,
       source_broker: (sourceConfig.broker_host || '') as string,
+      display_name: node.display_name || '',
+      serial_number: node.serial_number || '',
+      installation_date: node.installation_date || '',
+      removal_date: node.removal_date || '',
+      calibration_date: node.calibration_date || '',
     });
     setMeterFormError(null);
     setShowMeterModal(true);
