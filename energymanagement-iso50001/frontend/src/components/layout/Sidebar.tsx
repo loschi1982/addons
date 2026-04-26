@@ -29,6 +29,7 @@ import {
   BookOpen,
   GraduationCap,
   SlidersHorizontal,
+  AlertTriangle,
   type LucideIcon,
 } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
@@ -60,6 +61,7 @@ const navGroups: NavGroup[] = [
       { path: '/sites', labelKey: 'nav.sites', icon: Building2 },
       { path: '/meters', labelKey: 'nav.meters', icon: Gauge },
       { path: '/readings', labelKey: 'nav.readings', icon: ClipboardList },
+      { path: '/outliers', labelKey: 'nav.outliers', icon: AlertTriangle },
       { path: '/consumers', labelKey: 'nav.consumers', icon: Zap },
     ],
   },
