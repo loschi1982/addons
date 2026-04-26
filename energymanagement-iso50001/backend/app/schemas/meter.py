@@ -82,6 +82,7 @@ class MeterResponse(MeterBase, BaseSchema):
     is_active: bool
     latest_reading: Decimal | None = None
     latest_reading_date: datetime | None = None
+    site_name: str | None = None
     created_at: datetime
 
 

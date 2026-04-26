@@ -17,6 +17,7 @@ interface Meter {
   data_source: string;
   location: string | null;
   site_id: string | null;
+  site_name: string | null;
   building_id: string | null;
   usage_unit_id: string | null;
   parent_meter_id: string | null;
@@ -432,7 +433,7 @@ export default function MetersPage() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-gray-500">
-                    {meter.location || '–'}
+                    {meter.site_name || meter.location || '–'}
                   </td>
                   <td className="px-4 py-3 text-right space-x-2">
                     {meter.data_source !== 'manual' && (

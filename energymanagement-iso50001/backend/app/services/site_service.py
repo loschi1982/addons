@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import EnergyManagementError
+from app.models.meter import Meter
 from app.models.site import Building, Site, UsageUnit
 
 logger = structlog.get_logger()
@@ -55,6 +56,22 @@ class SiteService:
         result = await self.db.execute(query)
         sites = result.scalars().unique().all()
 
+        # Zähler-Anzahl pro Standort in einer Batch-Abfrage ermitteln
+        site_ids = [s.id for s in sites]
+        meter_counts: dict[uuid.UUID, int] = {}
+        if site_ids:
+            count_q = (
+                select(Meter.site_id, func.count(Meter.id).label("cnt"))
+                .where(Meter.site_id.in_(site_ids), Meter.is_active == True)  # noqa: E712
+                .group_by(Meter.site_id)
+            )
+            for row in (await self.db.execute(count_q)).all():
+                meter_counts[row.site_id] = row.cnt
+
+        # Zähleranzahl als dynamisches Attribut anhängen
+        for s in sites:
+            s._meter_count = meter_counts.get(s.id, 0)
+
         return {
             "items": sites,
             "total": total,
@@ -89,6 +106,10 @@ class SiteService:
                 error_code="SITE_NOT_FOUND",
                 status_code=404,
             )
+        cnt_q = select(func.count(Meter.id)).where(
+            Meter.site_id == site.id, Meter.is_active == True  # noqa: E712
+        )
+        site._meter_count = (await self.db.execute(cnt_q)).scalar() or 0
         return site
 
     async def update_site(self, site_id: uuid.UUID, data: dict) -> Site:

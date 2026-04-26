@@ -78,6 +78,7 @@ def _site_response(site) -> dict:
         "co2_region": site.co2_region,
         "timezone": site.timezone,
         "building_count": len(site.buildings) if site.buildings else 0,
+        "meter_count": getattr(site, "_meter_count", 0),
         "created_at": site.created_at,
     }
 
