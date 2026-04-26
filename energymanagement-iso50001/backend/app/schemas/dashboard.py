@@ -49,7 +49,7 @@ class TimeSeriesPoint(BaseModel):
 
 class ConsumptionChart(BaseModel):
     """Verbrauchszeitreihe für Charts."""
-    meter_id: uuid.UUID | None = None
+    meter_id: str | None = None  # UUID oder energy_type-String bei Aggregation
     meter_name: str | None = None
     energy_type: str
     unit: str
