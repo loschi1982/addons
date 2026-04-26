@@ -284,7 +284,6 @@ function MeterTreeRow({
   onTestConnection: (node: AnnotatedMeterNode) => void;
 }) {
   const [open, setOpen] = useState(depth < 1);
-  const [showActions, setShowActions] = useState(false);
   const hasChildren = node.children.length > 0;
   const isDragging = dnd.draggingId === node.id;
   const isDragOver = dnd.dragOverId === node.id;
@@ -312,8 +311,6 @@ function MeterTreeRow({
           if (dnd.draggingId && dnd.draggingId !== node.id) dnd.onDropOnNode(node.id);
           dnd.setDragOverId(null);
         }}
-        onMouseEnter={() => setShowActions(true)}
-        onMouseLeave={() => setShowActions(false)}
         className={`group select-none transition-colors ${
           isDragging ? 'opacity-40' : ''
         } ${isDragOver ? 'bg-primary-50 ring-1 ring-inset ring-primary-300' : 'hover:bg-gray-50'}`}
@@ -356,9 +353,9 @@ function MeterTreeRow({
         <td className="px-3 py-2 text-xs text-gray-400 text-right">
           {hasChildren && `${node.children.length} Sub`}
         </td>
-        {/* Aktionen */}
+        {/* Aktionen – via CSS group-hover sichtbar, kein JS-State */}
         <td className="px-3 py-2 text-right">
-          <div className={`inline-flex items-center gap-1 transition-opacity ${showActions ? 'opacity-100' : 'opacity-0'}`}>
+          <div className="inline-flex items-center gap-1 transition-opacity opacity-0 group-hover:opacity-100">
             {!node.cross_site_boundary && (
               <>
                 <button
