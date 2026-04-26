@@ -6,7 +6,7 @@ Standort → Gebäude → Nutzungseinheit (z.B. Wohnung, Gewerbe).
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, Field
@@ -157,6 +157,64 @@ class UsageUnitResponse(UsageUnitBase, BaseSchema):
     id: uuid.UUID
     created_at: datetime
 
+
+# ---------------------------------------------------------------------------
+# Standort-Nettoverbrauch (cross-site Zählerbäume)
+# ---------------------------------------------------------------------------
+
+class SiteExitPointDetail(BaseModel):
+    """Subtraktionszähler: Fremdzähler der physisch unter einem eigenen Zähler hängt."""
+    meter_id: uuid.UUID
+    meter_name: str
+    owner_site_id: uuid.UUID | None = None
+    owner_site_name: str
+    consumption_kwh: Decimal
+
+
+class SiteConsumptionResponse(BaseModel):
+    """Nettoverbrauch eines Standorts nach Abzug der Subtraktionszähler."""
+    site_id: uuid.UUID
+    site_name: str
+    period_start: date
+    period_end: date
+    gross_consumption_kwh: Decimal
+    cross_site_exit_kwh: Decimal
+    net_consumption_kwh: Decimal
+    exit_points: list[SiteExitPointDetail] = []
+
+
+class AnnotatedMeterTreeNode(BaseModel):
+    """
+    Zähler-Baumknoten mit Standort-Annotation.
+    cross_site_boundary = True wenn der Zähler einem anderen Standort gehört
+    (Subtraktionszähler / ExitSet-Mitglied).
+    """
+    id: str
+    name: str
+    meter_number: str | None = None
+    energy_type: str
+    unit: str
+    data_source: str
+    parent_meter_id: str | None = None
+    is_active: bool
+    is_virtual: bool
+    is_feed_in: bool
+    is_submeter: bool = False
+    is_delivery_based: bool = False
+    is_weather_corrected: bool = False
+    site_id: str | None = None
+    building_id: str | None = None
+    usage_unit_id: str | None = None
+    source_config: dict | None = None
+    virtual_config: dict | None = None
+    schema_label: str | None = None
+    notes: str | None = None
+    cross_site_boundary: bool = False
+    owner_site_name: str | None = None
+    children: list["AnnotatedMeterTreeNode"] = []
+
+
+AnnotatedMeterTreeNode.model_rebuild()
 
 # Zirkuläre Referenzen auflösen
 SiteDetailResponse.model_rebuild()
