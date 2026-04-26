@@ -201,6 +201,7 @@ export default function SitesPage() {
   const [siteMeters, setSiteMeters] = useState<Meter[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'meters' | 'buildings'>('meters');
+  const [meterEnergyFilter, setMeterEnergyFilter] = useState<string>('');
 
   // Modals
   const [showSiteModal, setShowSiteModal] = useState(false);
@@ -236,6 +237,7 @@ export default function SitesPage() {
     setDetailLoading(true);
     setSiteBuildings([]);
     setSiteMeters([]);
+    setMeterEnergyFilter('');
     try {
       const [buildingsRes, metersRes] = await Promise.all([
         apiClient.get<Building[]>(`/api/v1/sites/${site.id}/buildings`),
@@ -340,7 +342,6 @@ export default function SitesPage() {
   };
 
   const totalPages = Math.ceil(total / pageSize);
-  const meterTree = buildTree(siteMeters);
 
   // ── Breadcrumb ──
 
@@ -500,32 +501,76 @@ export default function SitesPage() {
         </div>
 
         {/* Tab: Zähler */}
-        {activeTab === 'meters' && (
-          <div className="card overflow-hidden p-0">
-            {detailLoading ? (
-              <div className="p-8 text-center text-gray-400">Zähler werden geladen...</div>
-            ) : siteMeters.length === 0 ? (
-              <div className="p-8 text-center text-gray-400">Diesem Standort sind keine aktiven Zähler zugewiesen.</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-                    <tr>
-                      <th className="px-4 py-3 text-left">Name / Zählernummer</th>
-                      <th className="px-4 py-3 text-left">Energieart</th>
-                      <th className="px-4 py-3 text-left">Datenquelle</th>
-                      <th className="px-4 py-3 text-right">Info</th>
-                      <th className="px-4 py-3 text-right"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {meterTree.map(node => <MeterTreeRow key={node.id} node={node} depth={0} />)}
-                  </tbody>
-                </table>
+        {activeTab === 'meters' && (() => {
+          const energyTypes = [...new Set(siteMeters.map(m => m.energy_type))].sort();
+          const filtered = meterEnergyFilter
+            ? siteMeters.filter(m => m.energy_type === meterEnergyFilter)
+            : siteMeters;
+          const tree = buildTree(filtered);
+          return (
+            <div>
+              {/* Energieart-Filter */}
+              {!detailLoading && siteMeters.length > 0 && energyTypes.length > 1 && (
+                <div className="flex flex-wrap gap-2 mb-3">
+                  <button
+                    onClick={() => setMeterEnergyFilter('')}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                      meterEnergyFilter === ''
+                        ? 'bg-primary-600 text-white border-primary-600'
+                        : 'bg-white text-gray-600 border-gray-300 hover:border-primary-400'
+                    }`}
+                  >
+                    Alle ({siteMeters.length})
+                  </button>
+                  {energyTypes.map(et => {
+                    const count = siteMeters.filter(m => m.energy_type === et).length;
+                    return (
+                      <button
+                        key={et}
+                        onClick={() => setMeterEnergyFilter(et === meterEnergyFilter ? '' : et)}
+                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                          meterEnergyFilter === et
+                            ? 'bg-primary-600 text-white border-primary-600'
+                            : 'bg-white border-gray-300 hover:border-primary-400 ' + (ENERGY_COLORS[et] || 'text-gray-600')
+                        }`}
+                      >
+                        {ENERGY_TYPE_LABELS[et as keyof typeof ENERGY_TYPE_LABELS] || et} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="card overflow-hidden p-0">
+                {detailLoading ? (
+                  <div className="p-8 text-center text-gray-400">Zähler werden geladen...</div>
+                ) : filtered.length === 0 ? (
+                  <div className="p-8 text-center text-gray-400">
+                    {siteMeters.length === 0
+                      ? 'Diesem Standort sind keine aktiven Zähler zugewiesen.'
+                      : 'Keine Zähler für diese Energieart.'}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
+                        <tr>
+                          <th className="px-4 py-3 text-left">Name / Zählernummer</th>
+                          <th className="px-4 py-3 text-left">Energieart</th>
+                          <th className="px-4 py-3 text-left">Datenquelle</th>
+                          <th className="px-4 py-3 text-right">Info</th>
+                          <th className="px-4 py-3 text-right"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {tree.map(node => <MeterTreeRow key={node.id} node={node} depth={0} />)}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
         {/* Tab: Gebäude */}
         {activeTab === 'buildings' && (
