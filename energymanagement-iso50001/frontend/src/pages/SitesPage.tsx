@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
-import { ChevronRight, Zap, Building2, Home } from 'lucide-react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { ChevronRight, Zap, Building2, Home, GripVertical } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type PaginatedResponse } from '@/types';
 
@@ -141,20 +141,66 @@ function buildTree(meters: Meter[]): MeterTreeNode[] {
   return roots;
 }
 
-function MeterTreeRow({ node, depth = 0 }: { node: MeterTreeNode; depth?: number }) {
+// ── MeterTreeRow (mit Drag & Drop) ──
+
+interface DndProps {
+  draggingId: string | null;
+  dragOverId: string | null;
+  setDraggingId: (id: string | null) => void;
+  setDragOverId: (id: string | null) => void;
+  onDropOnNode: (targetId: string) => void;
+}
+
+function MeterTreeRow({
+  node, depth = 0, dnd,
+}: {
+  node: MeterTreeNode;
+  depth?: number;
+  dnd: DndProps;
+}) {
   const [open, setOpen] = useState(depth < 1);
   const hasChildren = node.children.length > 0;
+  const isDragging = dnd.draggingId === node.id;
+  const isDragOver = dnd.dragOverId === node.id;
+
   return (
     <>
-      <tr className="hover:bg-gray-50">
+      <tr
+        draggable
+        onDragStart={e => {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', node.id);
+          dnd.setDraggingId(node.id);
+        }}
+        onDragEnd={() => { dnd.setDraggingId(null); dnd.setDragOverId(null); }}
+        onDragOver={e => {
+          e.preventDefault();
+          if (dnd.draggingId && dnd.draggingId !== node.id) {
+            e.dataTransfer.dropEffect = 'move';
+            dnd.setDragOverId(node.id);
+          }
+        }}
+        onDragLeave={() => { if (dnd.dragOverId === node.id) dnd.setDragOverId(null); }}
+        onDrop={e => {
+          e.preventDefault();
+          if (dnd.draggingId && dnd.draggingId !== node.id) {
+            dnd.onDropOnNode(node.id);
+          }
+          dnd.setDragOverId(null);
+        }}
+        className={`hover:bg-gray-50 select-none transition-colors ${
+          isDragging ? 'opacity-40' : ''
+        } ${isDragOver ? 'bg-primary-50 ring-1 ring-inset ring-primary-300' : ''}`}
+      >
         <td className="px-4 py-2.5">
           <div className="flex items-center" style={{ paddingLeft: `${depth * 20}px` }}>
+            <GripVertical className="w-3.5 h-3.5 text-gray-300 mr-1 flex-shrink-0 cursor-grab active:cursor-grabbing" />
             {hasChildren
               ? <button onClick={() => setOpen(!open)} className="mr-1.5 text-gray-400 hover:text-gray-600 flex-shrink-0">
                   <ChevronRight className={`w-4 h-4 transition-transform ${open ? 'rotate-90' : ''}`} />
                 </button>
               : <span className="mr-1.5 w-4 inline-block flex-shrink-0" />}
-            <span className="font-medium text-gray-900 truncate max-w-xs" title={node.name}>{node.name}</span>
+            <span className="font-medium text-gray-900 truncate" title={node.name}>{node.name}</span>
             {node.meter_number && <span className="ml-2 text-xs text-gray-400 font-mono">{node.meter_number}</span>}
           </div>
         </td>
@@ -177,8 +223,154 @@ function MeterTreeRow({ node, depth = 0 }: { node: MeterTreeNode; depth?: number
             className="text-xs text-primary-600 hover:text-primary-800">Messwerte</a>
         </td>
       </tr>
-      {open && node.children.map(child => <MeterTreeRow key={child.id} node={child} depth={depth + 1} />)}
+      {open && node.children.map(child => (
+        <MeterTreeRow key={child.id} node={child} depth={depth + 1} dnd={dnd} />
+      ))}
     </>
+  );
+}
+
+// ── MeterTreeTable (Tabelle mit Spaltenbreiten + Drag & Drop) ──
+
+function MeterTreeTable({
+  meters,
+  loading,
+  emptyMessage,
+  onReload,
+}: {
+  meters: Meter[];
+  loading?: boolean;
+  emptyMessage?: string;
+  onReload: () => void;
+}) {
+  const [colWidths, setColWidths] = useState([260, 130, 150, 110, 90]);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [dropOverRoot, setDropOverRoot] = useState(false);
+  const resizingRef = useRef<{ colIdx: number; startX: number; startWidth: number } | null>(null);
+
+  const startResize = (colIdx: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    resizingRef.current = { colIdx, startX: e.clientX, startWidth: colWidths[colIdx] };
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!resizingRef.current) return;
+      const { colIdx: ci, startX, startWidth } = resizingRef.current;
+      const newWidth = Math.max(60, startWidth + ev.clientX - startX);
+      setColWidths(prev => {
+        const next = [...prev];
+        next[ci] = newWidth;
+        return next;
+      });
+    };
+    const onMouseUp = () => {
+      resizingRef.current = null;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleDropOnNode = async (targetId: string) => {
+    if (!draggingId || draggingId === targetId) return;
+    try {
+      await apiClient.put(`/api/v1/meters/${draggingId}`, { parent_meter_id: targetId });
+      onReload();
+    } catch { /* Interceptor */ } finally {
+      setDraggingId(null);
+      setDragOverId(null);
+    }
+  };
+
+  const handleDropToRoot = async () => {
+    if (!draggingId) return;
+    setDropOverRoot(false);
+    try {
+      await apiClient.put(`/api/v1/meters/${draggingId}`, { parent_meter_id: null });
+      onReload();
+    } catch { /* Interceptor */ } finally {
+      setDraggingId(null);
+      setDragOverId(null);
+    }
+  };
+
+  const dnd: DndProps = { draggingId, dragOverId, setDraggingId, setDragOverId, onDropOnNode: handleDropOnNode };
+  const tree = buildTree(meters);
+
+  const thStyle = (i: number): React.CSSProperties => ({
+    width: colWidths[i],
+    minWidth: 60,
+    position: 'relative',
+    userSelect: 'none',
+  });
+
+  const resizeHandle = (i: number) => (
+    <div
+      style={{
+        position: 'absolute', right: 0, top: 0, bottom: 0,
+        width: 5, cursor: 'col-resize', zIndex: 1,
+      }}
+      onMouseDown={e => startResize(i, e)}
+      onClick={e => e.stopPropagation()}
+    />
+  );
+
+  if (loading) return <div className="p-8 text-center text-gray-400">Zähler werden geladen...</div>;
+  if (meters.length === 0) return <div className="p-8 text-center text-gray-400">{emptyMessage || 'Keine Zähler vorhanden.'}</div>;
+
+  return (
+    <div>
+      {/* Drop-Zone: Elternzuordnung entfernen */}
+      {draggingId && (
+        <div
+          onDragOver={e => { e.preventDefault(); setDropOverRoot(true); }}
+          onDragLeave={() => setDropOverRoot(false)}
+          onDrop={e => { e.preventDefault(); handleDropToRoot(); }}
+          className={`mb-2 flex items-center justify-center rounded-lg border-2 border-dashed py-2 text-sm transition-colors ${
+            dropOverRoot
+              ? 'border-orange-400 bg-orange-50 text-orange-700'
+              : 'border-gray-300 text-gray-400'
+          }`}
+        >
+          Hier ablegen → Elternzuordnung entfernen (Hauptzähler)
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
+          <colgroup>
+            {colWidths.map((w, i) => <col key={i} style={{ width: w }} />)}
+          </colgroup>
+          <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
+            <tr>
+              <th className="px-4 py-3 text-left" style={thStyle(0)}>
+                Name / Zählernummer {resizeHandle(0)}
+              </th>
+              <th className="px-4 py-3 text-left" style={thStyle(1)}>
+                Energieart {resizeHandle(1)}
+              </th>
+              <th className="px-4 py-3 text-left" style={thStyle(2)}>
+                Datenquelle {resizeHandle(2)}
+              </th>
+              <th className="px-4 py-3 text-right" style={thStyle(3)}>
+                Info {resizeHandle(3)}
+              </th>
+              <th className="px-4 py-3 text-right" style={thStyle(4)}></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {tree.map(node => (
+              <MeterTreeRow key={node.id} node={node} depth={0} dnd={dnd} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {draggingId && (
+        <p className="mt-2 text-center text-xs text-gray-400">
+          Auf einen anderen Zähler ziehen → als Unterzähler einhängen
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -202,6 +394,10 @@ export default function SitesPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'meters' | 'buildings'>('meters');
   const [meterEnergyFilter, setMeterEnergyFilter] = useState<string>('');
+
+  // Gebäude-Detail
+  const [buildingMeters, setBuildingMeters] = useState<Meter[]>([]);
+  const [buildingActiveTab, setBuildingActiveTab] = useState<'units' | 'meters'>('meters');
 
   // Modals
   const [showSiteModal, setShowSiteModal] = useState(false);
@@ -231,7 +427,7 @@ export default function SitesPage() {
 
   useEffect(() => { loadSites(); }, [loadSites]);
 
-  const loadSiteDetail = async (site: Site) => {
+  const loadSiteDetail = useCallback(async (site: Site) => {
     setSelectedSite(site);
     setSelectedBuilding(null);
     setDetailLoading(true);
@@ -246,14 +442,43 @@ export default function SitesPage() {
       setSiteBuildings(buildingsRes.data);
       setSiteMeters(metersRes.data.items);
     } catch { /* Interceptor */ } finally { setDetailLoading(false); }
-  };
+  }, []);
 
-  const loadBuildingDetail = async (siteId: string, buildingId: string) => {
+  const loadBuildingDetail = useCallback(async (siteId: string, buildingId: string) => {
     try {
-      const res = await apiClient.get(`/api/v1/sites/${siteId}/buildings/${buildingId}`);
-      setSelectedBuilding(res.data);
+      const buildingRes = await apiClient.get(`/api/v1/sites/${siteId}/buildings/${buildingId}`);
+      const building = buildingRes.data;
+      setSelectedBuilding(building);
+
+      // Zähler: direkt am Gebäude + alle Nutzungseinheiten
+      const unitIds: string[] = (building.usage_units || []).map((u: UsageUnit) => u.id);
+      const meterRequests: Promise<{ data: PaginatedResponse<Meter> }>[] = [
+        apiClient.get<PaginatedResponse<Meter>>(`/api/v1/meters?building_id=${buildingId}&page_size=500`),
+        ...unitIds.map(uid =>
+          apiClient.get<PaginatedResponse<Meter>>(`/api/v1/meters?usage_unit_id=${uid}&page_size=500`)
+        ),
+      ];
+      const meterResults = await Promise.all(meterRequests);
+      const meterMap = new Map<string, Meter>();
+      meterResults.forEach(r => r.data.items.forEach(m => meterMap.set(m.id, m)));
+      setBuildingMeters([...meterMap.values()]);
     } catch { /* Interceptor */ }
-  };
+  }, []);
+
+  const reloadSiteMeters = useCallback(async () => {
+    if (!selectedSite) return;
+    try {
+      const res = await apiClient.get<PaginatedResponse<Meter>>(
+        `/api/v1/meters?site_id=${selectedSite.id}&page_size=500`
+      );
+      setSiteMeters(res.data.items);
+    } catch { /* Interceptor */ }
+  }, [selectedSite]);
+
+  const reloadBuildingMeters = useCallback(async () => {
+    if (!selectedBuilding || !selectedSite) return;
+    await loadBuildingDetail(selectedSite.id, selectedBuilding.id);
+  }, [selectedBuilding, selectedSite, loadBuildingDetail]);
 
   // ── Standort CRUD ──
 
@@ -449,6 +674,11 @@ export default function SitesPage() {
   // ── Render: Standort-Detail ──
 
   if (!selectedBuilding) {
+    const energyTypes = [...new Set(siteMeters.map(m => m.energy_type))].sort();
+    const filteredMeters = meterEnergyFilter
+      ? siteMeters.filter(m => m.energy_type === meterEnergyFilter)
+      : siteMeters;
+
     return (
       <div>
         {breadcrumb}
@@ -501,76 +731,56 @@ export default function SitesPage() {
         </div>
 
         {/* Tab: Zähler */}
-        {activeTab === 'meters' && (() => {
-          const energyTypes = [...new Set(siteMeters.map(m => m.energy_type))].sort();
-          const filtered = meterEnergyFilter
-            ? siteMeters.filter(m => m.energy_type === meterEnergyFilter)
-            : siteMeters;
-          const tree = buildTree(filtered);
-          return (
-            <div>
-              {/* Energieart-Filter */}
-              {!detailLoading && siteMeters.length > 0 && energyTypes.length > 1 && (
-                <div className="flex flex-wrap gap-2 mb-3">
-                  <button
-                    onClick={() => setMeterEnergyFilter('')}
-                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                      meterEnergyFilter === ''
-                        ? 'bg-primary-600 text-white border-primary-600'
-                        : 'bg-white text-gray-600 border-gray-300 hover:border-primary-400'
-                    }`}
-                  >
-                    Alle ({siteMeters.length})
-                  </button>
-                  {energyTypes.map(et => {
-                    const count = siteMeters.filter(m => m.energy_type === et).length;
-                    return (
-                      <button
-                        key={et}
-                        onClick={() => setMeterEnergyFilter(et === meterEnergyFilter ? '' : et)}
-                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                          meterEnergyFilter === et
-                            ? 'bg-primary-600 text-white border-primary-600'
-                            : 'bg-white border-gray-300 hover:border-primary-400 ' + (ENERGY_COLORS[et] || 'text-gray-600')
-                        }`}
-                      >
-                        {ENERGY_TYPE_LABELS[et as keyof typeof ENERGY_TYPE_LABELS] || et} ({count})
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              <div className="card overflow-hidden p-0">
-                {detailLoading ? (
-                  <div className="p-8 text-center text-gray-400">Zähler werden geladen...</div>
-                ) : filtered.length === 0 ? (
-                  <div className="p-8 text-center text-gray-400">
-                    {siteMeters.length === 0
-                      ? 'Diesem Standort sind keine aktiven Zähler zugewiesen.'
-                      : 'Keine Zähler für diese Energieart.'}
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-                        <tr>
-                          <th className="px-4 py-3 text-left">Name / Zählernummer</th>
-                          <th className="px-4 py-3 text-left">Energieart</th>
-                          <th className="px-4 py-3 text-left">Datenquelle</th>
-                          <th className="px-4 py-3 text-right">Info</th>
-                          <th className="px-4 py-3 text-right"></th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {tree.map(node => <MeterTreeRow key={node.id} node={node} depth={0} />)}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+        {activeTab === 'meters' && (
+          <div>
+            {/* Energieart-Filter */}
+            {!detailLoading && siteMeters.length > 0 && energyTypes.length > 1 && (
+              <div className="flex flex-wrap gap-2 mb-3">
+                <button
+                  onClick={() => setMeterEnergyFilter('')}
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    meterEnergyFilter === ''
+                      ? 'bg-primary-600 text-white border-primary-600'
+                      : 'bg-white text-gray-600 border-gray-300 hover:border-primary-400'
+                  }`}
+                >
+                  Alle ({siteMeters.length})
+                </button>
+                {energyTypes.map(et => {
+                  const count = siteMeters.filter(m => m.energy_type === et).length;
+                  return (
+                    <button
+                      key={et}
+                      onClick={() => setMeterEnergyFilter(et === meterEnergyFilter ? '' : et)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                        meterEnergyFilter === et
+                          ? 'bg-primary-600 text-white border-primary-600'
+                          : 'bg-white border-gray-300 hover:border-primary-400 ' + (ENERGY_COLORS[et] || 'text-gray-600')
+                      }`}
+                    >
+                      {ENERGY_TYPE_LABELS[et as keyof typeof ENERGY_TYPE_LABELS] || et} ({count})
+                    </button>
+                  );
+                })}
               </div>
+            )}
+            <div className="card overflow-hidden p-0">
+              <MeterTreeTable
+                meters={filteredMeters}
+                loading={detailLoading}
+                emptyMessage={
+                  siteMeters.length === 0
+                    ? 'Diesem Standort sind keine aktiven Zähler zugewiesen.'
+                    : 'Keine Zähler für diese Energieart.'
+                }
+                onReload={reloadSiteMeters}
+              />
             </div>
-          );
-        })()}
+            <p className="mt-2 text-xs text-gray-400">
+              Tipp: Zähler per Drag & Drop (⠿) in Eltern-Kind-Beziehungen anordnen
+            </p>
+          </div>
+        )}
 
         {/* Tab: Gebäude */}
         {activeTab === 'buildings' && (
@@ -662,7 +872,7 @@ export default function SitesPage() {
     );
   }
 
-  // ── Render: Gebäude-Detail (Nutzungseinheiten) ──
+  // ── Render: Gebäude-Detail (Tabs: Zähler | Nutzungseinheiten) ──
 
   return (
     <div>
@@ -676,53 +886,85 @@ export default function SitesPage() {
             {selectedBuilding.building_year && ` · Baujahr ${selectedBuilding.building_year}`}
           </p>
         </div>
-        <button onClick={() => { setEditingId(null); setUnitForm(emptyUnitForm); setFormError(null); setShowUnitModal(true); }}
-          className="btn-primary">+ Neue Nutzungseinheit</button>
-      </div>
-
-      <div className="card mt-4 overflow-hidden p-0">
-        {selectedBuilding.usage_units.length === 0 ? (
-          <div className="p-8 text-center text-gray-400">
-            <Home className="w-8 h-8 mx-auto mb-2 opacity-30" />
-            Keine Nutzungseinheiten vorhanden.
-          </div>
-        ) : (
-          <table className="w-full text-left text-sm">
-            <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-              <tr>
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Nutzungsart</th>
-                <th className="px-4 py-3">Etage</th>
-                <th className="px-4 py-3 text-right">Fläche (m²)</th>
-                <th className="px-4 py-3 text-right">Personen</th>
-                <th className="px-4 py-3">Mieter</th>
-                <th className="px-4 py-3 text-right">Aktionen</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {selectedBuilding.usage_units.map(u => (
-                <tr key={u.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium">{u.name}</td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
-                      {USAGE_TYPES[u.usage_type] || u.usage_type}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">{u.floor || '–'}</td>
-                  <td className="px-4 py-3 text-right text-gray-500">{u.area_m2 ? Number(u.area_m2).toLocaleString('de-DE') : '–'}</td>
-                  <td className="px-4 py-3 text-right text-gray-500">{u.occupants ?? '–'}</td>
-                  <td className="px-4 py-3 text-gray-500">{u.tenant_name || '–'}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button onClick={() => { setEditingId(u.id); setUnitForm({ name: u.name, usage_type: u.usage_type, floor: u.floor || '', area_m2: u.area_m2?.toString() || '', occupants: u.occupants?.toString() || '', tenant_name: u.tenant_name || '' }); setFormError(null); setShowUnitModal(true); }}
-                      className="mr-2 text-primary-600 hover:text-primary-800">Bearbeiten</button>
-                    <button onClick={() => handleDeleteUnit(u)} className="text-red-500 hover:text-red-700">Löschen</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {buildingActiveTab === 'units' && (
+          <button onClick={() => { setEditingId(null); setUnitForm(emptyUnitForm); setFormError(null); setShowUnitModal(true); }}
+            className="btn-primary">+ Neue Nutzungseinheit</button>
         )}
       </div>
+
+      {/* Tabs */}
+      <div className="flex border-b border-gray-200 mb-4 gap-1">
+        <button
+          className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${buildingActiveTab === 'meters' ? 'border-primary-600 text-primary-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          onClick={() => setBuildingActiveTab('meters')}
+        >
+          <Zap className="w-4 h-4" /> Zähler ({buildingMeters.length})
+        </button>
+        <button
+          className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${buildingActiveTab === 'units' ? 'border-primary-600 text-primary-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          onClick={() => setBuildingActiveTab('units')}
+        >
+          <Home className="w-4 h-4" /> Nutzungseinheiten ({selectedBuilding.usage_units.length})
+        </button>
+      </div>
+
+      {/* Tab: Zähler (Gebäude + alle Nutzungseinheiten) */}
+      {buildingActiveTab === 'meters' && (
+        <div className="card overflow-hidden p-0">
+          <MeterTreeTable
+            meters={buildingMeters}
+            emptyMessage="Diesem Gebäude sind keine Zähler direkt zugewiesen. Zähler können in der Zählerverwaltung einem Gebäude zugeordnet werden."
+            onReload={reloadBuildingMeters}
+          />
+        </div>
+      )}
+
+      {/* Tab: Nutzungseinheiten */}
+      {buildingActiveTab === 'units' && (
+        <div className="card mt-0 overflow-hidden p-0">
+          {selectedBuilding.usage_units.length === 0 ? (
+            <div className="p-8 text-center text-gray-400">
+              <Home className="w-8 h-8 mx-auto mb-2 opacity-30" />
+              Keine Nutzungseinheiten vorhanden.
+            </div>
+          ) : (
+            <table className="w-full text-left text-sm">
+              <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
+                <tr>
+                  <th className="px-4 py-3">Name</th>
+                  <th className="px-4 py-3">Nutzungsart</th>
+                  <th className="px-4 py-3">Etage</th>
+                  <th className="px-4 py-3 text-right">Fläche (m²)</th>
+                  <th className="px-4 py-3 text-right">Personen</th>
+                  <th className="px-4 py-3">Mieter</th>
+                  <th className="px-4 py-3 text-right">Aktionen</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {selectedBuilding.usage_units.map(u => (
+                  <tr key={u.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium">{u.name}</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
+                        {USAGE_TYPES[u.usage_type] || u.usage_type}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">{u.floor || '–'}</td>
+                    <td className="px-4 py-3 text-right text-gray-500">{u.area_m2 ? Number(u.area_m2).toLocaleString('de-DE') : '–'}</td>
+                    <td className="px-4 py-3 text-right text-gray-500">{u.occupants ?? '–'}</td>
+                    <td className="px-4 py-3 text-gray-500">{u.tenant_name || '–'}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button onClick={() => { setEditingId(u.id); setUnitForm({ name: u.name, usage_type: u.usage_type, floor: u.floor || '', area_m2: u.area_m2?.toString() || '', occupants: u.occupants?.toString() || '', tenant_name: u.tenant_name || '' }); setFormError(null); setShowUnitModal(true); }}
+                        className="mr-2 text-primary-600 hover:text-primary-800">Bearbeiten</button>
+                      <button onClick={() => handleDeleteUnit(u)} className="text-red-500 hover:text-red-700">Löschen</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {showUnitModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
