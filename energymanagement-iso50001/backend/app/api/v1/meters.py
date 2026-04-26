@@ -67,7 +67,7 @@ def _meter_to_response(meter, latest=None, site_name: str | None = None) -> Mete
 @router.get("", response_model=PaginatedResponse[MeterResponse])
 async def list_meters(
     page: int = Query(1, ge=1),
-    page_size: int = Query(25, ge=1, le=100),
+    page_size: int = Query(25, ge=1, le=500),
     energy_type: str | None = None,
     data_source: str | None = None,
     site_id: uuid.UUID | None = None,
