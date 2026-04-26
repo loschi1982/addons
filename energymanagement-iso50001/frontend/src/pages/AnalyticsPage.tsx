@@ -272,22 +272,33 @@ export default function AnalyticsPage() {
 
 function TimeSeriesTab({ meters }: { meters: Meter[] }) {
   const [data, setData] = useState<TimeSeriesMeter[]>([]);
+  const [selectedEnergyType, setSelectedEnergyType] = useState('electricity');
   const [selectedMeter, setSelectedMeter] = useState('');
   const [startDate, setStartDate] = useState(yearStart());
   const [endDate, setEndDate] = useState(today());
   const [granularity, setGranularity] = useState('daily');
   const [loading, setLoading] = useState(false);
-  const [chartType, setChartType] = useState<'line' | 'area' | 'bar'>('line');
+  const [chartType, setChartType] = useState<'line' | 'area' | 'bar'>('bar');
+
+  const energyTypes = [...new Set(meters.map((m) => m.energy_type))].sort();
+  const filteredMeters = meters.filter((m) => m.energy_type === selectedEnergyType);
+
+  // Zähler-Auswahl zurücksetzen wenn Energietyp wechselt
+  const handleEnergyTypeChange = (et: string) => {
+    setSelectedEnergyType(et);
+    setSelectedMeter('');
+  };
 
   const fetchData = useCallback(async () => {
+    if (!selectedMeter) return;
     setLoading(true);
     try {
       const params: Record<string, string> = {
         start_date: startDate,
         end_date: endDate,
         granularity,
+        meter_ids: selectedMeter,
       };
-      if (selectedMeter) params.meter_ids = selectedMeter;
       const res = await apiClient.get('/api/v1/analytics/timeseries', { params });
       setData(res.data);
     } catch { /* leer */ }
@@ -319,10 +330,18 @@ function TimeSeriesTab({ meters }: { meters: Meter[] }) {
     <div>
       <div className="flex flex-wrap gap-3 items-end mb-6">
         <div>
+          <label className="label">Energieträger</label>
+          <select className="input" value={selectedEnergyType} onChange={(e) => handleEnergyTypeChange(e.target.value)}>
+            {energyTypes.map((et) => (
+              <option key={et} value={et}>{ENERGY_TYPE_LABELS[et as EnergyType] ?? et}</option>
+            ))}
+          </select>
+        </div>
+        <div>
           <label className="label">Zähler</label>
           <select className="input" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
-            <option value="">Alle Hauptzähler</option>
-            {meters.map((m) => (
+            <option value="">— Bitte wählen —</option>
+            {filteredMeters.map((m) => (
               <option key={m.id} value={m.id}>{m.name}</option>
             ))}
           </select>
@@ -369,7 +388,7 @@ function TimeSeriesTab({ meters }: { meters: Meter[] }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="label" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip formatter={(val: number) => [`${formatNumber(val)} kWh`, '']} />
+              <Tooltip formatter={(val: number) => [`${formatNumber(val)} ${data[0]?.unit ?? ''}`, '']} />
               <Legend />
               {data.map((s, idx) => {
                 const color = CHART_COLORS[idx % CHART_COLORS.length];
@@ -385,7 +404,7 @@ function TimeSeriesTab({ meters }: { meters: Meter[] }) {
           </ResponsiveContainer>
         ) : (
           <div className="flex h-80 items-center justify-center text-gray-400">
-            Keine Daten für den gewählten Zeitraum
+            {selectedMeter ? 'Keine Daten für den gewählten Zeitraum' : 'Bitte Zähler auswählen'}
           </div>
         )}
       </div>
@@ -634,9 +653,13 @@ function DistributionTab() {
 /* ── Tab: Heatmap ── */
 
 function HeatmapTab({ meters }: { meters: Meter[] }) {
+  const [selectedEnergyType, setSelectedEnergyType] = useState('electricity');
   const [selectedMeter, setSelectedMeter] = useState('');
   const [data, setData] = useState<HeatmapPoint[]>([]);
   const [loading, setLoading] = useState(false);
+
+  const energyTypes = [...new Set(meters.map((m) => m.energy_type))].sort();
+  const filteredMeters = meters.filter((m) => m.energy_type === selectedEnergyType);
 
   const fetchData = useCallback(async () => {
     if (!selectedMeter) return;
@@ -671,14 +694,24 @@ function HeatmapTab({ meters }: { meters: Meter[] }) {
 
   return (
     <div>
-      <div className="mb-6">
-        <label className="label">Zähler auswählen</label>
-        <select className="input w-64" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
-          <option value="">— Bitte wählen —</option>
-          {meters.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
-          ))}
-        </select>
+      <div className="flex flex-wrap gap-3 items-end mb-6">
+        <div>
+          <label className="label">Energieträger</label>
+          <select className="input" value={selectedEnergyType} onChange={(e) => { setSelectedEnergyType(e.target.value); setSelectedMeter(''); }}>
+            {energyTypes.map((et) => (
+              <option key={et} value={et}>{ENERGY_TYPE_LABELS[et as EnergyType] ?? et}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="label">Zähler auswählen</label>
+          <select className="input w-80" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
+            <option value="">— Bitte wählen —</option>
+            {filteredMeters.map((m) => (
+              <option key={m.id} value={m.id}>{m.name}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="card">
@@ -834,11 +867,15 @@ function SankeyTab({ meters }: { meters: Meter[] }) {
 /* ── Tab: Witterungskorrektur ── */
 
 function WeatherCorrectionTab({ meters }: { meters: Meter[] }) {
+  const [selectedEnergyType, setSelectedEnergyType] = useState('district_heating');
   const [selectedMeter, setSelectedMeter] = useState('');
   const [data, setData] = useState<WeatherCorrectedData | null>(null);
   const [startDate, setStartDate] = useState(yearStart());
   const [endDate, setEndDate] = useState(today());
   const [loading, setLoading] = useState(false);
+
+  const energyTypes = [...new Set(meters.map((m) => m.energy_type))].sort();
+  const filteredMeters = meters.filter((m) => m.energy_type === selectedEnergyType);
 
   const fetchData = useCallback(async () => {
     if (!selectedMeter) return;
@@ -874,10 +911,18 @@ function WeatherCorrectionTab({ meters }: { meters: Meter[] }) {
     <div>
       <div className="flex flex-wrap gap-3 items-end mb-6">
         <div>
+          <label className="label">Energieträger</label>
+          <select className="input" value={selectedEnergyType} onChange={(e) => { setSelectedEnergyType(e.target.value); setSelectedMeter(''); }}>
+            {energyTypes.map((et) => (
+              <option key={et} value={et}>{ENERGY_TYPE_LABELS[et as EnergyType] ?? et}</option>
+            ))}
+          </select>
+        </div>
+        <div>
           <label className="label">Zähler</label>
-          <select className="input w-64" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
+          <select className="input w-80" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
             <option value="">— Bitte wählen —</option>
-            {meters.map((m) => (
+            {filteredMeters.map((m) => (
               <option key={m.id} value={m.id}>{m.name}</option>
             ))}
           </select>
@@ -1195,10 +1240,14 @@ function SelfConsumptionTab() {
 /* ── Tab: Jahresdauerlinie ── */
 
 function DurationCurveTab({ meters }: { meters: Meter[] }) {
+  const [selectedEnergyType, setSelectedEnergyType] = useState('electricity');
   const [selectedMeter, setSelectedMeter] = useState('');
   const [year, setYear] = useState(new Date().getFullYear());
   const [data, setData] = useState<{ index: number; value: number }[]>([]);
   const [loading, setLoading] = useState(false);
+
+  const energyTypes = [...new Set(meters.map((m) => m.energy_type))].sort();
+  const filteredMeters = meters.filter((m) => m.energy_type === selectedEnergyType);
 
   const fetchData = useCallback(async () => {
     if (!selectedMeter) return;
@@ -1218,10 +1267,18 @@ function DurationCurveTab({ meters }: { meters: Meter[] }) {
     <div>
       <div className="flex flex-wrap gap-3 items-end mb-6">
         <div>
+          <label className="label">Energieträger</label>
+          <select className="input" value={selectedEnergyType} onChange={(e) => { setSelectedEnergyType(e.target.value); setSelectedMeter(''); }}>
+            {energyTypes.map((et) => (
+              <option key={et} value={et}>{ENERGY_TYPE_LABELS[et as EnergyType] ?? et}</option>
+            ))}
+          </select>
+        </div>
+        <div>
           <label className="label">Zähler</label>
-          <select className="input" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
+          <select className="input w-80" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
             <option value="">Bitte wählen…</option>
-            {meters.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            {filteredMeters.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
         </div>
         <div>
@@ -1264,11 +1321,15 @@ function DurationCurveTab({ meters }: { meters: Meter[] }) {
 /* ── Tab: Summenlinie (Kumulativer Verbrauch) ── */
 
 function CumulativeTab({ meters }: { meters: Meter[] }) {
+  const [selectedEnergyType, setSelectedEnergyType] = useState('electricity');
   const [selectedMeters, setSelectedMeters] = useState<string[]>([]);
   const [startDate, setStartDate] = useState(yearStart());
   const [endDate, setEndDate] = useState(today());
   const [data, setData] = useState<TimeSeriesMeter[]>([]);
   const [loading, setLoading] = useState(false);
+
+  const energyTypes = [...new Set(meters.map((m) => m.energy_type))].sort();
+  const filteredMeters = meters.filter((m) => m.energy_type === selectedEnergyType);
 
   const fetchData = useCallback(async () => {
     if (selectedMeters.length === 0) return;
@@ -1304,15 +1365,23 @@ function CumulativeTab({ meters }: { meters: Meter[] }) {
     <div>
       <div className="flex flex-wrap gap-3 items-end mb-6">
         <div>
-          <label className="label">Zähler (Mehrfachauswahl)</label>
+          <label className="label">Energieträger</label>
+          <select className="input" value={selectedEnergyType} onChange={(e) => { setSelectedEnergyType(e.target.value); setSelectedMeters([]); }}>
+            {energyTypes.map((et) => (
+              <option key={et} value={et}>{ENERGY_TYPE_LABELS[et as EnergyType] ?? et}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="label">Zähler (Mehrfachauswahl, Strg+Klick)</label>
           <select
             className="input"
             multiple
-            size={4}
+            size={6}
             value={selectedMeters}
             onChange={(e) => setSelectedMeters(Array.from(e.target.selectedOptions, (o) => o.value))}
           >
-            {meters.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            {filteredMeters.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
         </div>
         <div>

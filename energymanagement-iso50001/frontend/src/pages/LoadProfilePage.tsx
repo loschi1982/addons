@@ -68,6 +68,7 @@ export default function LoadProfilePage() {
   const lastDayOfMonth = new Date(currentYear, currentMonth, 0).getDate();
 
   const [meters, setMeters] = useState<Meter[]>([]);
+  const [selectedEnergyType, setSelectedEnergyType] = useState('electricity');
   const [selectedMeters, setSelectedMeters] = useState<string[]>([]);
   const [startDate, setStartDate] = useState(
     `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`
@@ -82,10 +83,18 @@ export default function LoadProfilePage() {
 
   // Zähler laden
   useEffect(() => {
-    apiClient.get<{ items: Meter[] }>('/api/v1/meters?page_size=200').then(res => {
+    apiClient.get<{ items: Meter[] }>('/api/v1/meters?page_size=500').then(res => {
       setMeters(res.data.items);
     }).catch(() => {});
   }, []);
+
+  const energyTypes = [...new Set(meters.map((m) => m.energy_type))].sort();
+  const filteredMeters = meters.filter((m) => m.energy_type === selectedEnergyType);
+
+  const handleEnergyTypeChange = (et: string) => {
+    setSelectedEnergyType(et);
+    setSelectedMeters([]);
+  };
 
   const toggleMeter = (id: string) => {
     setSelectedMeters(prev =>
@@ -142,11 +151,31 @@ export default function LoadProfilePage() {
 
       {/* Filter */}
       <div className="card p-4 space-y-4">
+        {/* Energieträger-Filter */}
+        <div>
+          <label className="label mb-2">Energieträger</label>
+          <div className="flex flex-wrap gap-2">
+            {energyTypes.map(et => (
+              <button
+                key={et}
+                onClick={() => handleEnergyTypeChange(et)}
+                className={`px-3 py-1 text-sm rounded-full border transition-all ${
+                  selectedEnergyType === et
+                    ? 'bg-[#1B5E7B] text-white border-[#1B5E7B]'
+                    : 'bg-white text-gray-600 border-gray-300 hover:border-[#1B5E7B]'
+                }`}
+              >
+                {et === 'electricity' ? 'Strom' : et === 'district_heating' ? 'Fernwärme' : et === 'district_cooling' ? 'Kälte' : et === 'water' ? 'Wasser' : et}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Zähler-Auswahl */}
         <div>
           <label className="label mb-2">Zähler auswählen (mind. 1)</label>
-          <div className="flex flex-wrap gap-2">
-            {meters.map(m => (
+          <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
+            {filteredMeters.map(m => (
               <button
                 key={m.id}
                 onClick={() => toggleMeter(m.id)}
@@ -160,8 +189,8 @@ export default function LoadProfilePage() {
                 {m.location && <span className="opacity-60 ml-1 text-xs">· {m.location}</span>}
               </button>
             ))}
-            {meters.length === 0 && (
-              <p className="text-sm text-gray-400">Keine Zähler vorhanden</p>
+            {filteredMeters.length === 0 && (
+              <p className="text-sm text-gray-400">Keine Zähler für diesen Energieträger</p>
             )}
           </div>
         </div>
