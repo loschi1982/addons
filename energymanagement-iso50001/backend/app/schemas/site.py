@@ -55,6 +55,7 @@ class SiteResponse(SiteBase, BaseSchema):
     """Standort in API-Responses."""
     id: uuid.UUID
     building_count: int | None = None
+    meter_count: int = 0
     created_at: datetime
 
 

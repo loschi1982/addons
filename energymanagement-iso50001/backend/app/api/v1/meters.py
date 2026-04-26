@@ -10,10 +10,12 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_permission
+from app.models.site import Site
 from app.models.user import User
 from app.schemas.common import DeleteResponse, PaginatedResponse
 from app.schemas.meter import (
@@ -28,7 +30,7 @@ from app.services.meter_service import MeterService
 router = APIRouter()
 
 
-def _meter_to_response(meter, latest=None) -> MeterResponse:
+def _meter_to_response(meter, latest=None, site_name: str | None = None) -> MeterResponse:
     """Hilfsfunktion: Meter-Objekt → MeterResponse."""
     latest_value, latest_ts = latest if latest else (None, None)
     return MeterResponse(
@@ -58,6 +60,7 @@ def _meter_to_response(meter, latest=None) -> MeterResponse:
         created_at=meter.created_at,
         latest_reading=latest_value,
         latest_reading_date=latest_ts,
+        site_name=site_name or getattr(meter, '_site_name', None),
     )
 
 
@@ -91,8 +94,21 @@ async def list_meters(
 
     total = result["total"]
     latest_by_meter = result.get("latest_by_meter", {})
+    meters = result["items"]
+
+    # Site-Namen per Batch-Abfrage laden
+    site_ids = {m.site_id for m in meters if m.site_id}
+    site_names: dict[uuid.UUID, str] = {}
+    if site_ids:
+        site_rows = await db.execute(select(Site.id, Site.name).where(Site.id.in_(site_ids)))
+        for sid, sname in site_rows.all():
+            site_names[sid] = sname
+
     return PaginatedResponse(
-        items=[_meter_to_response(m, latest_by_meter.get(m.id)) for m in result["items"]],
+        items=[
+            _meter_to_response(m, latest_by_meter.get(m.id), site_names.get(m.site_id))
+            for m in meters
+        ],
         total=total,
         page=result["page"],
         page_size=result["page_size"],
