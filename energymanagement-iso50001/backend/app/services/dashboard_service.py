@@ -424,18 +424,16 @@ class DashboardService:
     async def _get_consumption_chart(
         self, start: date, end: date, granularity: str
     ) -> list[dict]:
-        """Verbrauchszeitreihe für die Hauptzähler – eine aggregierte Abfrage."""
+        """Verbrauchszeitreihe nach Energieträger aggregiert (nicht je Zähler)."""
         trunc_map = {"daily": "day", "weekly": "week", "monthly": "month", "yearly": "year"}
         trunc = trunc_map.get(granularity, "month")
 
         ts_start = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
         ts_end = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
 
-        # Alle Zähler in einer Abfrage
+        # Nach energy_type aggregieren statt je Zähler
         query = (
             select(
-                Meter.id,
-                Meter.name,
                 Meter.energy_type,
                 Meter.unit,
                 func.date_trunc(trunc, MeterReading.timestamp).label("period"),
@@ -445,32 +443,40 @@ class DashboardService:
             .where(
                 Meter.is_active == True,  # noqa: E712
                 Meter.is_feed_in != True,
-                Meter.parent_meter_id.is_(None),
                 MeterReading.timestamp >= ts_start,
                 MeterReading.timestamp < ts_end,
             )
-            .group_by(Meter.id, Meter.name, Meter.energy_type, Meter.unit, text("period"))
-            .order_by(Meter.id, text("period"))
+            .group_by(Meter.energy_type, Meter.unit, text("period"))
+            .order_by(Meter.energy_type, text("period"))
         )
         result = await self.db.execute(query)
         rows = result.all()
 
-        # Ergebnisse nach Zähler gruppieren
+        # Bezeichnungen für Energieträger
+        labels = {
+            "electricity": "Strom",
+            "district_heating": "Fernwärme",
+            "district_cooling": "Kälte",
+            "water": "Wasser",
+            "gas": "Gas",
+        }
+
+        # Ergebnisse nach energy_type gruppieren
         charts: dict = {}
         for row in rows:
-            mid = row.id
-            if mid not in charts:
-                charts[mid] = {
-                    "meter_id": mid,
-                    "meter_name": row.name,
-                    "energy_type": row.energy_type,
+            et = row.energy_type
+            if et not in charts:
+                charts[et] = {
+                    "meter_id": et,
+                    "meter_name": labels.get(et, et),
+                    "energy_type": et,
                     "unit": "kWh",
                     "data": [],
                 }
             conv = CONVERSION_FACTORS.get(row.unit, Decimal("1"))
-            charts[mid]["data"].append({
+            charts[et]["data"].append({
                 "label": row.period.strftime("%b %Y") if row.period else "",
-                "value": (row.consumption or Decimal("0")) * conv,
+                "value": float((row.consumption or Decimal("0")) * conv),
             })
 
         return list(charts.values())
