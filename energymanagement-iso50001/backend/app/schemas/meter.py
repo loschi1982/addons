@@ -43,6 +43,11 @@ class MeterBase(BaseModel):
     virtual_config: dict[str, Any] | None = None
     schema_label: str | None = Field(None, max_length=100)
     notes: str | None = None
+    display_name: str | None = Field(None, max_length=255)
+    serial_number: str | None = Field(None, max_length=100)
+    installation_date: date | None = None
+    removal_date: date | None = None
+    calibration_date: date | None = None
 
 
 class MeterCreate(MeterBase):
@@ -74,6 +79,11 @@ class MeterUpdate(BaseModel):
     schema_label: str | None = None
     notes: str | None = None
     is_active: bool | None = None
+    display_name: str | None = None
+    serial_number: str | None = None
+    installation_date: date | None = None
+    removal_date: date | None = None
+    calibration_date: date | None = None
 
 
 class MeterResponse(MeterBase, BaseSchema):

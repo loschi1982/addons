@@ -132,6 +132,11 @@ class MeterService:
             is_feed_in=data.get("is_feed_in", False),
             virtual_config=data.get("virtual_config"),
             schema_label=data.get("schema_label"),
+            display_name=data.get("display_name"),
+            serial_number=data.get("serial_number"),
+            installation_date=data.get("installation_date"),
+            removal_date=data.get("removal_date"),
+            calibration_date=data.get("calibration_date"),
         )
         self.db.add(meter)
         await self.db.commit()
@@ -167,6 +172,7 @@ class MeterService:
             "co2_factor_override", "is_active",
             "is_submeter", "is_virtual", "is_feed_in", "is_delivery_based", "virtual_config",
             "schema_label",
+            "display_name", "serial_number", "installation_date", "removal_date", "calibration_date",
         ]
 
         for field in updatable_fields:

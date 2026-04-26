@@ -8,9 +8,10 @@ und CO₂-Faktor.
 """
 
 import uuid
+from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Boolean, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, Date, ForeignKey, Numeric, String, Text
 from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -96,6 +97,17 @@ class Meter(Base, UUIDMixin, TimestampMixin):
     # Betrachtungspunkt: Wenn gesetzt, ist dieser Zähler ein Schema-Einstiegspunkt
     # Der Unterbaum ab diesem Zähler wird als Energieschema visualisiert
     schema_label: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # Klarname (der Teil nach ' - ' im SPIE-Zählernamen, z.B. 'WC Allgemein EG A-00/81/82')
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Aktuelle Seriennummer / Zählernummer aus dem Zählergerät selbst
+    serial_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Einbaudatum des Zählers
+    installation_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Ausbaudatum (Tausch/Demontage)
+    removal_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Eichbeglaubigung / Eichfrist-Ablauf
+    calibration_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # Beziehungen
     readings = relationship("MeterReading", back_populates="meter", cascade="all, delete-orphan")
