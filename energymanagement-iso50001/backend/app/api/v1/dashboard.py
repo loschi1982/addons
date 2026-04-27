@@ -5,13 +5,19 @@ Das Dashboard liefert aggregierte Daten für die Übersichtsseite:
 KPI-Karten, Verbrauchscharts, Energieaufteilung und Warnungen.
 """
 
+import uuid
 from datetime import date
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
+from app.models.meter import Meter
+from app.models.reading import MeterReading
 from app.models.user import User
 from app.schemas.dashboard import DashboardResponse, EnPIResponse
 from app.services.dashboard_service import DashboardService
@@ -39,6 +45,101 @@ async def get_dashboard(
         import traceback
         logger.error("dashboard_traceback", tb=traceback.format_exc())
         raise
+
+
+class AnomalyReading(BaseModel):
+    """Ein statistisch auffälliger Messwert."""
+    reading_id: uuid.UUID
+    meter_id: uuid.UUID
+    meter_name: str
+    energy_type: str
+    unit: str
+    site_id: uuid.UUID | None
+    site_name: str | None
+    timestamp: str
+    consumption: Decimal
+    p95: Decimal
+    factor: Decimal   # consumption / p95
+
+
+@router.get("/anomalies", response_model=list[AnomalyReading])
+async def get_anomalies(
+    threshold: float = Query(20.0, ge=5.0, description="Faktor über p95 ab dem ein Ausreißer erkannt wird"),
+    limit: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Statistische Ausreißer in Messwerten erkennen.
+
+    Liefert Messwerte, deren consumption > threshold × p95 des jeweiligen Zählers.
+    Sortiert nach Schwere (höchster Faktor zuerst).
+    """
+    result = await db.execute(text("""
+        WITH meter_stats AS (
+            SELECT
+                meter_id,
+                PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY consumption) AS p95
+            FROM meter_readings
+            WHERE consumption IS NOT NULL AND consumption > 0
+            GROUP BY meter_id
+            HAVING COUNT(*) >= 10
+              AND PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY consumption) > 0
+        )
+        SELECT
+            r.id            AS reading_id,
+            r.meter_id,
+            m.name          AS meter_name,
+            m.energy_type,
+            m.unit,
+            m.site_id,
+            s.name          AS site_name,
+            r.timestamp     AT TIME ZONE 'Europe/Berlin' AS ts,
+            r.consumption,
+            ms.p95,
+            r.consumption / ms.p95 AS factor
+        FROM meter_readings r
+        JOIN meter_stats ms ON r.meter_id = ms.meter_id
+        JOIN meters m ON r.meter_id = m.id
+        LEFT JOIN sites s ON m.site_id = s.id
+        WHERE r.consumption > ms.p95 * :threshold
+          AND r.consumption > 0
+          AND m.is_active = TRUE
+        ORDER BY factor DESC
+        LIMIT :limit
+    """), {"threshold": threshold, "limit": limit})
+
+    rows = result.fetchall()
+    return [
+        AnomalyReading(
+            reading_id=row.reading_id,
+            meter_id=row.meter_id,
+            meter_name=row.meter_name,
+            energy_type=row.energy_type,
+            unit=row.unit,
+            site_id=row.site_id,
+            site_name=row.site_name,
+            timestamp=str(row.ts)[:16],
+            consumption=Decimal(str(row.consumption)),
+            p95=Decimal(str(row.p95)),
+            factor=Decimal(str(row.factor)),
+        )
+        for row in rows
+    ]
+
+
+@router.delete("/anomalies/{reading_id}")
+async def delete_anomaly_reading(
+    reading_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Einen als Ausreißer markierten Messwert löschen."""
+    reading = await db.get(MeterReading, reading_id)
+    if reading:
+        await db.delete(reading)
+        await db.commit()
+    return {"deleted": True, "id": reading_id}
 
 
 @router.get("/enpi", response_model=list[EnPIResponse])

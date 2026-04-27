@@ -6,6 +6,7 @@ import {
 import {
   TrendingUp, TrendingDown, Minus, AlertTriangle, Activity,
   Zap, Leaf, Euro, Gauge, Sun, BatteryCharging,
+  Trash2, ExternalLink, ChevronDown, ChevronUp, RefreshCw,
 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import InfoTip from '@/components/ui/InfoTip';
@@ -399,6 +400,196 @@ function EnPIOverviewCard() {
   );
 }
 
+/* ── Anomalie-Panel ── */
+
+interface AnomalyReading {
+  reading_id: string;
+  meter_id: string;
+  meter_name: string;
+  energy_type: string;
+  unit: string;
+  site_id: string | null;
+  site_name: string | null;
+  timestamp: string;
+  consumption: number;
+  p95: number;
+  factor: number;
+}
+
+const ENERGY_TYPE_COLORS_BG: Record<string, string> = {
+  electricity: 'bg-yellow-100 text-yellow-800',
+  gas: 'bg-blue-100 text-blue-800',
+  district_heating: 'bg-red-100 text-red-800',
+  district_cooling: 'bg-cyan-100 text-cyan-800',
+  water: 'bg-teal-100 text-teal-800',
+};
+
+function AnomalyPanel() {
+  const [anomalies, setAnomalies] = useState<AnomalyReading[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [collapsed, setCollapsed] = useState(false);
+  const [deleting, setDeleting] = useState<Set<string>>(new Set());
+  const [threshold, setThreshold] = useState(20);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await apiClient.get<AnomalyReading[]>('/api/v1/dashboard/anomalies', {
+        params: { threshold, limit: 50 },
+      });
+      setAnomalies(res.data);
+    } catch { /* interceptor */ } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, [threshold]);
+
+  const handleDelete = async (reading: AnomalyReading) => {
+    if (!confirm(`Messwert von ${reading.timestamp} (${Number(reading.consumption).toLocaleString('de-DE')} ${reading.unit}) wirklich löschen?`)) return;
+    setDeleting(prev => new Set(prev).add(reading.reading_id));
+    try {
+      await apiClient.delete(`/api/v1/dashboard/anomalies/${reading.reading_id}`);
+      setAnomalies(prev => prev.filter(a => a.reading_id !== reading.reading_id));
+    } catch { /* interceptor */ } finally {
+      setDeleting(prev => { const s = new Set(prev); s.delete(reading.reading_id); return s; });
+    }
+  };
+
+  const handleGoToMeter = (a: AnomalyReading) => {
+    if (a.site_id) {
+      window.location.href = `/sites?site=${a.site_id}&meter=${a.meter_id}`;
+    } else {
+      window.location.href = `/meters?id=${a.meter_id}`;
+    }
+  };
+
+  const handleGoToReadings = (a: AnomalyReading) => {
+    window.location.href = `/readings?meter_id=${a.meter_id}`;
+  };
+
+  if (loading) return (
+    <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 flex items-center gap-3">
+      <div className="h-5 w-5 animate-spin rounded-full border-2 border-red-300 border-t-red-600 flex-shrink-0" />
+      <span className="text-sm text-red-700">Ausreißer werden analysiert…</span>
+    </div>
+  );
+
+  if (anomalies.length === 0) return null;
+
+  return (
+    <div className="mt-6 rounded-xl border-2 border-red-300 bg-red-50 shadow-sm">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-red-200">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0" />
+          <h2 className="font-semibold text-red-800">
+            {anomalies.length} Ausreißer erkannt
+          </h2>
+          <span className="text-xs text-red-500">
+            (Verbrauch &gt; {threshold}× Normalwert)
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-red-700 flex items-center gap-1">
+            Schwellwert:
+            <select
+              value={threshold}
+              onChange={e => setThreshold(Number(e.target.value))}
+              className="ml-1 rounded border border-red-300 bg-white px-1 py-0.5 text-xs text-red-800"
+            >
+              {[5, 10, 20, 50, 100].map(v => <option key={v} value={v}>{v}×</option>)}
+            </select>
+          </label>
+          <button onClick={load} className="p-1 text-red-500 hover:text-red-700" title="Neu laden">
+            <RefreshCw className="h-4 w-4" />
+          </button>
+          <button onClick={() => setCollapsed(c => !c)} className="p-1 text-red-500 hover:text-red-700">
+            {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Tabelle */}
+      {!collapsed && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="border-b border-red-200 bg-red-100/50 text-xs uppercase text-red-700">
+              <tr>
+                <th className="px-4 py-2 text-left">Zeitpunkt</th>
+                <th className="px-4 py-2 text-left">Zähler</th>
+                <th className="px-4 py-2 text-left">Standort</th>
+                <th className="px-4 py-2 text-left">Energieart</th>
+                <th className="px-4 py-2 text-right">Ausreißerwert</th>
+                <th className="px-4 py-2 text-right">Normalwert p95</th>
+                <th className="px-4 py-2 text-right">Faktor</th>
+                <th className="px-4 py-2 text-right">Aktionen</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-red-100">
+              {anomalies.map(a => (
+                <tr key={a.reading_id} className="hover:bg-red-100/40 transition-colors">
+                  <td className="px-4 py-2 font-mono text-xs text-gray-600 whitespace-nowrap">
+                    {a.timestamp}
+                  </td>
+                  <td className="px-4 py-2 max-w-[200px]">
+                    <span className="block font-medium text-gray-900 truncate" title={a.meter_name}>
+                      {a.meter_name}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">
+                    {a.site_name ?? '–'}
+                  </td>
+                  <td className="px-4 py-2">
+                    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${ENERGY_TYPE_COLORS_BG[a.energy_type] || 'bg-gray-100 text-gray-700'}`}>
+                      {ENERGY_TYPE_LABELS[a.energy_type as keyof typeof ENERGY_TYPE_LABELS] || a.energy_type}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-right font-bold text-red-700 whitespace-nowrap">
+                    {Number(a.consumption).toLocaleString('de-DE', { maximumFractionDigits: 1 })} {a.unit}
+                  </td>
+                  <td className="px-4 py-2 text-right text-gray-500 whitespace-nowrap">
+                    {Number(a.p95).toLocaleString('de-DE', { maximumFractionDigits: 1 })} {a.unit}
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <span className="font-bold text-red-600">
+                      {Number(a.factor).toFixed(0)}×
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <div className="inline-flex items-center gap-1">
+                      <button
+                        onClick={() => handleGoToReadings(a)}
+                        className="rounded p-1 text-gray-400 hover:text-primary-600"
+                        title="Messwerte anzeigen"
+                      >
+                        <Activity className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleGoToMeter(a)}
+                        className="rounded p-1 text-gray-400 hover:text-primary-600"
+                        title="Zum Standort / Zähler"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(a)}
+                        disabled={deleting.has(a.reading_id)}
+                        className="rounded p-1 text-gray-400 hover:text-red-600 disabled:opacity-40"
+                        title="Messwert löschen"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Hauptseite ── */
 
 export default function DashboardPage() {
@@ -494,6 +685,9 @@ export default function DashboardPage() {
           <AlertBanner alerts={data.alerts} />
         </div>
       )}
+
+      {/* Ausreißer-Panel */}
+      <AnomalyPanel />
 
       {/* KPI-Karten */}
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
