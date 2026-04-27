@@ -476,7 +476,7 @@ function AnomalyPanel() {
   };
 
   const handleGoToReadings = (a: AnomalyReading) => {
-    navigate(`/readings?meter_id=${a.meter_id}`);
+    navigate(`/readings?meter_id=${a.meter_id}&highlight=${a.reading_id}`);
   };
 
   if (loading) return (
