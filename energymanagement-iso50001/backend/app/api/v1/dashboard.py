@@ -105,6 +105,7 @@ async def get_anomalies(
         WHERE r.consumption > ms.p95 * :threshold
           AND r.consumption > 0
           AND m.is_active = TRUE
+          AND r.quality != 'verified'
         ORDER BY factor DESC
         LIMIT :limit
     """), {"threshold": threshold, "limit": limit})
@@ -140,6 +141,20 @@ async def delete_anomaly_reading(
         await db.delete(reading)
         await db.commit()
     return {"deleted": True, "id": reading_id}
+
+
+@router.patch("/anomalies/{reading_id}/accept")
+async def accept_anomaly_reading(
+    reading_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Einen Ausreißer als geprüft/gültig markieren (quality = verified)."""
+    reading = await db.get(MeterReading, reading_id)
+    if reading:
+        reading.quality = "verified"
+        await db.commit()
+    return {"accepted": True, "id": reading_id}
 
 
 @router.get("/enpi", response_model=list[EnPIResponse])
