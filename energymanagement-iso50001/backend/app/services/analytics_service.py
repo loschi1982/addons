@@ -45,6 +45,18 @@ class AnalyticsService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    # ── Hilfsmethode: Zähler-IDs eines Standorts ──
+
+    async def _meter_ids_for_site(self, site_id: uuid.UUID) -> list[uuid.UUID]:
+        """Alle aktiven Zähler eines Standorts zurückgeben."""
+        result = await self.db.execute(
+            select(Meter.id).where(
+                Meter.site_id == site_id,
+                Meter.is_active == True,  # noqa: E712
+            )
+        )
+        return list(result.scalars().all())
+
     # ── Zeitreihen ──
 
     async def get_timeseries(
@@ -54,12 +66,17 @@ class AnalyticsService:
         start_date: date | None = None,
         end_date: date | None = None,
         granularity: str = "daily",
+        site_id: uuid.UUID | None = None,
     ) -> list[dict]:
         """
         Zeitreihendaten für ein oder mehrere Zähler.
 
         Granularity: hourly, daily, weekly, monthly, yearly
         """
+        # Standortfilter → Zähler-IDs auflösen
+        if site_id and not meter_ids:
+            meter_ids = await self._meter_ids_for_site(site_id)
+
         # Zähler ermitteln (Einspeisezähler ausschließen)
         meter_query = select(Meter).where(
             Meter.is_active == True,  # noqa: E712
@@ -144,8 +161,12 @@ class AnalyticsService:
         period2_start: date = None,
         period2_end: date = None,
         granularity: str = "monthly",
+        site_id: uuid.UUID | None = None,
     ) -> dict:
         """Zwei Zeiträume vergleichen (z.B. Jahr-zu-Jahr)."""
+        # Standortfilter → Zähler-IDs auflösen
+        if site_id and not meter_ids:
+            meter_ids = await self._meter_ids_for_site(site_id)
         # Wenn energy_type gesetzt, Zähler automatisch ermitteln
         if not meter_ids and energy_type:
             meter_query = select(Meter.id).where(
@@ -217,6 +238,7 @@ class AnalyticsService:
         start_date: date,
         end_date: date,
         group_by: str = "energy_type",
+        site_id: uuid.UUID | None = None,
     ) -> list[dict]:
         """Verbrauchsverteilung nach Energietyp, Standort oder Kostenstelle."""
         group_col = {
@@ -245,6 +267,8 @@ class AnalyticsService:
             )
             .group_by(group_col, Meter.unit)
         )
+        if site_id:
+            query = query.where(Meter.site_id == site_id)
         result = await self.db.execute(query)
         rows = result.all()
 
@@ -1070,8 +1094,11 @@ class AnalyticsService:
         energy_type: str | None = None,
         start_date: date | None = None,
         end_date: date | None = None,
+        site_id: uuid.UUID | None = None,
     ) -> list[dict]:
         """Kumulative Verbrauchslinie pro Zähler."""
+        if site_id and not meter_ids:
+            meter_ids = await self._meter_ids_for_site(site_id)
         meter_query = select(Meter).where(
             Meter.is_active == True,  # noqa: E712
             Meter.is_feed_in != True,
@@ -1144,6 +1171,7 @@ class AnalyticsService:
         year_b: int,
         energy_types: list[str] | None = None,
         meter_ids: list[uuid.UUID] | None = None,
+        site_id: uuid.UUID | None = None,
     ) -> dict:
         """
         Monatlicher Verbrauchsvergleich zweier Jahre, aufgeschlüsselt nach Energieträgern.
@@ -1177,6 +1205,8 @@ class AnalyticsService:
         }
 
         # Zähler laden
+        if site_id and not meter_ids:
+            meter_ids = await self._meter_ids_for_site(site_id)
         meter_query = select(Meter).where(Meter.is_active == True)  # noqa: E712
         if meter_ids:
             meter_query = meter_query.where(Meter.id.in_(meter_ids))
@@ -1272,6 +1302,7 @@ class AnalyticsService:
         end_date: date,
         energy_types: list[str] | None = None,
         meter_ids: list[uuid.UUID] | None = None,
+        site_id: uuid.UUID | None = None,
     ) -> dict:
         """
         Energiebilanz für einen Zeitraum – monatlich aufgeschlüsselt nach Energieträgern.
@@ -1308,6 +1339,8 @@ class AnalyticsService:
         }
 
         # Zähler laden
+        if site_id and not meter_ids:
+            meter_ids = await self._meter_ids_for_site(site_id)
         meter_query = select(Meter).where(Meter.is_active == True)  # noqa: E712
         if meter_ids:
             meter_query = meter_query.where(Meter.id.in_(meter_ids))
@@ -1426,6 +1459,7 @@ class AnalyticsService:
         start_date: date,
         end_date: date,
         meter_ids: list[uuid.UUID] | None = None,
+        site_id: uuid.UUID | None = None,
     ) -> dict:
         """
         Kostenumlage auf Nutzungseinheiten basierend auf MeterUnitAllocation.
@@ -1438,6 +1472,8 @@ class AnalyticsService:
         sortiert nach Gesamtkosten absteigend.
         """
         # Alle MeterUnitAllocations mit ihren Nutzungseinheiten laden
+        if site_id and not meter_ids:
+            meter_ids = await self._meter_ids_for_site(site_id)
         alloc_q = (
             select(MeterUnitAllocation)
             .options(
@@ -1715,4 +1751,218 @@ class AnalyticsService:
             "resolution_minutes": avg_interval_min,
             "max_demand_kw_contract": max_demand_kw_contract,
             "contract_exceeded": contract_exceeded,
+        }
+
+    # ── Teilzähler-Beitrag (Donut-Chart) ──
+
+    async def get_submeter_contribution(
+        self,
+        root_meter_id: uuid.UUID,
+        start_date: date,
+        end_date: date,
+    ) -> dict:
+        """
+        Verbrauchsanteile der direkten Unterzähler eines Hauptzählers.
+
+        Rückgabe:
+          {
+            "root": {"id": ..., "name": ..., "unit": ..., "total_kwh": ...},
+            "children": [{"id": ..., "name": ..., "kwh": ..., "share_percent": ...}, ...],
+            "unaccounted_kwh": ...,   # root - Summe Kinder
+            "unaccounted_percent": ...
+          }
+        """
+        start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+        end_dt = datetime.combine(end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+
+        # Hauptzähler laden
+        root_meter = await self.db.get(Meter, root_meter_id)
+        if not root_meter:
+            return {"root": None, "children": [], "unaccounted_kwh": 0, "unaccounted_percent": 0}
+
+        conv_root = CONVERSION_FACTORS.get(root_meter.unit or "kWh", Decimal("1"))
+
+        # Verbrauch Hauptzähler
+        root_q = select(func.sum(MeterReading.consumption)).where(
+            MeterReading.meter_id == root_meter_id,
+            MeterReading.timestamp >= start_dt,
+            MeterReading.timestamp < end_dt,
+            MeterReading.consumption.isnot(None),
+        )
+        root_sum_raw = (await self.db.execute(root_q)).scalar() or Decimal("0")
+        root_kwh = float(root_sum_raw * conv_root)
+
+        # Direkte Unterzähler
+        children_q = select(Meter).where(
+            Meter.parent_meter_id == root_meter_id,
+            Meter.is_active == True,  # noqa: E712
+        )
+        children = list((await self.db.execute(children_q)).scalars().all())
+
+        child_results = []
+        child_total_kwh = 0.0
+        for child in children:
+            conv = CONVERSION_FACTORS.get(child.unit or "kWh", Decimal("1"))
+            cq = select(func.sum(MeterReading.consumption)).where(
+                MeterReading.meter_id == child.id,
+                MeterReading.timestamp >= start_dt,
+                MeterReading.timestamp < end_dt,
+                MeterReading.consumption.isnot(None),
+            )
+            c_raw = (await self.db.execute(cq)).scalar() or Decimal("0")
+            c_kwh = float(c_raw * conv)
+            child_total_kwh += c_kwh
+            child_results.append({
+                "id": str(child.id),
+                "name": child.display_name or child.name,
+                "kwh": round(c_kwh, 2),
+                "share_percent": 0.0,  # Berechnung nach Schleife
+            })
+
+        # Anteile berechnen
+        base = root_kwh if root_kwh > 0 else child_total_kwh
+        for c in child_results:
+            c["share_percent"] = round(c["kwh"] / base * 100, 1) if base > 0 else 0.0
+
+        unaccounted = max(0.0, root_kwh - child_total_kwh)
+        unaccounted_pct = round(unaccounted / root_kwh * 100, 1) if root_kwh > 0 else 0.0
+
+        return {
+            "root": {
+                "id": str(root_meter_id),
+                "name": root_meter.display_name or root_meter.name,
+                "unit": root_meter.unit,
+                "total_kwh": round(root_kwh, 2),
+            },
+            "children": sorted(child_results, key=lambda x: -x["kwh"]),
+            "unaccounted_kwh": round(unaccounted, 2),
+            "unaccounted_percent": unaccounted_pct,
+        }
+
+    # ── Wetter-Regression (Streudiagramm Temperatur vs. Verbrauch) ──
+
+    async def get_weather_regression(
+        self,
+        meter_id: uuid.UUID,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> dict:
+        """
+        Lineare Regression: Tagesverbrauch vs. Außentemperatur.
+
+        Verbindet tägliche Messwerte mit Wetterdaten des Standorts.
+        Rückgabe: Streuplot-Punkte + Regressionslinie (Steigung, Achsenabschnitt, R²).
+        """
+        from app.models.weather import WeatherRecord, WeatherStation
+
+        meter = await self.db.get(Meter, meter_id)
+        if not meter:
+            return {"points": [], "regression": None, "meter_name": "", "unit": ""}
+
+        today = date.today()
+        if not start_date:
+            start_date = date(today.year - 1, today.month, today.day)
+        if not end_date:
+            end_date = today
+
+        start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+        end_dt = datetime.combine(end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+        conv = CONVERSION_FACTORS.get(meter.unit or "kWh", Decimal("1"))
+
+        # Tagesverbrauch des Zählers
+        daily_q = (
+            select(
+                func.date_trunc("day", MeterReading.timestamp).label("day"),
+                func.sum(MeterReading.consumption).label("consumption"),
+            )
+            .where(
+                MeterReading.meter_id == meter_id,
+                MeterReading.timestamp >= start_dt,
+                MeterReading.timestamp < end_dt,
+                MeterReading.consumption.isnot(None),
+                MeterReading.consumption > 0,
+            )
+            .group_by(text("day"))
+            .order_by(text("day"))
+        )
+        daily_rows = (await self.db.execute(daily_q)).all()
+        daily_map: dict[date, float] = {
+            r.day.date(): float((r.consumption or Decimal("0")) * conv)
+            for r in daily_rows
+        }
+
+        # Wetterstation des Standorts ermitteln
+        weather_station_id: uuid.UUID | None = None
+        if meter.site_id:
+            site = await self.db.get(Site, meter.site_id)
+            if site:
+                weather_station_id = site.weather_station_id
+
+        if not weather_station_id:
+            # Fallback: erste aktive Station
+            station_q = select(WeatherStation.id).where(
+                WeatherStation.is_active == True  # noqa: E712
+            ).limit(1)
+            weather_station_id = (await self.db.execute(station_q)).scalar()
+
+        if not weather_station_id or not daily_map:
+            return {"points": [], "regression": None, "meter_name": meter.display_name or meter.name, "unit": meter.unit}
+
+        # Wetterdaten für Zeitraum
+        weather_q = (
+            select(WeatherRecord.date, WeatherRecord.temp_avg)
+            .where(
+                WeatherRecord.station_id == weather_station_id,
+                WeatherRecord.date >= start_date,
+                WeatherRecord.date <= end_date,
+                WeatherRecord.temp_avg.isnot(None),
+            )
+            .order_by(WeatherRecord.date)
+        )
+        weather_rows = (await self.db.execute(weather_q)).all()
+        weather_map: dict[date, float] = {r.date: float(r.temp_avg) for r in weather_rows}
+
+        # Schnittmenge: nur Tage mit beiden Werten
+        points = []
+        for d, consumption in daily_map.items():
+            if d in weather_map:
+                points.append({
+                    "date": d.isoformat(),
+                    "temp": weather_map[d],
+                    "consumption": round(consumption, 3),
+                })
+
+        if len(points) < 3:
+            return {"points": points, "regression": None, "meter_name": meter.display_name or meter.name, "unit": meter.unit}
+
+        # Lineare Regression (Least Squares, numpy-frei)
+        n = len(points)
+        xs = [p["temp"] for p in points]
+        ys = [p["consumption"] for p in points]
+        sum_x = sum(xs)
+        sum_y = sum(ys)
+        sum_xx = sum(x * x for x in xs)
+        sum_xy = sum(xs[i] * ys[i] for i in range(n))
+        denom = n * sum_xx - sum_x ** 2
+        if denom == 0:
+            return {"points": points, "regression": None, "meter_name": meter.display_name or meter.name, "unit": meter.unit}
+
+        slope = (n * sum_xy - sum_x * sum_y) / denom
+        intercept = (sum_y - slope * sum_x) / n
+
+        # R²
+        y_mean = sum_y / n
+        ss_tot = sum((y - y_mean) ** 2 for y in ys)
+        ss_res = sum((ys[i] - (slope * xs[i] + intercept)) ** 2 for i in range(n))
+        r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
+
+        return {
+            "meter_name": meter.display_name or meter.name,
+            "unit": meter.unit or "kWh",
+            "points": points,
+            "regression": {
+                "slope": round(slope, 4),
+                "intercept": round(intercept, 3),
+                "r2": round(r2, 4),
+            },
         }
