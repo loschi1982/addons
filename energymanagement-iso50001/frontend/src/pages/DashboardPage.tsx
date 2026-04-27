@@ -432,7 +432,7 @@ function AnomalyPanel() {
   const [collapsed, setCollapsed] = useState(false);
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
   const [accepting, setAccepting] = useState<Set<string>>(new Set());
-  const [threshold, setThreshold] = useState(20);
+  const [threshold, setThreshold] = useState(5);
 
   const load = async () => {
     setLoading(true);
@@ -560,7 +560,7 @@ function AnomalyPanel() {
                     {Number(a.consumption).toLocaleString('de-DE', { maximumFractionDigits: 1 })} {a.unit}
                   </td>
                   <td className="px-4 py-2 text-right text-gray-500 whitespace-nowrap">
-                    {Number(a.p95).toLocaleString('de-DE', { maximumFractionDigits: 1 })} {a.unit}
+                    {Number(a.p95).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 3 })} {a.unit}
                   </td>
                   <td className="px-4 py-2 text-right">
                     <span className="font-bold text-red-600">
