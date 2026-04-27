@@ -27,6 +27,7 @@ interface Report {
   generated_at: string | null;
   error_message: string | null;
   created_at: string;
+  site_id?: string | null;
 }
 
 interface ReportDetail extends Report {
@@ -82,6 +83,7 @@ export default function ReportsPage() {
   const [filterStatus, setFilterStatus] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [viewingReport, setViewingReport] = useState<ReportDetail | null>(null);
+  const [siteMap, setSiteMap] = useState<Record<string, string>>({});
 
   const fetchReports = useCallback(async () => {
     setLoading(true);
@@ -96,6 +98,17 @@ export default function ReportsPage() {
   }, [page, filterStatus]);
 
   useEffect(() => { fetchReports(); }, [fetchReports]);
+
+  useEffect(() => {
+    apiClient.get('/api/v1/sites', { params: { page_size: 100 } })
+      .then((res) => {
+        const items: { id: string; name: string }[] = res.data.items || res.data || [];
+        const map: Record<string, string> = {};
+        items.forEach((s) => { map[s.id] = s.name; });
+        setSiteMap(map);
+      })
+      .catch(() => {});
+  }, []);
 
   const deleteReport = async (id: string) => {
     if (!confirm('Bericht wirklich löschen? Die PDF-Datei wird ebenfalls gelöscht.')) return;
@@ -223,6 +236,7 @@ export default function ReportsPage() {
                   <tr className="border-b text-left text-gray-500">
                     <th className="pb-2 font-medium">Titel</th>
                     <th className="pb-2 font-medium">Typ</th>
+                    <th className="pb-2 font-medium">Standort</th>
                     <th className="pb-2 font-medium">Zeitraum</th>
                     <th className="pb-2 font-medium text-center">Status</th>
                     <th className="pb-2 font-medium">Erstellt</th>
@@ -238,6 +252,9 @@ export default function ReportsPage() {
                         <td className="py-3 font-medium text-gray-900">{r.title}</td>
                         <td className="py-3 text-gray-500">
                           {REPORT_TYPES.find((t) => t.value === r.report_type)?.label || r.report_type}
+                        </td>
+                        <td className="py-3 text-gray-500 text-sm">
+                          {r.site_id ? (siteMap[r.site_id] ?? '–') : <span className="text-gray-300">Alle</span>}
                         </td>
                         <td className="py-3 text-gray-500">
                           {formatDate(r.period_start)} – {formatDate(r.period_end)}

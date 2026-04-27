@@ -87,7 +87,7 @@ function exportCsv(data: BalanceData) {
 
 /* ── Hauptkomponente ── */
 
-export default function EnergyBalancePage() {
+export default function EnergyBalancePage({ siteId }: { siteId?: string }) {
   const today = new Date();
   const firstOfYear = `${today.getFullYear()}-01-01`;
   const todayStr = today.toISOString().slice(0, 10);
@@ -105,6 +105,7 @@ export default function EnergyBalancePage() {
     setError(null);
     try {
       const params = new URLSearchParams({ start_date: startDate, end_date: endDate });
+      if (siteId) params.set('site_id', siteId);
       const res = await apiClient.get<BalanceData>(
         `/api/v1/analytics/energy-balance?${params}`
       );
@@ -114,7 +115,7 @@ export default function EnergyBalancePage() {
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate]);
+  }, [startDate, endDate, siteId]);
 
   // Chart-Daten aufbereiten
   const chartData = data

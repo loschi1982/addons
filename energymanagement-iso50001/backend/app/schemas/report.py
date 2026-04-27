@@ -10,7 +10,8 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from typing import Self
 
 from app.schemas.common import BaseSchema
 
@@ -82,6 +83,20 @@ class ReportResponse(ReportBase, BaseSchema):
     generated_at: datetime | None
     error_message: str | None = None
     created_at: datetime
+    site_id: uuid.UUID | None = None  # aus scope extrahiert
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_site_id(cls, data: Self) -> Self:
+        """site_id aus scope-JSON extrahieren."""
+        if hasattr(data, "scope") and isinstance(data.scope, dict):
+            raw = data.scope.get("site_id")
+            if raw and not getattr(data, "site_id", None):
+                try:
+                    object.__setattr__(data, "site_id", uuid.UUID(str(raw)))
+                except (ValueError, AttributeError):
+                    pass
+        return data
 
 
 class ReportDetailResponse(ReportResponse):

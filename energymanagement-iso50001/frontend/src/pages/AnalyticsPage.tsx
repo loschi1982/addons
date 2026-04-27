@@ -2,7 +2,8 @@ import { useEffect, useState, useCallback, lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area,
-  ComposedChart, PieChart, Pie, Cell,
+  ComposedChart, Scatter,
+  PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer,
 } from 'recharts';
@@ -120,6 +121,7 @@ const TAB_GROUPS: TabGroup[] = [
       { key: 'monthly_comparison', label: 'Jahresvergleich' },
       { key: 'distribution', label: 'Verteilung' },
       { key: 'cumulative', label: 'Summenlinie' },
+      { key: 'submeter', label: 'Teilzähler' },
     ],
   },
   {
@@ -131,6 +133,7 @@ const TAB_GROUPS: TabGroup[] = [
       { key: 'sankey', label: 'Energiefluss' },
       { key: 'self_consumption', label: 'Eigenverbrauch' },
       { key: 'weather', label: 'Witterungskorrektur' },
+      { key: 'weather_regression', label: 'Wetter-Regression' },
     ],
   },
   {
@@ -174,6 +177,11 @@ function yearStart(): string {
 
 /* ── Hauptkomponente ── */
 
+interface Site {
+  id: string;
+  name: string;
+}
+
 export default function AnalyticsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTab = (searchParams.get('tab') as TabKey) || 'timeseries';
@@ -181,6 +189,8 @@ export default function AnalyticsPage() {
     ALL_TABS.some(t => t.key === initialTab) ? initialTab : 'timeseries'
   );
   const [meters, setMeters] = useState<Meter[]>([]);
+  const [sites, setSites] = useState<Site[]>([]);
+  const [siteId, setSiteId] = useState('');
 
   const handleTabChange = (key: TabKey) => {
     setTab(key);
@@ -191,18 +201,43 @@ export default function AnalyticsPage() {
   const activeGroup = TAB_GROUPS.find((g) => g.tabs.some((t) => t.key === tab)) || TAB_GROUPS[0];
 
   useEffect(() => {
-    apiClient.get('/api/v1/meters').then((res) => {
+    apiClient.get('/api/v1/meters', { params: { page_size: 500 } }).then((res) => {
       const items = res.data.items || res.data;
       setMeters(Array.isArray(items) ? items : []);
     });
+    apiClient.get('/api/v1/sites', { params: { page_size: 100 } }).then((res) => {
+      const items = res.data.items || res.data;
+      setSites(Array.isArray(items) ? items : []);
+    });
   }, []);
+
+  const filteredMeters = siteId ? meters.filter((m) => (m as unknown as Record<string, unknown>)['site_id'] === siteId) : meters;
 
   return (
     <div>
-      <h1 className="page-title">Analysen</h1>
-      <p className="mt-1 text-sm text-gray-500">
-        Erweiterte Auswertungen und Visualisierungen der Energiedaten.
-      </p>
+      <div className="flex items-end justify-between">
+        <div>
+          <h1 className="page-title">Analysen</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Erweiterte Auswertungen und Visualisierungen der Energiedaten.
+          </p>
+        </div>
+        {sites.length > 0 && (
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-gray-600">Standort:</label>
+            <select
+              className="input w-auto min-w-[200px]"
+              value={siteId}
+              onChange={(e) => setSiteId(e.target.value)}
+            >
+              <option value="">Alle Standorte</option>
+              {sites.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
 
       {/* Kategorien */}
       <div className="mt-4 flex gap-2">
@@ -242,27 +277,29 @@ export default function AnalyticsPage() {
       <p className="mt-2 text-xs text-gray-400">{activeGroup.description}</p>
 
       <div className="mt-4">
-        {tab === 'timeseries' && <TimeSeriesTab meters={meters} />}
-        {tab === 'comparison' && <ComparisonTab meters={meters} />}
+        {tab === 'timeseries' && <TimeSeriesTab meters={filteredMeters} siteId={siteId} />}
+        {tab === 'comparison' && <ComparisonTab meters={filteredMeters} siteId={siteId} />}
         {tab === 'monthly_comparison' && (
           <Suspense fallback={<div className="py-8 text-center text-gray-400">Laden...</div>}>
-            <MonthlyComparisonPage />
+            <MonthlyComparisonPage siteId={siteId} />
           </Suspense>
         )}
         {tab === 'energy_balance' && (
           <Suspense fallback={<div className="py-8 text-center text-gray-400">Laden...</div>}>
-            <EnergyBalancePage />
+            <EnergyBalancePage siteId={siteId} />
           </Suspense>
         )}
-        {tab === 'distribution' && <DistributionTab />}
+        {tab === 'distribution' && <DistributionTab siteId={siteId} />}
         {tab === 'self_consumption' && <SelfConsumptionTab />}
-        {tab === 'heatmap' && <HeatmapTab meters={meters} />}
-        {tab === 'sankey' && <SankeyTab meters={meters} />}
-        {tab === 'duration_curve' && <DurationCurveTab meters={meters} />}
-        {tab === 'cumulative' && <CumulativeTab meters={meters} />}
-        {tab === 'weather' && <WeatherCorrectionTab meters={meters} />}
+        {tab === 'heatmap' && <HeatmapTab meters={filteredMeters} />}
+        {tab === 'sankey' && <SankeyTab meters={filteredMeters} />}
+        {tab === 'duration_curve' && <DurationCurveTab meters={filteredMeters} />}
+        {tab === 'cumulative' && <CumulativeTab meters={filteredMeters} siteId={siteId} />}
+        {tab === 'weather' && <WeatherCorrectionTab meters={filteredMeters} />}
         {tab === 'co2path' && <CO2PathTab />}
         {tab === 'anomalies' && <AnomaliesTab />}
+        {tab === 'submeter' && <SubMeterContributionTab meters={meters} />}
+        {tab === 'weather_regression' && <WeatherRegressionTab meters={filteredMeters} />}
       </div>
     </div>
   );
@@ -270,7 +307,7 @@ export default function AnalyticsPage() {
 
 /* ── Tab: Zeitreihen ── */
 
-function TimeSeriesTab({ meters }: { meters: Meter[] }) {
+function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string }) {
   const [data, setData] = useState<TimeSeriesMeter[]>([]);
   const [selectedEnergyType, setSelectedEnergyType] = useState('electricity');
   const [selectedMeter, setSelectedMeter] = useState('');
@@ -290,20 +327,21 @@ function TimeSeriesTab({ meters }: { meters: Meter[] }) {
   };
 
   const fetchData = useCallback(async () => {
-    if (!selectedMeter) return;
+    if (!selectedMeter && !siteId) return;
     setLoading(true);
     try {
       const params: Record<string, string> = {
         start_date: startDate,
         end_date: endDate,
         granularity,
-        meter_ids: selectedMeter,
       };
+      if (selectedMeter) params.meter_ids = selectedMeter;
+      if (siteId) params.site_id = siteId;
       const res = await apiClient.get('/api/v1/analytics/timeseries', { params });
       setData(res.data);
     } catch { /* leer */ }
     setLoading(false);
-  }, [selectedMeter, startDate, endDate, granularity]);
+  }, [selectedMeter, startDate, endDate, granularity, siteId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -414,7 +452,7 @@ function TimeSeriesTab({ meters }: { meters: Meter[] }) {
 
 /* ── Tab: Vergleich ── */
 
-function ComparisonTab({ meters }: { meters: Meter[] }) {
+function ComparisonTab({ meters, siteId }: { meters: Meter[]; siteId?: string }) {
   const [mode, setMode] = useState<'meter' | 'energy_type'>('energy_type');
   const [selectedMeter, setSelectedMeter] = useState('');
   const [selectedEnergyType, setSelectedEnergyType] = useState('');
@@ -440,13 +478,14 @@ function ComparisonTab({ meters }: { meters: Meter[] }) {
       if (!selectedEnergyType) return;
       params.energy_type = selectedEnergyType;
     }
+    if (siteId) params.site_id = siteId;
     setLoading(true);
     try {
       const res = await apiClient.get('/api/v1/analytics/comparison', { params });
       setData(res.data);
     } catch { /* leer */ }
     setLoading(false);
-  }, [mode, selectedMeter, selectedEnergyType, thisYear]);
+  }, [mode, selectedMeter, selectedEnergyType, thisYear, siteId]);
 
   useEffect(() => { fetchComparison(); }, [fetchComparison]);
 
@@ -544,7 +583,7 @@ function ComparisonTab({ meters }: { meters: Meter[] }) {
 
 /* ── Tab: Verteilung ── */
 
-function DistributionTab() {
+function DistributionTab({ siteId }: { siteId?: string }) {
   const [data, setData] = useState<DistributionItem[]>([]);
   const [groupBy, setGroupBy] = useState('energy_type');
   const [startDate, setStartDate] = useState(yearStart());
@@ -554,13 +593,13 @@ function DistributionTab() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get('/api/v1/analytics/distribution', {
-        params: { start_date: startDate, end_date: endDate, group_by: groupBy },
-      });
+      const params: Record<string, string> = { start_date: startDate, end_date: endDate, group_by: groupBy };
+      if (siteId) params.site_id = siteId;
+      const res = await apiClient.get('/api/v1/analytics/distribution', { params });
       setData(res.data);
     } catch { /* leer */ }
     setLoading(false);
-  }, [startDate, endDate, groupBy]);
+  }, [startDate, endDate, groupBy, siteId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -1320,7 +1359,7 @@ function DurationCurveTab({ meters }: { meters: Meter[] }) {
 
 /* ── Tab: Summenlinie (Kumulativer Verbrauch) ── */
 
-function CumulativeTab({ meters }: { meters: Meter[] }) {
+function CumulativeTab({ meters, siteId }: { meters: Meter[]; siteId?: string }) {
   const [selectedEnergyType, setSelectedEnergyType] = useState('electricity');
   const [selectedMeters, setSelectedMeters] = useState<string[]>([]);
   const [startDate, setStartDate] = useState(yearStart());
@@ -1332,16 +1371,17 @@ function CumulativeTab({ meters }: { meters: Meter[] }) {
   const filteredMeters = meters.filter((m) => m.energy_type === selectedEnergyType);
 
   const fetchData = useCallback(async () => {
-    if (selectedMeters.length === 0) return;
+    if (selectedMeters.length === 0 && !siteId) return;
     setLoading(true);
     try {
-      const res = await apiClient.get('/api/v1/analytics/cumulative', {
-        params: { meter_ids: selectedMeters.join(','), start_date: startDate, end_date: endDate },
-      });
+      const params: Record<string, string> = { start_date: startDate, end_date: endDate };
+      if (selectedMeters.length > 0) params.meter_ids = selectedMeters.join(',');
+      if (siteId) params.site_id = siteId;
+      const res = await apiClient.get('/api/v1/analytics/cumulative', { params });
       setData(res.data);
     } catch { /* leer */ }
     setLoading(false);
-  }, [selectedMeters, startDate, endDate]);
+  }, [selectedMeters, startDate, endDate, siteId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -1427,6 +1467,345 @@ function CumulativeTab({ meters }: { meters: Meter[] }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ── Tab: Teilzähler-Beitrag ── */
+
+interface SubMeterData {
+  root: { id: string; name: string; unit: string; total_kwh: number } | null;
+  children: { id: string; name: string; kwh: number; share_percent: number }[];
+  unaccounted_kwh: number;
+  unaccounted_percent: number;
+}
+
+function SubMeterContributionTab({ meters }: { meters: Meter[] }) {
+  const [rootMeterId, setRootMeterId] = useState('');
+  const [startDate, setStartDate] = useState(yearStart());
+  const [endDate, setEndDate] = useState(today());
+  const [data, setData] = useState<SubMeterData | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    if (!rootMeterId) return;
+    setLoading(true);
+    try {
+      const res = await apiClient.get('/api/v1/analytics/submeter-contribution', {
+        params: { root_meter_id: rootMeterId, start_date: startDate, end_date: endDate },
+      });
+      setData(res.data);
+    } catch { /* leer */ }
+    setLoading(false);
+  }, [rootMeterId, startDate, endDate]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const pieData = data
+    ? [
+        ...(data.children || []).map((c, i) => ({ name: c.name, value: c.kwh, color: CHART_COLORS[i % CHART_COLORS.length] })),
+        ...(data.unaccounted_kwh > 0.1 ? [{ name: 'Nicht erfasst', value: data.unaccounted_kwh, color: '#E5E7EB' }] : []),
+      ]
+    : [];
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-3 items-end mb-6">
+        <div>
+          <label className="label">Hauptzähler</label>
+          <select className="input" value={rootMeterId} onChange={(e) => setRootMeterId(e.target.value)}>
+            <option value="">— Bitte wählen —</option>
+            {meters.map((m) => (
+              <option key={m.id} value={m.id}>{m.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="label">Von</label>
+          <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        </div>
+        <div>
+          <label className="label">Bis</label>
+          <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        </div>
+        <button onClick={fetchData} className="btn-primary flex items-center gap-1.5">
+          <RefreshCw className="h-4 w-4" />
+          Laden
+        </button>
+      </div>
+
+      {loading && (
+        <div className="flex h-60 items-center justify-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
+        </div>
+      )}
+
+      {!loading && data && data.root && (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {/* Donut-Chart */}
+          <div className="card">
+            <h3 className="text-sm font-semibold text-gray-700 mb-4">
+              Verbrauchsanteile – {data.root.name}
+              <span className="ml-2 text-gray-400 font-normal">({formatNumber(data.root.total_kwh)} kWh gesamt)</span>
+            </h3>
+            {pieData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={280}>
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={70}
+                    outerRadius={110}
+                    paddingAngle={2}
+                  >
+                    {pieData.map((entry, i) => (
+                      <Cell key={i} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(val: number) => [`${formatNumber(val)} kWh`, '']} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-60 items-center justify-center text-gray-400">Keine Unterzähler vorhanden</div>
+            )}
+          </div>
+
+          {/* Tabelle */}
+          <div className="card">
+            <h3 className="text-sm font-semibold text-gray-700 mb-4">Aufschlüsselung</h3>
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-gray-500">
+                  <th className="pb-2 font-medium">Zähler</th>
+                  <th className="pb-2 font-medium text-right">kWh</th>
+                  <th className="pb-2 font-medium text-right">Anteil</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data.children || []).map((c, i) => (
+                  <tr key={c.id} className="border-b last:border-0">
+                    <td className="py-2 flex items-center gap-2">
+                      <span className="inline-block h-3 w-3 rounded-full flex-shrink-0" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
+                      {c.name}
+                    </td>
+                    <td className="py-2 text-right font-mono">{formatNumber(c.kwh)}</td>
+                    <td className="py-2 text-right font-mono">{c.share_percent.toFixed(1)}%</td>
+                  </tr>
+                ))}
+                {data.unaccounted_kwh > 0.1 && (
+                  <tr className="border-b last:border-0 text-gray-400">
+                    <td className="py-2 flex items-center gap-2">
+                      <span className="inline-block h-3 w-3 rounded-full flex-shrink-0 bg-gray-200" />
+                      Nicht erfasst
+                    </td>
+                    <td className="py-2 text-right font-mono">{formatNumber(data.unaccounted_kwh)}</td>
+                    <td className="py-2 text-right font-mono">{data.unaccounted_percent.toFixed(1)}%</td>
+                  </tr>
+                )}
+                <tr className="font-semibold">
+                  <td className="pt-3">Hauptzähler gesamt</td>
+                  <td className="pt-3 text-right font-mono">{formatNumber(data.root.total_kwh)}</td>
+                  <td className="pt-3 text-right font-mono">100%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {!loading && !data && rootMeterId && (
+        <div className="flex h-60 items-center justify-center text-gray-400">Keine Daten vorhanden</div>
+      )}
+      {!loading && !rootMeterId && (
+        <div className="flex h-60 items-center justify-center text-gray-400">Bitte Hauptzähler auswählen</div>
+      )}
+    </div>
+  );
+}
+
+/* ── Tab: Wetter-Regression ── */
+
+interface RegressionPoint {
+  date: string;
+  temp: number;
+  consumption: number;
+}
+
+interface RegressionResult {
+  slope: number;
+  intercept: number;
+  r2: number;
+}
+
+interface WeatherRegressionData {
+  meter_name: string;
+  unit: string;
+  points: RegressionPoint[];
+  regression: RegressionResult | null;
+}
+
+function WeatherRegressionTab({ meters }: { meters: Meter[] }) {
+  const [meterId, setMeterId] = useState('');
+  const [startDate, setStartDate] = useState(`${new Date().getFullYear() - 1}-01-01`);
+  const [endDate, setEndDate] = useState(today());
+  const [data, setData] = useState<WeatherRegressionData | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    if (!meterId) return;
+    setLoading(true);
+    try {
+      const res = await apiClient.get('/api/v1/analytics/weather-regression', {
+        params: { meter_id: meterId, start_date: startDate, end_date: endDate },
+      });
+      setData(res.data);
+    } catch { /* leer */ }
+    setLoading(false);
+  }, [meterId, startDate, endDate]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Regressionslinie als 2 Punkte berechnen
+  const regressionLineData = data?.regression && data.points.length >= 2
+    ? (() => {
+        const temps = data.points.map((p) => p.temp);
+        const tMin = Math.min(...temps);
+        const tMax = Math.max(...temps);
+        const { slope, intercept } = data.regression;
+        return [
+          { temp: tMin, regression: slope * tMin + intercept },
+          { temp: tMax, regression: slope * tMax + intercept },
+        ];
+      })()
+    : [];
+
+  const r2 = data?.regression?.r2 ?? 0;
+  const r2Label = r2 >= 0.7 ? 'stark' : r2 >= 0.4 ? 'mittel' : 'schwach';
+  const r2Color = r2 >= 0.7 ? 'text-green-600' : r2 >= 0.4 ? 'text-amber-600' : 'text-gray-500';
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-3 items-end mb-6">
+        <div>
+          <label className="label">Zähler</label>
+          <select className="input" value={meterId} onChange={(e) => setMeterId(e.target.value)}>
+            <option value="">— Bitte wählen —</option>
+            {meters.map((m) => (
+              <option key={m.id} value={m.id}>{m.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="label">Von</label>
+          <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        </div>
+        <div>
+          <label className="label">Bis</label>
+          <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        </div>
+        <button onClick={fetchData} className="btn-primary flex items-center gap-1.5">
+          <RefreshCw className="h-4 w-4" />
+          Laden
+        </button>
+      </div>
+
+      {loading && (
+        <div className="flex h-60 items-center justify-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
+        </div>
+      )}
+
+      {!loading && data && data.points.length > 0 && (
+        <>
+          {/* Kennzahlen */}
+          {data.regression && (
+            <div className="mb-4 flex flex-wrap gap-4">
+              <div className="card flex-1 min-w-[140px] p-4 text-center">
+                <p className="text-xs text-gray-500">Steigung</p>
+                <p className="text-lg font-semibold">{data.regression.slope.toFixed(2)}</p>
+                <p className="text-xs text-gray-400">{data.unit}/°C</p>
+              </div>
+              <div className="card flex-1 min-w-[140px] p-4 text-center">
+                <p className="text-xs text-gray-500">Achsenabschnitt</p>
+                <p className="text-lg font-semibold">{data.regression.intercept.toFixed(1)}</p>
+                <p className="text-xs text-gray-400">{data.unit} bei 0°C</p>
+              </div>
+              <div className="card flex-1 min-w-[140px] p-4 text-center">
+                <p className="text-xs text-gray-500">Bestimmtheitsmaß R²</p>
+                <p className={`text-lg font-semibold ${r2Color}`}>{(r2 * 100).toFixed(1)}%</p>
+                <p className={`text-xs ${r2Color}`}>Witterungsabhängigkeit {r2Label}</p>
+              </div>
+              <div className="card flex-1 min-w-[140px] p-4 text-center">
+                <p className="text-xs text-gray-500">Datenpunkte</p>
+                <p className="text-lg font-semibold">{data.points.length}</p>
+                <p className="text-xs text-gray-400">Tage</p>
+              </div>
+            </div>
+          )}
+
+          {/* Streuplot */}
+          <div className="card">
+            <h3 className="text-sm font-semibold text-gray-700 mb-4">
+              {data.meter_name} – Tagesverbrauch vs. Außentemperatur
+            </h3>
+            <ResponsiveContainer width="100%" height={360}>
+              <ComposedChart data={data.points}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis
+                  dataKey="temp"
+                  type="number"
+                  domain={['auto', 'auto']}
+                  tickFormatter={(v: number) => `${v}°C`}
+                  name="Temperatur"
+                />
+                <YAxis
+                  dataKey="consumption"
+                  tickFormatter={(v: number) => formatNumber(v)}
+                  name={data.unit}
+                />
+                <Tooltip
+                  formatter={(val: number, name: string) => [
+                    `${formatNumber(val)} ${data.unit}`,
+                    name === 'consumption' ? 'Tagesverbrauch' : name,
+                  ]}
+                  labelFormatter={(label: number) => `${Number(label).toFixed(1)}°C`}
+                />
+                <Scatter dataKey="consumption" fill="#1B5E7B" opacity={0.6} />
+                {regressionLineData.length === 2 && (
+                  <Line
+                    data={regressionLineData}
+                    dataKey="regression"
+                    stroke="#F59E0B"
+                    strokeWidth={2}
+                    dot={false}
+                    type="linear"
+                  />
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+            <p className="mt-2 text-xs text-gray-400 text-center">
+              Jeder Punkt entspricht einem Tag. {data.regression ? `Positive Steigung = mehr Verbrauch bei Kälte.` : ''}
+            </p>
+          </div>
+        </>
+      )}
+
+      {!loading && data && data.points.length === 0 && (
+        <div className="flex h-60 items-center justify-center text-gray-400">
+          Keine Schnittmenge aus Verbrauchs- und Wetterdaten gefunden
+        </div>
+      )}
+
+      {!loading && !data && meterId && (
+        <div className="flex h-60 items-center justify-center text-gray-400">Keine Daten vorhanden</div>
+      )}
+      {!loading && !meterId && (
+        <div className="flex h-60 items-center justify-center text-gray-400">Bitte Zähler auswählen</div>
+      )}
     </div>
   );
 }

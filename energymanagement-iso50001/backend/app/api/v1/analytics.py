@@ -22,6 +22,7 @@ router = APIRouter()
 @router.get("/timeseries")
 async def get_timeseries(
     meter_ids: str | None = Query(None, description="Kommagetrennte Zähler-IDs"),
+    site_id: uuid.UUID | None = Query(None, description="Standort-ID (alternativ zu meter_ids)"),
     energy_type: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
@@ -38,12 +39,14 @@ async def get_timeseries(
         start_date=start_date,
         end_date=end_date,
         granularity=granularity,
+        site_id=site_id,
     )
 
 
 @router.get("/comparison")
 async def get_comparison(
     meter_ids: str | None = Query(None, description="Kommagetrennte Zähler-IDs"),
+    site_id: uuid.UUID | None = Query(None, description="Standort-ID"),
     energy_type: str | None = None,
     period1_start: date = Query(...),
     period1_end: date = Query(...),
@@ -64,6 +67,7 @@ async def get_comparison(
         period2_start=period2_start,
         period2_end=period2_end,
         granularity=granularity,
+        site_id=site_id,
     )
 
 
@@ -72,12 +76,13 @@ async def get_distribution(
     start_date: date = Query(...),
     end_date: date = Query(...),
     group_by: str = Query("energy_type", pattern="^(energy_type|location|cost_center)$"),
+    site_id: uuid.UUID | None = Query(None, description="Standort-ID"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Verbrauchsverteilung (Pie/Donut-Chart)."""
     service = AnalyticsService(db)
-    return await service.get_distribution(start_date, end_date, group_by)
+    return await service.get_distribution(start_date, end_date, group_by, site_id=site_id)
 
 
 @router.get("/heatmap")
@@ -188,6 +193,7 @@ async def get_duration_curve(
 @router.get("/cumulative")
 async def get_cumulative(
     meter_ids: str | None = Query(None, description="Kommagetrennte Zähler-IDs"),
+    site_id: uuid.UUID | None = Query(None, description="Standort-ID"),
     energy_type: str | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
@@ -197,7 +203,7 @@ async def get_cumulative(
     """Kumulative Verbrauchslinie."""
     service = AnalyticsService(db)
     ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")] if meter_ids else None
-    return await service.get_cumulative(ids, energy_type, start_date, end_date)
+    return await service.get_cumulative(ids, energy_type, start_date, end_date, site_id=site_id)
 
 
 @router.get("/monthly-comparison")
@@ -206,6 +212,7 @@ async def get_monthly_comparison(
     year_b: int = Query(..., description="Vergleichsjahr (z.B. 2025)"),
     energy_types: str | None = Query(None, description="Kommagetrennte Energiearten (electricity,natural_gas,…)"),
     meter_ids: str | None = Query(None, description="Kommagetrennte Zähler-IDs"),
+    site_id: uuid.UUID | None = Query(None, description="Standort-ID"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -218,7 +225,7 @@ async def get_monthly_comparison(
     service = AnalyticsService(db)
     ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")] if meter_ids else None
     et_filter = [e.strip() for e in energy_types.split(",")] if energy_types else None
-    return await service.get_monthly_comparison(year_a, year_b, et_filter, ids)
+    return await service.get_monthly_comparison(year_a, year_b, et_filter, ids, site_id=site_id)
 
 
 @router.get("/energy-balance")
@@ -227,6 +234,7 @@ async def get_energy_balance(
     end_date: date = Query(...),
     energy_types: str | None = Query(None, description="Kommagetrennte Energiearten"),
     meter_ids: str | None = Query(None, description="Kommagetrennte Zähler-IDs"),
+    site_id: uuid.UUID | None = Query(None, description="Standort-ID"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -238,7 +246,7 @@ async def get_energy_balance(
     service = AnalyticsService(db)
     ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")] if meter_ids else None
     et_filter = [e.strip() for e in energy_types.split(",")] if energy_types else None
-    return await service.get_energy_balance(start_date, end_date, et_filter, ids)
+    return await service.get_energy_balance(start_date, end_date, et_filter, ids, site_id=site_id)
 
 
 @router.get("/cost-allocation")
@@ -246,6 +254,7 @@ async def get_cost_allocation(
     start_date: date = Query(...),
     end_date: date = Query(...),
     meter_ids: str | None = Query(None, description="Kommagetrennte Zähler-IDs"),
+    site_id: uuid.UUID | None = Query(None, description="Standort-ID"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -258,7 +267,7 @@ async def get_cost_allocation(
     """
     service = AnalyticsService(db)
     ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")] if meter_ids else None
-    return await service.get_cost_allocation(start_date, end_date, ids)
+    return await service.get_cost_allocation(start_date, end_date, ids, site_id=site_id)
 
 
 @router.get("/load-profile")
@@ -280,3 +289,29 @@ async def get_load_profile(
     service = AnalyticsService(db)
     ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")]
     return await service.get_load_profile(ids, start_date, end_date, max_demand_kw_contract)
+
+
+@router.get("/submeter-contribution")
+async def get_submeter_contribution(
+    root_meter_id: uuid.UUID = Query(..., description="Hauptzähler-ID"),
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Verbrauchsanteile der direkten Unterzähler eines Hauptzählers (Donut-Chart)."""
+    service = AnalyticsService(db)
+    return await service.get_submeter_contribution(root_meter_id, start_date, end_date)
+
+
+@router.get("/weather-regression")
+async def get_weather_regression(
+    meter_id: uuid.UUID = Query(...),
+    start_date: date | None = None,
+    end_date: date | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Streudiagramm Außentemperatur vs. Tagesverbrauch mit linearer Regression."""
+    service = AnalyticsService(db)
+    return await service.get_weather_regression(meter_id, start_date, end_date)

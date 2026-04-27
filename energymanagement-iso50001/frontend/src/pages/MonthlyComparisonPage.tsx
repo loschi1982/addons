@@ -56,7 +56,7 @@ const MONTH_NAMES = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt
 
 /* ── Hauptkomponente ── */
 
-export default function MonthlyComparisonPage() {
+export default function MonthlyComparisonPage({ siteId }: { siteId?: string }) {
   const currentYear = new Date().getFullYear();
   const [yearA, setYearA] = useState(currentYear - 1);
   const [yearB, setYearB] = useState(currentYear);
@@ -77,6 +77,7 @@ export default function MonthlyComparisonPage() {
       if (selectedEts.length > 0) {
         params.set('energy_types', selectedEts.join(','));
       }
+      if (siteId) params.set('site_id', siteId);
       const res = await apiClient.get<ComparisonData>(
         `/api/v1/analytics/monthly-comparison?${params}`
       );
@@ -89,7 +90,7 @@ export default function MonthlyComparisonPage() {
     } finally {
       setLoading(false);
     }
-  }, [yearA, yearB, selectedEts, activeEt]);
+  }, [yearA, yearB, selectedEts, activeEt, siteId]);
 
   const toggleEt = (key: string) => {
     setSelectedEts(prev =>
