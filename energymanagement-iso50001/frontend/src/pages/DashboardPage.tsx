@@ -6,7 +6,7 @@ import {
 import {
   TrendingUp, TrendingDown, Minus, AlertTriangle, Activity,
   Zap, Leaf, Euro, Gauge, Sun, BatteryCharging,
-  Trash2, ExternalLink, ChevronDown, ChevronUp, RefreshCw,
+  Trash2, ExternalLink, ChevronDown, ChevronUp, RefreshCw, CheckCircle,
 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import InfoTip from '@/components/ui/InfoTip';
@@ -429,6 +429,7 @@ function AnomalyPanel() {
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
+  const [accepting, setAccepting] = useState<Set<string>>(new Set());
   const [threshold, setThreshold] = useState(20);
 
   const load = async () => {
@@ -442,6 +443,16 @@ function AnomalyPanel() {
   };
 
   useEffect(() => { load(); }, [threshold]);
+
+  const handleAccept = async (reading: AnomalyReading) => {
+    setAccepting(prev => new Set(prev).add(reading.reading_id));
+    try {
+      await apiClient.patch(`/api/v1/dashboard/anomalies/${reading.reading_id}/accept`);
+      setAnomalies(prev => prev.filter(a => a.reading_id !== reading.reading_id));
+    } catch { /* interceptor */ } finally {
+      setAccepting(prev => { const s = new Set(prev); s.delete(reading.reading_id); return s; });
+    }
+  };
 
   const handleDelete = async (reading: AnomalyReading) => {
     if (!confirm(`Messwert von ${reading.timestamp} (${Number(reading.consumption).toLocaleString('de-DE')} ${reading.unit}) wirklich löschen?`)) return;
@@ -569,6 +580,14 @@ function AnomalyPanel() {
                         title="Zum Standort / Zähler"
                       >
                         <ExternalLink className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleAccept(a)}
+                        disabled={accepting.has(a.reading_id)}
+                        className="rounded p-1 text-gray-400 hover:text-green-600 disabled:opacity-40"
+                        title="Messwert als geprüft übernehmen (nicht mehr als Ausreißer anzeigen)"
+                      >
+                        <CheckCircle className="h-4 w-4" />
                       </button>
                       <button
                         onClick={() => handleDelete(a)}
