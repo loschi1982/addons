@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ChevronRight, Zap, Building2, Home, GripVertical, Settings, Trash2, Activity, Wifi, Plus } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type PaginatedResponse } from '@/types';
@@ -748,6 +749,8 @@ function MeterModal({
 // ── Hauptkomponente ──
 
 export default function SitesPage() {
+  const [searchParams] = useSearchParams();
+
   // Standort-Liste
   const [sites, setSites] = useState<Site[]>([]);
   const [total, setTotal] = useState(0);
@@ -856,6 +859,18 @@ export default function SitesPage() {
   useEffect(() => {
     if (selectedSite) loadSiteConsumption(selectedSite.id, consumptionYear);
   }, [selectedSite, consumptionYear, loadSiteConsumption]);
+
+  // Auto-Standort aus URL-Parameter öffnen
+  const autoSiteParam = searchParams.get('site');
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (!autoSiteParam || autoOpenedRef.current || loading || sites.length === 0) return;
+    const match = sites.find((s) => s.id === autoSiteParam);
+    if (match) {
+      autoOpenedRef.current = true;
+      loadSiteDetail(match);
+    }
+  }, [autoSiteParam, sites, loading, loadSiteDetail]);
 
   const reloadSiteMeters = useCallback(async () => {
     if (!selectedSite) return;

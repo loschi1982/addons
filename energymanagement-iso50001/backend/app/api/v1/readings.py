@@ -110,6 +110,48 @@ async def create_readings_bulk(
     return [_reading_to_response(r) for r in readings]
 
 
+@router.get("/{reading_id}/page-info")
+async def get_reading_page_info(
+    reading_id: uuid.UUID,
+    page_size: int = Query(25, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Seitennummer und Position eines Messwerts in der paginierten Liste ermitteln.
+
+    Nützlich um nach einer reading_id direkt die richtige Seite zu öffnen.
+    Rückgabe: {meter_id, page, position_on_page, total}
+    """
+    reading = await db.get(MeterReading, reading_id)
+    if not reading:
+        raise HTTPException(status_code=404, detail="Messwert nicht gefunden")
+
+    # Anzahl neuerer Messwerte zählen (timestamp DESC → position = count_newer)
+    count_newer = await db.scalar(
+        select(func.count(MeterReading.id)).where(
+            MeterReading.meter_id == reading.meter_id,
+            MeterReading.timestamp > reading.timestamp,
+        )
+    ) or 0
+
+    total = await db.scalar(
+        select(func.count(MeterReading.id)).where(
+            MeterReading.meter_id == reading.meter_id,
+        )
+    ) or 0
+
+    page = (count_newer // page_size) + 1
+    position_on_page = count_newer % page_size
+
+    return {
+        "meter_id": str(reading.meter_id),
+        "page": page,
+        "position_on_page": position_on_page,
+        "total": total,
+    }
+
+
 @router.get("/{reading_id}", response_model=ReadingResponse)
 async def get_reading(
     reading_id: uuid.UUID,

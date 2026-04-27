@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
 
@@ -61,9 +62,13 @@ const SOURCE_LABELS: Record<string, string> = {
 // ── Komponente ──
 
 export default function ReadingsPage() {
+  const [searchParams] = useSearchParams();
+  const highlightReadingId = searchParams.get('highlight') ?? '';
+  const highlightRef = useRef<HTMLTableRowElement | null>(null);
+
   // Zähler-Liste
   const [meters, setMeters] = useState<Meter[]>([]);
-  const [selectedMeterId, setSelectedMeterId] = useState('');
+  const [selectedMeterId, setSelectedMeterId] = useState(searchParams.get('meter_id') ?? '');
 
   // Readings-Liste
   const [readings, setReadings] = useState<Reading[]>([]);
@@ -99,18 +104,30 @@ export default function ReadingsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ value: '', notes: '' });
 
-  // Zähler laden
+  // Zähler laden + ggf. Seite aus highlight ableiten
   useEffect(() => {
     (async () => {
       try {
         const res = await apiClient.get<PaginatedResponse<Meter>>(
-          '/api/v1/meters?page_size=100'
+          '/api/v1/meters?page_size=500'
         );
         setMeters(res.data.items.filter((m) => m.is_active));
       } catch {
         // Interceptor handled
       }
+      // Wenn highlight gesetzt: richtige Seite ermitteln
+      if (highlightReadingId) {
+        try {
+          const info = await apiClient.get<{ meter_id: string; page: number; position_on_page: number; total: number }>(
+            `/api/v1/readings/${highlightReadingId}/page-info`,
+            { params: { page_size: pageSize } }
+          );
+          setSelectedMeterId(info.data.meter_id);
+          setPage(info.data.page);
+        } catch { /* leer */ }
+      }
     })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Readings laden
@@ -142,6 +159,13 @@ export default function ReadingsPage() {
   useEffect(() => {
     loadReadings();
   }, [loadReadings]);
+
+  // Nach dem Laden zur markierten Zeile scrollen
+  useEffect(() => {
+    if (highlightReadingId && highlightRef.current && !loading) {
+      setTimeout(() => highlightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+    }
+  }, [readings, loading, highlightReadingId]);
 
   // Einzelerfassung
   const handleOpenSingle = () => {
@@ -364,7 +388,13 @@ export default function ReadingsPage() {
               </thead>
               <tbody className="divide-y">
                 {readings.map((r) => (
-                  <tr key={r.id} className="hover:bg-gray-50">
+                  <tr
+                    key={r.id}
+                    ref={r.id === highlightReadingId ? highlightRef : undefined}
+                    className={r.id === highlightReadingId
+                      ? 'bg-amber-50 ring-2 ring-inset ring-amber-400'
+                      : 'hover:bg-gray-50'}
+                  >
                     <td className="px-4 py-3 whitespace-nowrap">{formatDate(r.timestamp)}</td>
                     <td className="px-4 py-3 text-right font-mono">
                       {editingId === r.id ? (
