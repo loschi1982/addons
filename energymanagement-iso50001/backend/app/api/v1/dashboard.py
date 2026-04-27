@@ -64,8 +64,8 @@ class AnomalyReading(BaseModel):
 
 @router.get("/anomalies", response_model=list[AnomalyReading])
 async def get_anomalies(
-    threshold: float = Query(20.0, ge=5.0, description="Faktor über p95 ab dem ein Ausreißer erkannt wird"),
-    limit: int = Query(50, ge=1, le=200),
+    threshold: float = Query(5.0, ge=2.0, description="Faktor über p95 ab dem ein Ausreißer erkannt wird"),
+    limit: int = Query(100, ge=1, le=500),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -84,7 +84,7 @@ async def get_anomalies(
             WHERE consumption IS NOT NULL AND consumption > 0
             GROUP BY meter_id
             HAVING COUNT(*) >= 10
-              AND PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY consumption) > 0
+              AND PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY consumption) >= 1
         )
         SELECT
             r.id            AS reading_id,
