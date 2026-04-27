@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
@@ -425,6 +426,7 @@ const ENERGY_TYPE_COLORS_BG: Record<string, string> = {
 };
 
 function AnomalyPanel() {
+  const navigate = useNavigate();
   const [anomalies, setAnomalies] = useState<AnomalyReading[]>([]);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
@@ -467,14 +469,14 @@ function AnomalyPanel() {
 
   const handleGoToMeter = (a: AnomalyReading) => {
     if (a.site_id) {
-      window.location.href = `/sites?site=${a.site_id}&meter=${a.meter_id}`;
+      navigate(`/sites?site=${a.site_id}&meter=${a.meter_id}`);
     } else {
-      window.location.href = `/meters?id=${a.meter_id}`;
+      navigate(`/meters?id=${a.meter_id}`);
     }
   };
 
   const handleGoToReadings = (a: AnomalyReading) => {
-    window.location.href = `/readings?meter_id=${a.meter_id}`;
+    navigate(`/readings?meter_id=${a.meter_id}`);
   };
 
   if (loading) return (
