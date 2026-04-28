@@ -497,16 +497,15 @@ function MeterTreeTable({
 
   return (
     <div>
-      {draggingId && (
-        <div
+      <div
           onDragOver={e => { e.preventDefault(); setDropOverRoot(true); }}
           onDragLeave={() => setDropOverRoot(false)}
           onDrop={e => { e.preventDefault(); handleDropToRoot(); }}
+          style={{ visibility: draggingId ? 'visible' : 'hidden' }}
           className={`mb-2 flex items-center justify-center rounded-lg border-2 border-dashed py-2 text-sm transition-colors ${dropOverRoot ? 'border-orange-400 bg-orange-50 text-orange-700' : 'border-gray-300 text-gray-400'}`}
         >
           Hier ablegen → Elternzuordnung entfernen (Hauptzähler)
         </div>
-      )}
       <div className="overflow-x-auto">
         <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
           <colgroup>{colWidths.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
