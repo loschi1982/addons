@@ -10,7 +10,7 @@ import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint
 from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,6 +26,9 @@ class MeterReading(Base, UUIDMixin):
     Differenz zum vorherigen Zählerstand desselben Zählers.
     """
     __tablename__ = "meter_readings"
+    __table_args__ = (
+        UniqueConstraint("meter_id", "timestamp", name="uq_meter_readings_meter_timestamp"),
+    )
 
     meter_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("meters.id"), index=True

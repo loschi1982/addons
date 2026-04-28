@@ -100,6 +100,20 @@ class ReadingService:
                 status_code=404,
             )
 
+        # Duplikat-Prüfung: gleicher Zähler + gleicher Zeitstempel
+        existing = await self.db.scalar(
+            select(func.count(MeterReading.id)).where(
+                MeterReading.meter_id == meter_id,
+                MeterReading.timestamp == timestamp,
+            )
+        )
+        if existing:
+            raise EnergyManagementError(
+                f"Für diesen Zähler existiert bereits ein Messwert zum Zeitpunkt {timestamp}",
+                error_code="DUPLICATE_READING",
+                status_code=409,
+            )
+
         # Verbrauch-Direkteingabe (z.B. aus Monatsabrechnung ohne Zählerstand)
         consumption_direct = data.get("consumption_direct")
         if consumption_direct is not None and data.get("value") is None:
@@ -155,11 +169,17 @@ class ReadingService:
         return reading
 
     async def create_readings_bulk(self, readings_data: list[dict]) -> list[MeterReading]:
-        """Mehrere Zählerstände auf einmal erfassen."""
+        """Mehrere Zählerstände auf einmal erfassen. Duplikate werden übersprungen."""
         results = []
         for data in readings_data:
-            reading = await self.create_reading(data)
-            results.append(reading)
+            try:
+                reading = await self.create_reading(data)
+                results.append(reading)
+            except EnergyManagementError as e:
+                if e.error_code == "DUPLICATE_READING":
+                    logger.info("duplicate_reading_skipped", timestamp=str(data.get("timestamp")))
+                    continue
+                raise
         return results
 
     async def get_reading(self, reading_id: uuid.UUID) -> MeterReading:
