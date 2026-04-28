@@ -463,15 +463,27 @@ function MeterTreeTable({
 
   const handleDropOnNode = async (targetId: string) => {
     if (!draggingId || draggingId === targetId) return;
-    try { await apiClient.put(`/api/v1/meters/${draggingId}`, { parent_meter_id: targetId }); onReload(); }
-    catch { /* interceptor */ } finally { setDraggingId(null); setDragOverId(null); }
+    try {
+      await apiClient.put(`/api/v1/meters/${draggingId}`, { parent_meter_id: targetId });
+      onReload();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string }; status?: number } };
+      const msg = e?.response?.data?.detail || `HTTP ${e?.response?.status}` || 'Unbekannter Fehler';
+      alert(`Zähler konnte nicht verschoben werden: ${msg}`);
+    } finally { setDraggingId(null); setDragOverId(null); }
   };
 
   const handleDropToRoot = async () => {
     if (!draggingId) return;
     setDropOverRoot(false);
-    try { await apiClient.put(`/api/v1/meters/${draggingId}`, { parent_meter_id: null }); onReload(); }
-    catch { /* interceptor */ } finally { setDraggingId(null); setDragOverId(null); }
+    try {
+      await apiClient.put(`/api/v1/meters/${draggingId}`, { parent_meter_id: null });
+      onReload();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string }; status?: number } };
+      const msg = e?.response?.data?.detail || `HTTP ${e?.response?.status}` || 'Unbekannter Fehler';
+      alert(`Zähler konnte nicht verschoben werden: ${msg}`);
+    } finally { setDraggingId(null); setDragOverId(null); }
   };
 
   const dnd: DndProps = { draggingId, dragOverId, setDraggingId, setDragOverId, onDropOnNode: handleDropOnNode };
