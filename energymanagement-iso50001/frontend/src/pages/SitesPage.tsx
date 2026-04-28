@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ChevronRight, Zap, Building2, Home, GripVertical, Settings, Trash2, Activity, Wifi, Plus } from 'lucide-react';
+import { ChevronRight, Zap, Building2, Home, Settings, Trash2, Activity, Wifi, Plus } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type PaginatedResponse } from '@/types';
 
@@ -253,12 +253,6 @@ function buildMeterPayload(form: MeterForm): Record<string, unknown> {
   return payload;
 }
 
-function flattenTree(nodes: AnnotatedMeterNode[]): AnnotatedMeterNode[] {
-  const result: AnnotatedMeterNode[] = [];
-  const visit = (n: AnnotatedMeterNode) => { result.push(n); n.children.forEach(visit); };
-  nodes.forEach(visit);
-  return result;
-}
 
 function filterTree(nodes: AnnotatedMeterNode[], energyType: string): AnnotatedMeterNode[] {
   const filtered: AnnotatedMeterNode[] = [];
@@ -275,23 +269,13 @@ function countNodes(nodes: AnnotatedMeterNode[]): number {
   return nodes.reduce((sum, n) => sum + 1 + countNodes(n.children), 0);
 }
 
-// ── DnD-Typen ──
-interface DndProps {
-  draggingId: string | null;
-  dragOverId: string | null;
-  setDraggingId: (id: string | null) => void;
-  setDragOverId: (id: string | null) => void;
-  onDropOnNode: (targetId: string) => void;
-}
-
 // ── MeterTreeRow ──
 
 function MeterTreeRow({
-  node, depth = 0, dnd, onEdit, onDelete, onPoll, onTestConnection,
+  node, depth = 0, onEdit, onDelete, onPoll, onTestConnection,
 }: {
   node: AnnotatedMeterNode;
   depth?: number;
-  dnd: DndProps;
   onEdit: (node: AnnotatedMeterNode) => void;
   onDelete: (node: AnnotatedMeterNode) => void;
   onPoll: (node: AnnotatedMeterNode) => void;
@@ -299,40 +283,14 @@ function MeterTreeRow({
 }) {
   const [open, setOpen] = useState(depth < 1);
   const hasChildren = node.children.length > 0;
-  const isDragging = dnd.draggingId === node.id;
-  const isDragOver = dnd.dragOverId === node.id;
 
   return (
     <>
-      <tr
-        draggable
-        onDragStart={e => {
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', node.id);
-          dnd.setDraggingId(node.id);
-        }}
-        onDragEnd={() => { dnd.setDraggingId(null); dnd.setDragOverId(null); }}
-        onDragOver={e => {
-          e.preventDefault();
-          if (dnd.draggingId && dnd.draggingId !== node.id) {
-            e.dataTransfer.dropEffect = 'move';
-            dnd.setDragOverId(node.id);
-          }
-        }}
-        onDragLeave={() => { if (dnd.dragOverId === node.id) dnd.setDragOverId(null); }}
-        onDrop={e => {
-          e.preventDefault();
-          if (dnd.draggingId && dnd.draggingId !== node.id) dnd.onDropOnNode(node.id);
-          dnd.setDragOverId(null);
-        }}
-        className={`group select-none transition-colors ${
-          isDragging ? 'opacity-40' : ''
-        } ${isDragOver ? 'bg-primary-50 ring-1 ring-inset ring-primary-300' : 'hover:bg-gray-50'}`}
-      >
+      <tr className="group hover:bg-gray-50">
         {/* Name */}
         <td className="px-3 py-2">
           <div className="flex items-center min-w-0" style={{ paddingLeft: `${depth * 18}px` }}>
-            <GripVertical className="w-3 h-3 text-gray-300 mr-1 flex-shrink-0 cursor-grab active:cursor-grabbing" />
+            <span className="w-4 flex-shrink-0" />
             {hasChildren
               ? <button onClick={() => setOpen(!open)} className="mr-1 text-gray-400 hover:text-gray-600 flex-shrink-0">
                   <ChevronRight className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-90' : ''}`} />
@@ -420,7 +378,7 @@ function MeterTreeRow({
       </tr>
       {open && node.children.map(child => (
         <MeterTreeRow
-          key={child.id} node={child} depth={depth + 1} dnd={dnd}
+          key={child.id} node={child} depth={depth + 1}
           onEdit={onEdit} onDelete={onDelete} onPoll={onPoll} onTestConnection={onTestConnection}
         />
       ))}
@@ -431,21 +389,17 @@ function MeterTreeRow({
 // ── MeterTreeTable ──
 
 function MeterTreeTable({
-  nodes, loading, emptyMessage, onReload, onEdit, onDelete, onPoll, onTestConnection,
+  nodes, loading, emptyMessage, onEdit, onDelete, onPoll, onTestConnection,
 }: {
   nodes: AnnotatedMeterNode[];
   loading?: boolean;
   emptyMessage?: string;
-  onReload: () => void;
   onEdit: (node: AnnotatedMeterNode) => void;
   onDelete: (node: AnnotatedMeterNode) => void;
   onPoll: (node: AnnotatedMeterNode) => void;
   onTestConnection: (node: AnnotatedMeterNode) => void;
 }) {
   const [colWidths, setColWidths] = useState([280, 120, 130, 80, 120]);
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const [dropOverRoot, setDropOverRoot] = useState(false);
   const resizingRef = useRef<{ colIdx: number; startX: number; startWidth: number } | null>(null);
 
   const startResize = (colIdx: number, e: React.MouseEvent) => {
@@ -461,32 +415,6 @@ function MeterTreeTable({
     document.addEventListener('mouseup', onMouseUp);
   };
 
-  const handleDropOnNode = async (targetId: string) => {
-    if (!draggingId || draggingId === targetId) return;
-    try {
-      await apiClient.put(`/api/v1/meters/${draggingId}`, { parent_meter_id: targetId });
-      onReload();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string }; status?: number } };
-      const msg = e?.response?.data?.detail || `HTTP ${e?.response?.status}` || 'Unbekannter Fehler';
-      alert(`Zähler konnte nicht verschoben werden: ${msg}`);
-    } finally { setDraggingId(null); setDragOverId(null); }
-  };
-
-  const handleDropToRoot = async () => {
-    if (!draggingId) return;
-    setDropOverRoot(false);
-    try {
-      await apiClient.put(`/api/v1/meters/${draggingId}`, { parent_meter_id: null });
-      onReload();
-    } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string }; status?: number } };
-      const msg = e?.response?.data?.detail || `HTTP ${e?.response?.status}` || 'Unbekannter Fehler';
-      alert(`Zähler konnte nicht verschoben werden: ${msg}`);
-    } finally { setDraggingId(null); setDragOverId(null); }
-  };
-
-  const dnd: DndProps = { draggingId, dragOverId, setDraggingId, setDragOverId, onDropOnNode: handleDropOnNode };
   const resizeHandle = (i: number) => (
     <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 5, cursor: 'col-resize', zIndex: 1 }}
       onMouseDown={e => startResize(i, e)} onClick={e => e.stopPropagation()} />
@@ -497,15 +425,11 @@ function MeterTreeTable({
 
   return (
     <div>
-      <div
-          onDragOver={e => { e.preventDefault(); setDropOverRoot(true); }}
-          onDragLeave={() => setDropOverRoot(false)}
-          onDrop={e => { e.preventDefault(); handleDropToRoot(); }}
-          style={{ visibility: draggingId ? 'visible' : 'hidden' }}
-          className={`mb-2 flex items-center justify-center rounded-lg border-2 border-dashed py-2 text-sm transition-colors ${dropOverRoot ? 'border-orange-400 bg-orange-50 text-orange-700' : 'border-gray-300 text-gray-400'}`}
-        >
-          Hier ablegen → Elternzuordnung entfernen (Hauptzähler)
-        </div>
+      <div className="mb-2 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+        <span>Die Zähler-Hierarchie (Haupt-/Unterzähler) wird im Menü</span>
+        <a href="/meters" className="font-medium underline hover:text-blue-900">Zähler → Physikalisches Netzwerk</a>
+        <span>festgelegt.</span>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
           <colgroup>{colWidths.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
@@ -521,7 +445,7 @@ function MeterTreeTable({
           </thead>
           <tbody className="divide-y divide-gray-100">
             {nodes.map(node => (
-              <MeterTreeRow key={node.id} node={node} depth={0} dnd={dnd}
+              <MeterTreeRow key={node.id} node={node} depth={0}
                 onEdit={onEdit} onDelete={onDelete} onPoll={onPoll} onTestConnection={onTestConnection} />
             ))}
           </tbody>
@@ -535,7 +459,7 @@ function MeterTreeTable({
 
 function MeterModal({
   form, setForm, editingId, onSubmit, onClose, error, saving,
-  siteMeters, siteBuildings, siteUnits,
+  siteBuildings, siteUnits,
 }: {
   form: MeterForm;
   setForm: (f: MeterForm) => void;
@@ -544,12 +468,10 @@ function MeterModal({
   onClose: () => void;
   error: string | null;
   saving: boolean;
-  siteMeters: AnnotatedMeterNode[];
   siteBuildings: Building[];
   siteUnits: UsageUnit[];
 }) {
   const unitOptions = UNIT_OPTIONS[form.energy_type] || UNIT_OPTIONS.default;
-  const flatMeters = flattenTree(siteMeters).filter(m => m.id !== editingId);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 overflow-y-auto py-8">
@@ -671,12 +593,8 @@ function MeterModal({
                 </select>
               </div>
             )}
-            <div>
-              <label className="label">Übergeordneter Zähler</label>
-              <select className="input" value={form.parent_meter_id} onChange={e => setForm({ ...form, parent_meter_id: e.target.value })}>
-                <option value="">– Kein (Hauptzähler) –</option>
-                {flatMeters.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
+            <div className="col-span-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+              Die Zähler-Hierarchie (Haupt-/Unterzähler) wird unter <a href="/meters" className="font-medium underline">Zähler → Physikalisches Netzwerk</a> festgelegt.
             </div>
           </div>
 
@@ -918,10 +836,6 @@ export default function SitesPage() {
     } catch { /* Interceptor */ }
   }, []);
 
-  const reloadBuildingMeters = useCallback(async () => {
-    if (!selectedBuilding || !selectedSite) return;
-    await loadBuildingDetail(selectedSite.id, selectedBuilding.id);
-  }, [selectedBuilding, selectedSite, loadBuildingDetail]);
 
   // ── Zähler CRUD ──
 
@@ -1325,7 +1239,6 @@ export default function SitesPage() {
                 nodes={filteredTree}
                 loading={detailLoading}
                 emptyMessage={totalMeterCount === 0 ? 'Diesem Standort sind keine aktiven Zähler zugewiesen.' : 'Keine Zähler für diese Energieart.'}
-                onReload={reloadSiteMeters}
                 onEdit={openEditMeter}
                 onDelete={handleDeleteMeter}
                 onPoll={handlePollMeter}
@@ -1407,7 +1320,7 @@ export default function SitesPage() {
             form={meterForm} setForm={setMeterForm} editingId={editingMeterId}
             onSubmit={handleSubmitMeter} onClose={() => setShowMeterModal(false)}
             error={meterFormError} saving={meterSaving}
-            siteMeters={siteMeters} siteBuildings={siteBuildings} siteUnits={allSiteUnits}
+            siteBuildings={siteBuildings} siteUnits={allSiteUnits}
           />
         )}
 
@@ -1463,7 +1376,6 @@ export default function SitesPage() {
           <MeterTreeTable
             nodes={buildingMeters}
             emptyMessage="Diesem Gebäude sind keine Zähler zugewiesen."
-            onReload={reloadBuildingMeters}
             onEdit={openEditMeter}
             onDelete={handleDeleteMeter}
             onPoll={handlePollMeter}
@@ -1534,7 +1446,7 @@ export default function SitesPage() {
           form={meterForm} setForm={setMeterForm} editingId={editingMeterId}
           onSubmit={handleSubmitMeter} onClose={() => setShowMeterModal(false)}
           error={meterFormError} saving={meterSaving}
-          siteMeters={siteMeters} siteBuildings={siteBuildings} siteUnits={allSiteUnits}
+          siteBuildings={siteBuildings} siteUnits={allSiteUnits}
         />
       )}
 
