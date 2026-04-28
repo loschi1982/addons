@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Network } from 'lucide-react';
+import { Network, GripVertical, ChevronDown, ChevronRight } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
 import { useSiteHierarchy } from '@/hooks/useSiteHierarchy';
@@ -101,12 +101,18 @@ const DATA_SOURCES: Record<string, string> = {
 // ── Komponente ──
 
 export default function MetersPage() {
+  const [view, setView] = useState<'list' | 'network'>('list');
+
   const [meters, setMeters] = useState<Meter[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [loading, setLoading] = useState(true);
+
+  // Alle Zähler für Netzwerk-Tab (ohne Pagination)
+  const [networkMeters, setNetworkMeters] = useState<Meter[]>([]);
+  const [networkLoading, setNetworkLoading] = useState(false);
 
   // Discovery-Modal
   const [showDiscovery, setShowDiscovery] = useState(false);
@@ -146,6 +152,18 @@ export default function MetersPage() {
   useEffect(() => {
     loadMeters();
   }, [loadMeters]);
+
+  const loadAllMeters = useCallback(async () => {
+    setNetworkLoading(true);
+    try {
+      const res = await apiClient.get<PaginatedResponse<Meter>>('/api/v1/meters?page_size=500&is_active=true');
+      setNetworkMeters(res.data.items.filter(m => m.is_active));
+    } catch { /* interceptor */ } finally { setNetworkLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (view === 'network') loadAllMeters();
+  }, [view, loadAllMeters]);
 
   const handleCreate = () => {
     setEditingId(null);
@@ -346,9 +364,7 @@ export default function MetersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="page-title">Zähler</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            {total} Zähler insgesamt
-          </p>
+          <p className="mt-1 text-sm text-gray-500">{total} Zähler insgesamt</p>
         </div>
         <div className="flex items-center gap-2">
           <Link
@@ -359,144 +375,125 @@ export default function MetersPage() {
             <Network className="h-4 w-4" />
             <span className="hidden sm:inline">Karte</span>
           </Link>
-          <button onClick={handlePollAll} className="btn-secondary" title="Alle Zähler jetzt abfragen">
-            Alle abfragen
-          </button>
-          <button onClick={() => setShowDiscovery(true)} className="btn-secondary" title="Integrationen nach Zählern durchsuchen">
-            Geräte entdecken
-          </button>
-          <button onClick={handleCreate} className="btn-primary">
-            + Neuer Zähler
-          </button>
+          <button onClick={handlePollAll} className="btn-secondary">Alle abfragen</button>
+          <button onClick={() => setShowDiscovery(true)} className="btn-secondary">Geräte entdecken</button>
+          <button onClick={handleCreate} className="btn-primary">+ Neuer Zähler</button>
         </div>
       </div>
 
-      {/* Filter */}
-      <div className="card mt-4 flex gap-4">
-        <input
-          type="text"
-          className="input flex-1"
-          placeholder="Suche nach Name, Nummer, Standort..."
-          value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-        />
-        <select
-          className="input w-48"
-          value={filterType}
-          onChange={(e) => { setFilterType(e.target.value); setPage(1); }}
+      {/* Tab-Umschalter */}
+      <div className="mt-4 flex gap-1 rounded-lg border border-gray-200 bg-gray-50 p-1 w-fit">
+        <button
+          onClick={() => setView('list')}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${view === 'list' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
         >
-          <option value="">Alle Energiearten</option>
-          {Object.entries(ENERGY_TYPE_LABELS).map(([key, label]) => (
-            <option key={key} value={key}>{label}</option>
-          ))}
-        </select>
+          Liste
+        </button>
+        <button
+          onClick={() => setView('network')}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${view === 'network' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+        >
+          Physikalisches Netzwerk
+        </button>
       </div>
 
-      {/* Tabelle */}
-      <div className="card mt-4 overflow-hidden p-0">
-        {loading ? (
-          <div className="p-8 text-center text-gray-400">Laden...</div>
-        ) : meters.length === 0 ? (
-          <div className="p-8 text-center text-gray-400">
-            Keine Zähler gefunden. Legen Sie den ersten Zähler an.
-          </div>
-        ) : (
-          <table className="w-full text-left text-sm">
-            <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-              <tr>
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Nummer</th>
-                <th className="px-4 py-3">Energieart</th>
-                <th className="px-4 py-3">Quelle</th>
-                <th className="px-4 py-3">Standort</th>
-                <th className="px-4 py-3 text-right">Aktionen</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {meters.map((meter) => (
-                <tr key={meter.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium">{meter.name}</td>
-                  <td className="px-4 py-3 text-gray-500">
-                    {meter.meter_number || '–'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
-                      {ENERGY_TYPE_LABELS[meter.energy_type as EnergyType] || meter.energy_type}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">
-                    {meter.is_virtual
-                      ? (meter.virtual_config?.type === 'parallel' ? 'Doppelzähler' : 'Virtuell')
-                      : (DATA_SOURCES[meter.data_source] || meter.data_source)}
-                    {meter.is_feed_in && (
-                      <span className="ml-1 inline-flex items-center rounded-full bg-green-50 px-1.5 py-0.5 text-xs text-green-700">PV</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">
-                    {meter.site_name || meter.location || '–'}
-                  </td>
-                  <td className="px-4 py-3 text-right space-x-2">
-                    {meter.data_source !== 'manual' && (
-                      <>
-                        <button
-                          onClick={() => handleTestConnection(meter)}
-                          className="text-gray-500 hover:text-gray-700"
-                          title="Verbindung testen"
-                        >
-                          Test
-                        </button>
-                        <button
-                          onClick={() => handlePoll(meter)}
-                          className="text-green-600 hover:text-green-800"
-                          title="Jetzt abfragen"
-                        >
-                          Abfragen
-                        </button>
-                      </>
-                    )}
-                    <button
-                      onClick={() => handleEdit(meter)}
-                      className="text-primary-600 hover:text-primary-800"
-                    >
-                      Bearbeiten
-                    </button>
-                    <button
-                      onClick={() => handleDelete(meter)}
-                      className="text-red-500 hover:text-red-700"
-                    >
-                      Löschen
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="mt-4 flex items-center justify-between">
-          <p className="text-sm text-gray-500">
-            Seite {page} von {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <button
-              className="btn-secondary"
-              disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
-            >
-              Zurück
-            </button>
-            <button
-              className="btn-secondary"
-              disabled={page >= totalPages}
-              onClick={() => setPage(page + 1)}
-            >
-              Weiter
-            </button>
-          </div>
+      {view === 'list' && (<>
+        {/* Filter */}
+        <div className="card mt-4 flex gap-4">
+          <input
+            type="text"
+            className="input flex-1"
+            placeholder="Suche nach Name, Nummer, Standort..."
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          />
+          <select
+            className="input w-48"
+            value={filterType}
+            onChange={(e) => { setFilterType(e.target.value); setPage(1); }}
+          >
+            <option value="">Alle Energiearten</option>
+            {Object.entries(ENERGY_TYPE_LABELS).map(([key, label]) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
         </div>
+
+        {/* Tabelle */}
+        <div className="card mt-4 overflow-hidden p-0">
+          {loading ? (
+            <div className="p-8 text-center text-gray-400">Laden...</div>
+          ) : meters.length === 0 ? (
+            <div className="p-8 text-center text-gray-400">
+              Keine Zähler gefunden. Legen Sie den ersten Zähler an.
+            </div>
+          ) : (
+            <table className="w-full text-left text-sm">
+              <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
+                <tr>
+                  <th className="px-4 py-3">Name</th>
+                  <th className="px-4 py-3">Nummer</th>
+                  <th className="px-4 py-3">Energieart</th>
+                  <th className="px-4 py-3">Quelle</th>
+                  <th className="px-4 py-3">Standort</th>
+                  <th className="px-4 py-3 text-right">Aktionen</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {meters.map((meter) => (
+                  <tr key={meter.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium">{meter.name}</td>
+                    <td className="px-4 py-3 text-gray-500">{meter.meter_number || '–'}</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
+                        {ENERGY_TYPE_LABELS[meter.energy_type as EnergyType] || meter.energy_type}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">
+                      {meter.is_virtual
+                        ? (meter.virtual_config?.type === 'parallel' ? 'Doppelzähler' : 'Virtuell')
+                        : (DATA_SOURCES[meter.data_source] || meter.data_source)}
+                      {meter.is_feed_in && (
+                        <span className="ml-1 inline-flex items-center rounded-full bg-green-50 px-1.5 py-0.5 text-xs text-green-700">PV</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">{meter.site_name || meter.location || '–'}</td>
+                    <td className="px-4 py-3 text-right space-x-2">
+                      {meter.data_source !== 'manual' && (
+                        <>
+                          <button onClick={() => handleTestConnection(meter)} className="text-gray-500 hover:text-gray-700">Test</button>
+                          <button onClick={() => handlePoll(meter)} className="text-green-600 hover:text-green-800">Abfragen</button>
+                        </>
+                      )}
+                      <button onClick={() => handleEdit(meter)} className="text-primary-600 hover:text-primary-800">Bearbeiten</button>
+                      <button onClick={() => handleDelete(meter)} className="text-red-500 hover:text-red-700">Löschen</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="mt-4 flex items-center justify-between">
+            <p className="text-sm text-gray-500">Seite {page} von {totalPages}</p>
+            <div className="flex gap-2">
+              <button className="btn-secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>Zurück</button>
+              <button className="btn-secondary" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Weiter</button>
+            </div>
+          </div>
+        )}
+      </>)}
+
+      {view === 'network' && (
+        <MeterNetworkView
+          meters={networkMeters}
+          loading={networkLoading}
+          onReload={loadAllMeters}
+          onEdit={handleEdit}
+        />
       )}
 
       {/* Discovery-Modal */}
@@ -1049,6 +1046,164 @@ function MeterModal({
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Netzwerk-Baum ──────────────────────────────────────────────────────────
+
+interface NetworkNode extends Meter {
+  children: NetworkNode[];
+}
+
+function buildTree(meters: Meter[]): NetworkNode[] {
+  const byId: Record<string, NetworkNode> = {};
+  meters.forEach(m => { byId[m.id] = { ...m, children: [] }; });
+  const roots: NetworkNode[] = [];
+  meters.forEach(m => {
+    if (m.parent_meter_id && byId[m.parent_meter_id]) {
+      byId[m.parent_meter_id].children.push(byId[m.id]);
+    } else {
+      roots.push(byId[m.id]);
+    }
+  });
+  return roots;
+}
+
+function NetworkRow({
+  node, depth, dnd, onEdit,
+}: {
+  node: NetworkNode;
+  depth: number;
+  dnd: { draggingId: string | null; dragOverId: string | null; setDraggingId: (id: string | null) => void; setDragOverId: (id: string | null) => void; onDrop: (targetId: string) => void };
+  onEdit: (m: Meter) => void;
+}) {
+  const [open, setOpen] = useState(depth < 2);
+  const isDragging = dnd.draggingId === node.id;
+  const isDragOver = dnd.dragOverId === node.id;
+
+  return (
+    <>
+      <tr
+        draggable
+        onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', node.id); dnd.setDraggingId(node.id); }}
+        onDragEnd={() => { dnd.setDraggingId(null); dnd.setDragOverId(null); }}
+        onDragOver={e => { e.preventDefault(); if (dnd.draggingId && dnd.draggingId !== node.id) { e.dataTransfer.dropEffect = 'move'; dnd.setDragOverId(node.id); } }}
+        onDragLeave={() => { if (dnd.dragOverId === node.id) dnd.setDragOverId(null); }}
+        onDrop={e => { e.preventDefault(); if (dnd.draggingId && dnd.draggingId !== node.id) dnd.onDrop(node.id); dnd.setDragOverId(null); }}
+        className={`group select-none transition-colors ${isDragging ? 'opacity-40' : ''} ${isDragOver ? 'bg-primary-50 outline outline-2 outline-primary-400' : 'hover:bg-gray-50'}`}
+      >
+        <td className="px-3 py-2">
+          <div className="flex items-center min-w-0" style={{ paddingLeft: `${depth * 20}px` }}>
+            <GripVertical className="w-3 h-3 text-gray-300 mr-1 flex-shrink-0 cursor-grab active:cursor-grabbing" />
+            {node.children.length > 0
+              ? <button onClick={() => setOpen(!open)} className="mr-1 text-gray-400 hover:text-gray-600 flex-shrink-0">
+                  {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                </button>
+              : <span className="mr-4 w-3 flex-shrink-0" />
+            }
+            <span className="truncate font-medium text-sm text-gray-900">{node.name}</span>
+            {node.is_virtual && <span className="ml-1.5 rounded bg-purple-100 px-1.5 py-0.5 text-xs text-purple-700">V</span>}
+            {node.is_feed_in && <span className="ml-1 rounded bg-green-100 px-1.5 py-0.5 text-xs text-green-700">PV</span>}
+          </div>
+        </td>
+        <td className="px-3 py-2 text-xs text-gray-500">{node.meter_number || '–'}</td>
+        <td className="px-3 py-2">
+          <span className="inline-flex rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
+            {ENERGY_TYPE_LABELS[node.energy_type as EnergyType] || node.energy_type}
+          </span>
+        </td>
+        <td className="px-3 py-2 text-xs text-gray-500">{node.site_name || node.location || '–'}</td>
+        <td className="px-3 py-2 text-xs text-gray-500">{DATA_SOURCES[node.data_source] || node.data_source}</td>
+        <td className="px-3 py-2 text-right">
+          <button onClick={() => onEdit(node)} className="text-xs text-primary-600 hover:text-primary-800">Bearbeiten</button>
+        </td>
+      </tr>
+      {open && node.children.map(child => (
+        <NetworkRow key={child.id} node={child} depth={depth + 1} dnd={dnd} onEdit={onEdit} />
+      ))}
+    </>
+  );
+}
+
+function MeterNetworkView({ meters, loading, onReload, onEdit }: {
+  meters: Meter[];
+  loading: boolean;
+  onReload: () => void;
+  onEdit: (m: Meter) => void;
+}) {
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [dropOverRoot, setDropOverRoot] = useState(false);
+
+  const tree = buildTree(meters);
+
+  const handleDrop = async (targetId: string) => {
+    if (!draggingId || draggingId === targetId) return;
+    try {
+      await apiClient.put(`/api/v1/meters/${draggingId}`, { parent_meter_id: targetId });
+      onReload();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string }; status?: number } };
+      alert(`Fehler: ${e?.response?.data?.detail || e?.response?.status || 'Unbekannt'}`);
+    } finally { setDraggingId(null); setDragOverId(null); }
+  };
+
+  const handleDropToRoot = async () => {
+    if (!draggingId) return;
+    setDropOverRoot(false);
+    try {
+      await apiClient.put(`/api/v1/meters/${draggingId}`, { parent_meter_id: null });
+      onReload();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string }; status?: number } };
+      alert(`Fehler: ${e?.response?.data?.detail || e?.response?.status || 'Unbekannt'}`);
+    } finally { setDraggingId(null); setDragOverId(null); }
+  };
+
+  const dnd = { draggingId, dragOverId, setDraggingId, setDragOverId, onDrop: handleDrop };
+
+  if (loading) return <div className="mt-4 p-8 text-center text-gray-400">Laden...</div>;
+
+  return (
+    <div className="mt-4">
+      <p className="mb-2 text-sm text-gray-500">
+        Zähler per Drag &amp; Drop in die Hierarchie ziehen. Einrückung = Unterzähler.
+      </p>
+
+      {/* Drop-Zone: Elternzuordnung entfernen */}
+      <div
+        onDragOver={e => { e.preventDefault(); setDropOverRoot(true); }}
+        onDragLeave={() => setDropOverRoot(false)}
+        onDrop={e => { e.preventDefault(); handleDropToRoot(); }}
+        style={{ visibility: draggingId ? 'visible' : 'hidden' }}
+        className={`mb-2 flex items-center justify-center rounded-lg border-2 border-dashed py-2 text-sm transition-colors ${dropOverRoot ? 'border-orange-400 bg-orange-50 text-orange-700' : 'border-gray-300 text-gray-400'}`}
+      >
+        Hier ablegen → Hauptzähler (keine Elternzuordnung)
+      </div>
+
+      <div className="card overflow-hidden p-0">
+        <table className="w-full text-sm">
+          <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
+            <tr>
+              <th className="px-3 py-2 text-left">Zähler</th>
+              <th className="px-3 py-2 text-left">Nummer</th>
+              <th className="px-3 py-2 text-left">Energieart</th>
+              <th className="px-3 py-2 text-left">Standort</th>
+              <th className="px-3 py-2 text-left">Quelle</th>
+              <th className="px-3 py-2 text-right">Aktionen</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {tree.map(node => (
+              <NetworkRow key={node.id} node={node} depth={0} dnd={dnd} onEdit={onEdit} />
+            ))}
+          </tbody>
+        </table>
+        {tree.length === 0 && (
+          <div className="p-8 text-center text-gray-400">Keine aktiven Zähler vorhanden.</div>
+        )}
       </div>
     </div>
   );
