@@ -4,6 +4,10 @@ readings.py – Endpunkte für Zählerstände und Verbrauchsdaten.
 Zählerstände können einzeln oder als Bulk erfasst werden.
 Die Verbrauchsberechnung erfolgt automatisch als Differenz
 aufeinanderfolgender Stände.
+
+WICHTIG: Reihenfolge der Routen beachten – statische Pfade (z.B. /consumption/summary,
+/outliers) müssen VOR parametrischen Pfaden (/{reading_id}) stehen, da FastAPI
+first-match-wins verwendet und sonst "outliers" als reading_id (UUID) interpretiert.
 """
 
 import uuid
@@ -110,89 +114,9 @@ async def create_readings_bulk(
     return [_reading_to_response(r) for r in readings]
 
 
-@router.get("/{reading_id}/page-info")
-async def get_reading_page_info(
-    reading_id: uuid.UUID,
-    page_size: int = Query(25, ge=1, le=200),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Seitennummer und Position eines Messwerts in der paginierten Liste ermitteln.
-
-    Nützlich um nach einer reading_id direkt die richtige Seite zu öffnen.
-    Rückgabe: {meter_id, page, position_on_page, total}
-    """
-    reading = await db.get(MeterReading, reading_id)
-    if not reading:
-        raise HTTPException(status_code=404, detail="Messwert nicht gefunden")
-
-    # Anzahl neuerer Messwerte zählen (timestamp DESC → position = count_newer)
-    count_newer = await db.scalar(
-        select(func.count(MeterReading.id)).where(
-            MeterReading.meter_id == reading.meter_id,
-            MeterReading.timestamp > reading.timestamp,
-        )
-    ) or 0
-
-    total = await db.scalar(
-        select(func.count(MeterReading.id)).where(
-            MeterReading.meter_id == reading.meter_id,
-        )
-    ) or 0
-
-    page = (count_newer // page_size) + 1
-    position_on_page = count_newer % page_size
-
-    return {
-        "meter_id": str(reading.meter_id),
-        "page": page,
-        "position_on_page": position_on_page,
-        "total": total,
-    }
-
-
-@router.get("/{reading_id}", response_model=ReadingResponse)
-async def get_reading(
-    reading_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Einzelnen Zählerstand abrufen."""
-    service = ReadingService(db)
-    reading = await service.get_reading(reading_id)
-    return _reading_to_response(reading)
-
-
-@router.put("/{reading_id}", response_model=ReadingResponse)
-async def update_reading(
-    reading_id: uuid.UUID,
-    request: ReadingUpdate,
-    current_user: User = Depends(require_permission("readings", "update")),
-    db: AsyncSession = Depends(get_db),
-):
-    """Zählerstand korrigieren."""
-    service = ReadingService(db)
-    reading = await service.update_reading(
-        reading_id, request.model_dump(exclude_unset=True)
-    )
-    return _reading_to_response(reading)
-
-
-@router.delete("/{reading_id}", response_model=DeleteResponse)
-async def delete_reading(
-    reading_id: uuid.UUID,
-    current_user: User = Depends(require_permission("readings", "delete")),
-    db: AsyncSession = Depends(get_db),
-):
-    """Zählerstand löschen."""
-    service = ReadingService(db)
-    await service.delete_reading(reading_id)
-    return DeleteResponse(id=reading_id)
-
-
 # ---------------------------------------------------------------------------
-# Verbrauchsabfragen
+# Verbrauchsabfragen – VOR /{reading_id} damit /consumption/summary nicht als
+# UUID-Pfad interpretiert wird.
 # ---------------------------------------------------------------------------
 
 @router.get("/consumption/summary", response_model=list[ConsumptionSummary])
@@ -220,7 +144,7 @@ async def get_consumption_summary(
 
 
 # ---------------------------------------------------------------------------
-# Ausreißer-Erkennung und -Verwaltung
+# Ausreißer-Erkennung und -Verwaltung – VOR /{reading_id}
 # ---------------------------------------------------------------------------
 
 class OutlierItem(BaseModel):
@@ -303,6 +227,115 @@ async def detect_outliers(
     return outliers[:500]
 
 
+@router.post("/outliers/bulk-action")
+async def bulk_handle_outliers(
+    reading_ids: list[str],
+    action: Literal["delete", "flag"],
+    current_user: User = Depends(require_permission("readings", "update")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Massenaktion auf mehrere Ausreißer gleichzeitig."""
+    ids = [uuid.UUID(rid) for rid in reading_ids]
+    if action == "delete":
+        await db.execute(delete(MeterReading).where(MeterReading.id.in_(ids)))
+        await db.commit()
+        return {"status": "deleted", "count": len(ids)}
+    if action == "flag":
+        result = await db.execute(select(MeterReading).where(MeterReading.id.in_(ids)))
+        readings = result.scalars().all()
+        for r in readings:
+            r.quality = "outlier"
+            r.consumption = None
+            r.notes = f"Als Ausreißer markiert (Batch) am {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC"
+        await db.commit()
+        return {"status": "flagged", "count": len(ids)}
+
+
+# ---------------------------------------------------------------------------
+# Einzelne Messwert-Abfragen – NACH allen statischen Pfaden
+# ---------------------------------------------------------------------------
+
+@router.get("/{reading_id}/page-info")
+async def get_reading_page_info(
+    reading_id: uuid.UUID,
+    page_size: int = Query(25, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Seitennummer und Position eines Messwerts in der paginierten Liste ermitteln.
+
+    Nützlich um nach einer reading_id direkt die richtige Seite zu öffnen.
+    Rückgabe: {meter_id, page, position_on_page, total}
+    """
+    reading = await db.get(MeterReading, reading_id)
+    if not reading:
+        raise HTTPException(status_code=404, detail="Messwert nicht gefunden")
+
+    # Anzahl neuerer Messwerte zählen (timestamp DESC → position = count_newer)
+    count_newer = await db.scalar(
+        select(func.count(MeterReading.id)).where(
+            MeterReading.meter_id == reading.meter_id,
+            MeterReading.timestamp > reading.timestamp,
+        )
+    ) or 0
+
+    total = await db.scalar(
+        select(func.count(MeterReading.id)).where(
+            MeterReading.meter_id == reading.meter_id,
+        )
+    ) or 0
+
+    page = (count_newer // page_size) + 1
+    position_on_page = count_newer % page_size
+
+    return {
+        "meter_id": str(reading.meter_id),
+        "page": page,
+        "position_on_page": position_on_page,
+        "total": total,
+    }
+
+
+@router.get("/{reading_id}", response_model=ReadingResponse)
+async def get_reading(
+    reading_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Einzelnen Zählerstand abrufen."""
+    service = ReadingService(db)
+    reading = await service.get_reading(reading_id)
+    return _reading_to_response(reading)
+
+
+@router.put("/{reading_id}", response_model=ReadingResponse)
+async def update_reading(
+    reading_id: uuid.UUID,
+    request: ReadingUpdate,
+    current_user: User = Depends(require_permission("readings", "update")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Zählerstand korrigieren."""
+    service = ReadingService(db)
+    reading = await service.update_reading(
+        reading_id, request.model_dump(exclude_unset=True)
+    )
+    return _reading_to_response(reading)
+
+
+@router.delete("/{reading_id}", response_model=DeleteResponse)
+async def delete_reading(
+    reading_id: uuid.UUID,
+    current_user: User = Depends(require_permission("readings", "delete")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Zählerstand löschen."""
+    service = ReadingService(db)
+    await service.delete_reading(reading_id)
+    return DeleteResponse(id=reading_id)
+
+
 @router.post("/outliers/{reading_id}/action")
 async def handle_outlier(
     reading_id: uuid.UUID,
@@ -367,27 +400,3 @@ async def handle_outlier(
         )
         await db.commit()
         return {"status": "interpolated", "new_consumption": float(interpolated), "reading_id": str(reading_id)}
-
-
-@router.post("/outliers/bulk-action")
-async def bulk_handle_outliers(
-    reading_ids: list[str],
-    action: Literal["delete", "flag"],
-    current_user: User = Depends(require_permission("readings", "update")),
-    db: AsyncSession = Depends(get_db),
-):
-    """Massenaktion auf mehrere Ausreißer gleichzeitig."""
-    ids = [uuid.UUID(rid) for rid in reading_ids]
-    if action == "delete":
-        await db.execute(delete(MeterReading).where(MeterReading.id.in_(ids)))
-        await db.commit()
-        return {"status": "deleted", "count": len(ids)}
-    if action == "flag":
-        result = await db.execute(select(MeterReading).where(MeterReading.id.in_(ids)))
-        readings = result.scalars().all()
-        for r in readings:
-            r.quality = "outlier"
-            r.consumption = None
-            r.notes = f"Als Ausreißer markiert (Batch) am {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC"
-        await db.commit()
-        return {"status": "flagged", "count": len(ids)}

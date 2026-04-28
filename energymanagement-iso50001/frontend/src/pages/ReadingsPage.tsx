@@ -333,6 +333,14 @@ export default function ReadingsPage() {
         </div>
       </div>
 
+      {/* Banner: direkter Sprung zu markiertem Messwert */}
+      {highlightReadingId && (
+        <div className="mt-4 flex items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <span className="text-lg">⚑</span>
+          <span>Springe direkt zum markierten Ausreißer-Messwert – dieser ist <strong>gelb hervorgehoben</strong>.</span>
+        </div>
+      )}
+
       {/* Zähler-Auswahl */}
       <div className="card mt-4">
         <label className="label">Zähler auswählen</label>
