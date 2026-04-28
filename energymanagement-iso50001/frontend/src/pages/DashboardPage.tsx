@@ -415,6 +415,7 @@ interface AnomalyReading {
   consumption: number;
   p95: number;
   factor: number;
+  days_since_prev: number;
 }
 
 const ENERGY_TYPE_COLORS_BG: Record<string, string> = {
@@ -532,6 +533,7 @@ function AnomalyPanel() {
                 <th className="px-4 py-2 text-left">Standort</th>
                 <th className="px-4 py-2 text-left">Energieart</th>
                 <th className="px-4 py-2 text-right">Ausreißerwert</th>
+                <th className="px-4 py-2 text-right">Zeitraum</th>
                 <th className="px-4 py-2 text-right">Normalwert p95</th>
                 <th className="px-4 py-2 text-right">Faktor</th>
                 <th className="px-4 py-2 text-right">Aktionen</th>
@@ -558,6 +560,13 @@ function AnomalyPanel() {
                   </td>
                   <td className="px-4 py-2 text-right font-bold text-red-700 whitespace-nowrap">
                     {Number(a.consumption).toLocaleString('de-DE', { maximumFractionDigits: 1 })} {a.unit}
+                  </td>
+                  <td className="px-4 py-2 text-right whitespace-nowrap">
+                    <span className={a.days_since_prev > 45
+                      ? 'text-amber-600 font-medium'
+                      : 'text-gray-400'}>
+                      {a.days_since_prev} Tage
+                    </span>
                   </td>
                   <td className="px-4 py-2 text-right text-gray-500 whitespace-nowrap">
                     {Number(a.p95).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 3 })} {a.unit}

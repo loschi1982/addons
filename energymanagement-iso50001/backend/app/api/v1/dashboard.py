@@ -59,7 +59,8 @@ class AnomalyReading(BaseModel):
     timestamp: str
     consumption: Decimal
     p95: Decimal
-    factor: Decimal   # consumption / p95
+    factor: Decimal      # (consumption/days) / (p95/avg_days) – tagesbereinigt
+    days_since_prev: int  # Tage seit vorherigem Messwert
 
 
 @router.get("/anomalies", response_model=list[AnomalyReading])
@@ -77,18 +78,40 @@ async def get_anomalies(
     """
     result = await db.execute(text("""
         WITH meter_stats AS (
+            -- Tagesbereinigter p95: Verbrauch pro Tag je Zähler
+            -- avg_days = durchschnittlicher Ablese-Abstand in Tagen
             SELECT
                 meter_id,
-                PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY consumption) AS p95
+                PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY consumption) AS p95,
+                AVG(
+                    EXTRACT(EPOCH FROM (
+                        timestamp - LAG(timestamp) OVER (PARTITION BY meter_id ORDER BY timestamp)
+                    )) / 86400.0
+                ) AS avg_days
             FROM meter_readings
             WHERE consumption IS NOT NULL AND consumption > 0
             GROUP BY meter_id
             HAVING COUNT(*) >= 10
               AND PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY consumption) >= 1
+        ),
+        readings_with_gap AS (
+            SELECT
+                r.id,
+                r.meter_id,
+                r.timestamp,
+                r.consumption,
+                r.quality,
+                GREATEST(1, ROUND(
+                    EXTRACT(EPOCH FROM (
+                        r.timestamp - LAG(r.timestamp) OVER (PARTITION BY r.meter_id ORDER BY r.timestamp)
+                    )) / 86400.0
+                )) AS days_since_prev
+            FROM meter_readings r
         )
         SELECT
             r.id            AS reading_id,
-            r.meter_id,
+            rg.days_since_prev,
+            m.meter_id,
             m.name          AS meter_name,
             m.energy_type,
             m.unit,
@@ -97,15 +120,20 @@ async def get_anomalies(
             r.timestamp     AT TIME ZONE 'Europe/Berlin' AS ts,
             r.consumption,
             ms.p95,
-            r.consumption / ms.p95 AS factor
+            -- Tagesbereinigter Faktor: (Verbrauch/Tage) / (p95/avg_days)
+            (r.consumption / rg.days_since_prev)
+                / NULLIF((ms.p95 / GREATEST(1, ms.avg_days)), 0) AS factor
         FROM meter_readings r
+        JOIN readings_with_gap rg ON r.id = rg.id
         JOIN meter_stats ms ON r.meter_id = ms.meter_id
         JOIN meters m ON r.meter_id = m.id
         LEFT JOIN sites s ON m.site_id = s.id
-        WHERE r.consumption > ms.p95 * :threshold
-          AND r.consumption > 0
+        WHERE r.consumption > 0
           AND m.is_active = TRUE
           AND r.quality != 'verified'
+          AND rg.days_since_prev IS NOT NULL
+          AND (r.consumption / rg.days_since_prev)
+              / NULLIF((ms.p95 / GREATEST(1, ms.avg_days)), 0) > :threshold
         ORDER BY factor DESC
         LIMIT :limit
     """), {"threshold": threshold, "limit": limit})
@@ -124,6 +152,7 @@ async def get_anomalies(
             consumption=Decimal(str(row.consumption)),
             p95=Decimal(str(row.p95)),
             factor=Decimal(str(row.factor)),
+            days_since_prev=int(row.days_since_prev),
         )
         for row in rows
     ]
