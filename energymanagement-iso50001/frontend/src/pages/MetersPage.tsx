@@ -435,20 +435,35 @@ function MeterNetworkView({
     [filters]
   );
 
-  const processedMeters = useMemo(() => {
-    let result = isFiltered ? meters.filter(m => matchesMeter(m, filters)) : [...meters];
-    if (sortCol) {
-      result.sort((a, b) => {
-        const va = getSortValue(a, sortCol);
-        const vb = getSortValue(b, sortCol);
-        const cmp = va.localeCompare(vb, 'de');
-        return sortDir === 'asc' ? cmp : -cmp;
-      });
-    }
-    return result;
-  }, [meters, filters, isFiltered, sortCol, sortDir]);
+  // Sortierung auf Flat-Liste anwenden, dann Baum bauen
+  const sortedMeters = useMemo(() => {
+    if (!sortCol) return meters;
+    return [...meters].sort((a, b) => {
+      const va = getSortValue(a, sortCol);
+      const vb = getSortValue(b, sortCol);
+      const cmp = va.localeCompare(vb, 'de');
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [meters, sortCol, sortDir]);
 
-  const tree = useMemo(() => !isFiltered ? buildTree(processedMeters) : [], [processedMeters, isFiltered]);
+  // Baum rekursiv filtern: Knoten behalten wenn er selbst oder ein Nachfahre passt
+  const filterTree = useCallback((nodes: NetworkNode[]): NetworkNode[] => {
+    return nodes.flatMap(node => {
+      const filteredChildren = filterTree(node.children);
+      const selfMatches = matchesMeter(node, filters);
+      if (selfMatches || filteredChildren.length > 0) {
+        return [{ ...node, children: filteredChildren }];
+      }
+      return [];
+    });
+  }, [filters]);
+
+  const tree = useMemo(() => {
+    const full = buildTree(sortedMeters);
+    return isFiltered ? filterTree(full) : full;
+  }, [sortedMeters, isFiltered, filterTree]);
+
+  const processedMeters = sortedMeters; // für uniqueEnergyTypes/uniqueDataSources
 
   const handleSortClick = (col: SortCol) => {
     if (sortCol === col) {
@@ -595,14 +610,12 @@ function MeterNetworkView({
     <div className="mt-4">
       {isFiltered && (
         <div className="mb-2 flex items-center gap-2 text-sm text-gray-500">
-          <span>{processedMeters.length} Ergebnis{processedMeters.length !== 1 ? 'se' : ''}</span>
           <button
             className="text-xs text-primary-600 hover:text-primary-800 underline"
             onClick={() => setFilters({})}
           >
             Alle Filter löschen
           </button>
-          <span className="text-xs text-amber-600">(Hierarchie ausgeblendet – Filter aktiv)</span>
         </div>
       )}
 
@@ -640,31 +653,18 @@ function MeterNetworkView({
             </tr>
           </thead>
           <tbody key={treeKey} className="divide-y divide-gray-100">
-            {isFiltered
-              ? processedMeters.map(m => (
-                  <FlatRow
-                    key={m.id}
-                    meter={m}
-                    dnd={dnd}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onPoll={onPoll}
-                    onTestConnection={onTestConnection}
-                  />
-                ))
-              : tree.map(node => (
-                  <NetworkRow
-                    key={node.id}
-                    node={node}
-                    depth={0}
-                    dnd={dnd}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onPoll={onPoll}
-                    onTestConnection={onTestConnection}
-                  />
-                ))
-            }
+            {tree.map(node => (
+              <NetworkRow
+                key={node.id}
+                node={node}
+                depth={0}
+                dnd={dnd}
+                onEdit={onEdit}
+                onDelete={onDelete}
+                onPoll={onPoll}
+                onTestConnection={onTestConnection}
+              />
+            ))}
           </tbody>
         </table>
         {processedMeters.length === 0 && (
@@ -769,64 +769,7 @@ function NetworkRow({
   );
 }
 
-// ── Flache Zeile (gefilterte Ansicht, mit DnD) ────────────────────────────
-
 type DndProps = { draggingId: string | null; dragOverId: string | null; setDraggingId: (id: string | null) => void; setDragOverId: (id: string | null) => void; onDrop: (sourceId: string, targetId: string) => void };
-
-function FlatRow({ meter, dnd, onEdit, onDelete, onPoll, onTestConnection }: {
-  meter: Meter;
-  dnd: DndProps;
-  onEdit: (m: Meter) => void;
-  onDelete: (m: Meter) => void;
-  onPoll: (m: Meter) => void;
-  onTestConnection: (m: Meter) => void;
-}) {
-  const isDragging = dnd.draggingId === meter.id;
-  const isDragOver = dnd.dragOverId === meter.id;
-
-  return (
-    <tr
-      draggable
-      onDragStart={e => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', meter.id); dnd.setDraggingId(meter.id); }}
-      onDragEnd={() => { dnd.setDraggingId(null); dnd.setDragOverId(null); }}
-      onDragOver={e => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; dnd.setDragOverId(meter.id); }}
-      onDragLeave={e => { e.stopPropagation(); dnd.setDragOverId(null); }}
-      onDrop={e => { e.preventDefault(); e.stopPropagation(); const src = e.dataTransfer.getData('text/plain'); if (src && src !== meter.id) dnd.onDrop(src, meter.id); dnd.setDragOverId(null); }}
-      className={`select-none transition-colors ${isDragging ? 'opacity-40' : ''} ${isDragOver ? 'bg-primary-50 outline outline-2 outline-primary-400' : 'hover:bg-gray-50'}`}
-    >
-      <td className="px-3 py-2">
-        <div className="flex items-center min-w-0">
-          <GripVertical className="w-3 h-3 text-gray-300 mr-1 flex-shrink-0 cursor-grab active:cursor-grabbing" />
-          <span className="truncate font-medium text-sm text-gray-900">{meter.name}</span>
-          {meter.is_virtual && <span className="ml-1.5 rounded bg-purple-100 px-1.5 py-0.5 text-xs text-purple-700">V</span>}
-          {meter.is_feed_in && <span className="ml-1 rounded bg-green-100 px-1.5 py-0.5 text-xs text-green-700">PV</span>}
-        </div>
-      </td>
-      <td className="px-3 py-2 text-xs text-gray-500">{meter.meter_number || '–'}</td>
-      <td className="px-3 py-2">
-        <span className="inline-flex rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
-          {ENERGY_TYPE_LABELS[meter.energy_type as EnergyType] || meter.energy_type}
-        </span>
-      </td>
-      <td className="px-3 py-2 text-xs text-gray-500">{meter.site_name || meter.location || '–'}</td>
-      <td className="px-3 py-2 text-xs text-gray-500">
-        {meter.is_virtual
-          ? (meter.virtual_config?.type === 'parallel' ? 'Doppelzähler' : 'Virtuell')
-          : (DATA_SOURCES[meter.data_source] || meter.data_source)}
-      </td>
-      <td className="px-3 py-2 text-right space-x-2 text-xs">
-        {meter.data_source !== 'manual' && !meter.is_virtual && (
-          <>
-            <button onClick={() => onTestConnection(meter)} className="text-gray-500 hover:text-gray-700">Test</button>
-            <button onClick={() => onPoll(meter)} className="text-green-600 hover:text-green-800">Abfragen</button>
-          </>
-        )}
-        <button onClick={() => onEdit(meter)} className="text-primary-600 hover:text-primary-800">Bearbeiten</button>
-        <button onClick={() => onDelete(meter)} className="text-red-500 hover:text-red-700">Löschen</button>
-      </td>
-    </tr>
-  );
-}
 
 /* ── Zähler-Modal mit Standort-Kaskade + Datenquellen-Konfig ── */
 
