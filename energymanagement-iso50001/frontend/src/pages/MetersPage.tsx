@@ -700,15 +700,19 @@ function NetworkRow({
   const isDragging = dnd.draggingId === node.id;
   const isDragOver = dnd.dragOverId === node.id;
 
+  const rowDnd = {
+    draggable: true as const,
+    onDragStart: (e: React.DragEvent) => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', node.id); dnd.setDraggingId(node.id); },
+    onDragEnd: () => { dnd.setDraggingId(null); dnd.setDragOverId(null); },
+    onDragOver: (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; dnd.setDragOverId(node.id); },
+    onDragLeave: (e: React.DragEvent) => { e.stopPropagation(); dnd.setDragOverId(null); },
+    onDrop: (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); const src = e.dataTransfer.getData('text/plain'); if (src && src !== node.id) dnd.onDrop(src, node.id); dnd.setDragOverId(null); },
+  };
+
   return (
     <>
       <tr
-        draggable
-        onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', node.id); dnd.setDraggingId(node.id); }}
-        onDragEnd={() => { dnd.setDraggingId(null); dnd.setDragOverId(null); }}
-        onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dnd.draggingId !== node.id) dnd.setDragOverId(node.id); }}
-        onDragLeave={() => { if (dnd.dragOverId === node.id) dnd.setDragOverId(null); }}
-        onDrop={e => { e.preventDefault(); const src = e.dataTransfer.getData('text/plain'); if (src && src !== node.id) dnd.onDrop(src, node.id); dnd.setDragOverId(null); }}
+        {...rowDnd}
         className={`group select-none transition-colors ${isDragging ? 'opacity-40' : ''} ${isDragOver ? 'bg-primary-50 outline outline-2 outline-primary-400' : 'hover:bg-gray-50'}`}
       >
         <td className="px-3 py-2">
@@ -783,11 +787,11 @@ function FlatRow({ meter, dnd, onEdit, onDelete, onPoll, onTestConnection }: {
   return (
     <tr
       draggable
-      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', meter.id); dnd.setDraggingId(meter.id); }}
+      onDragStart={e => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', meter.id); dnd.setDraggingId(meter.id); }}
       onDragEnd={() => { dnd.setDraggingId(null); dnd.setDragOverId(null); }}
-      onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dnd.draggingId !== meter.id) dnd.setDragOverId(meter.id); }}
-      onDragLeave={() => { if (dnd.dragOverId === meter.id) dnd.setDragOverId(null); }}
-      onDrop={e => { e.preventDefault(); const src = e.dataTransfer.getData('text/plain'); if (src && src !== meter.id) dnd.onDrop(src, meter.id); dnd.setDragOverId(null); }}
+      onDragOver={e => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; dnd.setDragOverId(meter.id); }}
+      onDragLeave={e => { e.stopPropagation(); dnd.setDragOverId(null); }}
+      onDrop={e => { e.preventDefault(); e.stopPropagation(); const src = e.dataTransfer.getData('text/plain'); if (src && src !== meter.id) dnd.onDrop(src, meter.id); dnd.setDragOverId(null); }}
       className={`select-none transition-colors ${isDragging ? 'opacity-40' : ''} ${isDragOver ? 'bg-primary-50 outline outline-2 outline-primary-400' : 'hover:bg-gray-50'}`}
     >
       <td className="px-3 py-2">

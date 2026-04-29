@@ -10,6 +10,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -369,10 +370,14 @@ async def update_meter(
     return _meter_to_response(meter)
 
 
+class SetParentBody(BaseModel):
+    parent_meter_id: uuid.UUID | None = None
+
+
 @router.patch("/{meter_id}/parent")
 async def set_meter_parent(
     meter_id: uuid.UUID,
-    body: dict,
+    body: SetParentBody,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -387,8 +392,7 @@ async def set_meter_parent(
     meter = await db.get(_Meter, meter_id)
     if not meter:
         raise HTTPException(status_code=404, detail="Zähler nicht gefunden")
-    raw = body.get("parent_meter_id")
-    meter.parent_meter_id = uuid.UUID(str(raw)) if raw else None
+    meter.parent_meter_id = body.parent_meter_id
     await db.commit()
     return {"id": str(meter_id), "parent_meter_id": str(meter.parent_meter_id) if meter.parent_meter_id else None}
 
