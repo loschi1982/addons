@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Network, GripVertical, ChevronDown, ChevronRight, ChevronUp, ArrowUpDown, Filter } from 'lucide-react';
 import { apiClient } from '@/utils/api';
-import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
+import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
 import { useSiteHierarchy } from '@/hooks/useSiteHierarchy';
 import DiscoveryModal from '@/components/DiscoveryModal';
 
@@ -115,8 +115,8 @@ export default function MetersPage() {
   const loadMeters = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get<PaginatedResponse<Meter>>('/api/v1/meters?page_size=500');
-      setAllMeters(res.data.items.filter(m => m.is_active));
+      const res = await apiClient.get<{ items: Meter[]; total: number }>('/api/v1/meters/tree');
+      setAllMeters(res.data.items);
     } catch { /* interceptor */ } finally { setLoading(false); }
   }, []);
 
@@ -483,6 +483,7 @@ function MeterNetworkView({
     if (!draggingId || draggingId === targetId) return;
     try {
       await apiClient.put(`/api/v1/meters/${draggingId}`, { parent_meter_id: targetId });
+      setFilters({});
       onReload();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string }; status?: number } };
@@ -495,6 +496,7 @@ function MeterNetworkView({
     setDropOverRoot(false);
     try {
       await apiClient.put(`/api/v1/meters/${draggingId}`, { parent_meter_id: null });
+      setFilters({});
       onReload();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string }; status?: number } };

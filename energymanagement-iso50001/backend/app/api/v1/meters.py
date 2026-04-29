@@ -116,6 +116,83 @@ async def list_meters(
     )
 
 
+@router.get("/tree")
+async def list_meters_tree(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Alle aktiven Zähler als schlanke Liste für die Baumansicht.
+
+    Kein latest_reading-Query – nur die für den Baum nötigen Felder.
+    Wesentlich schneller als der vollständige list_meters-Endpunkt.
+    """
+    from sqlalchemy import select as _select
+    from app.models.meter import Meter as _Meter
+
+    rows = await db.execute(
+        _select(
+            _Meter.id,
+            _Meter.name,
+            _Meter.meter_number,
+            _Meter.energy_type,
+            _Meter.unit,
+            _Meter.data_source,
+            _Meter.location,
+            _Meter.site_id,
+            _Meter.building_id,
+            _Meter.usage_unit_id,
+            _Meter.parent_meter_id,
+            _Meter.is_active,
+            _Meter.is_virtual,
+            _Meter.is_feed_in,
+            _Meter.is_delivery_based,
+            _Meter.is_weather_corrected,
+            _Meter.source_config,
+            _Meter.virtual_config,
+        )
+        .where(_Meter.is_active == True)  # noqa: E712
+        .order_by(_Meter.name)
+    )
+    meters = rows.mappings().all()
+
+    # Site-Namen per Batch-Abfrage laden
+    site_ids = {m["site_id"] for m in meters if m["site_id"]}
+    site_names: dict = {}
+    if site_ids:
+        site_rows = await db.execute(select(Site.id, Site.name).where(Site.id.in_(site_ids)))
+        for sid, sname in site_rows.all():
+            site_names[sid] = sname
+
+    return {
+        "items": [
+            {
+                "id": str(m["id"]),
+                "name": m["name"],
+                "meter_number": m["meter_number"],
+                "energy_type": m["energy_type"],
+                "unit": m["unit"],
+                "data_source": m["data_source"],
+                "location": m["location"],
+                "site_id": str(m["site_id"]) if m["site_id"] else None,
+                "site_name": site_names.get(m["site_id"]),
+                "building_id": str(m["building_id"]) if m["building_id"] else None,
+                "usage_unit_id": str(m["usage_unit_id"]) if m["usage_unit_id"] else None,
+                "parent_meter_id": str(m["parent_meter_id"]) if m["parent_meter_id"] else None,
+                "is_active": m["is_active"],
+                "is_virtual": m["is_virtual"],
+                "is_feed_in": m["is_feed_in"],
+                "is_delivery_based": m["is_delivery_based"],
+                "is_weather_corrected": m["is_weather_corrected"],
+                "source_config": m["source_config"],
+                "virtual_config": m["virtual_config"],
+            }
+            for m in meters
+        ],
+        "total": len(meters),
+    }
+
+
 @router.post("", response_model=MeterResponse, status_code=201)
 async def create_meter(
     request: MeterCreate,
