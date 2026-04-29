@@ -731,6 +731,10 @@ export default function SitesPage() {
   // Alle Nutzungseinheiten des Standorts (für Zähler-Modal)
   const [allSiteUnits, setAllSiteUnits] = useState<UsageUnit[]>([]);
 
+  // Sync virtuelle Netto-Zähler
+  const [syncingNetMeters, setSyncingNetMeters] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ name: string; action: string; subtract_count: number }[] | null>(null);
+
   const pageSize = 25;
 
   // ── Laden ──
@@ -950,6 +954,20 @@ export default function SitesPage() {
       const e2 = err as { response?: { data?: { detail?: string } } };
       setFormError(e2.response?.data?.detail || 'Fehler beim Speichern');
     } finally { setSaving(false); }
+  };
+
+  const handleSyncNetMeters = async () => {
+    if (!selectedSite) return;
+    setSyncingNetMeters(true);
+    setSyncResult(null);
+    try {
+      const res = await apiClient.post(`/api/v1/sites/${selectedSite.id}/sync-net-meters`);
+      setSyncResult(res.data);
+      // Zählerliste und Verbrauchsdaten aktualisieren
+      await reloadSiteMeters();
+      if (selectedSite) loadSiteConsumption(selectedSite.id, new Date().getFullYear());
+    } catch { /* Interceptor */ }
+    setSyncingNetMeters(false);
   };
 
   const handleDeleteSite = async (site: Site, ev: React.MouseEvent) => {
@@ -1234,6 +1252,33 @@ export default function SitesPage() {
                 <p className="text-xs text-gray-400 pt-1">
                   Keine standortübergreifenden Subtraktionszähler vorhanden – Brutto = Netto.
                 </p>
+              )}
+
+              {hasExits && (
+                <div className="pt-2 border-t border-amber-200">
+                  <button
+                    onClick={handleSyncNetMeters}
+                    disabled={syncingNetMeters}
+                    className="flex items-center gap-1.5 text-xs rounded px-2.5 py-1.5 bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300 disabled:opacity-50"
+                  >
+                    {syncingNetMeters
+                      ? <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-600 border-t-transparent" />
+                      : <Zap className="h-3 w-3" />}
+                    Netto-Zähler automatisch erstellen
+                  </button>
+                  {syncResult && syncResult.length > 0 && (
+                    <div className="mt-2 space-y-0.5">
+                      {syncResult.map((r) => (
+                        <p key={r.name} className="text-xs text-amber-700">
+                          ✓ {r.name} ({r.action}, {r.subtract_count} Subtraktionszähler)
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                  {syncResult && syncResult.length === 0 && (
+                    <p className="mt-1 text-xs text-amber-600">Alle Netto-Zähler sind bereits aktuell.</p>
+                  )}
+                </div>
               )}
             </div>
           </div>

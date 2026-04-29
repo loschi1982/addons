@@ -172,12 +172,25 @@ class ReportService:
 
         if site_id:
             result = await self.db.execute(
-                select(Meter.id).where(
+                select(Meter.id, Meter.is_virtual, Meter.virtual_config).where(
                     Meter.site_id == site_id,
                     Meter.is_active == True,  # noqa: E712
                 )
             )
-            ids = [row[0] for row in result.all()]
+            rows = result.all()
+            # Physische Quell-Zähler ausschließen, für die ein virtueller
+            # Netto-Zähler (type="difference") vorhanden ist
+            virtual_source_ids: set = set()
+            for row in rows:
+                if row.is_virtual and (row.virtual_config or {}).get("type") == "difference":
+                    src = (row.virtual_config or {}).get("source_meter_id")
+                    if src:
+                        try:
+                            import uuid as _uuid
+                            virtual_source_ids.add(_uuid.UUID(src))
+                        except ValueError:
+                            pass
+            ids = [row[0] for row in rows if row[0] not in virtual_source_ids]
             return ids if ids else None
 
         return None  # Alle Zähler
