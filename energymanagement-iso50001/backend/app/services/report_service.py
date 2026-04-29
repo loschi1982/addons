@@ -129,6 +129,8 @@ class ReportService:
         site_id: uuid.UUID | None,
         root_meter_id: uuid.UUID | None,
         meter_ids: list[uuid.UUID] | None,
+        building_id: uuid.UUID | None = None,
+        usage_unit_id: uuid.UUID | None = None,
     ) -> list[uuid.UUID] | None:
         """Zähler-IDs basierend auf Scope-Filtern auflösen."""
         if meter_ids:
@@ -146,6 +148,27 @@ class ReportService:
                 )
                 queue.extend(row[0] for row in children.all())
             return all_meters
+
+        # Feinste Scope-Ebene zuerst auflösen
+        if usage_unit_id:
+            result = await self.db.execute(
+                select(Meter.id).where(
+                    Meter.usage_unit_id == usage_unit_id,
+                    Meter.is_active == True,  # noqa: E712
+                )
+            )
+            ids = [row[0] for row in result.all()]
+            return ids if ids else None
+
+        if building_id:
+            result = await self.db.execute(
+                select(Meter.id).where(
+                    Meter.building_id == building_id,
+                    Meter.is_active == True,  # noqa: E712
+                )
+            )
+            ids = [row[0] for row in result.all()]
+            return ids if ids else None
 
         if site_id:
             result = await self.db.execute(
@@ -253,6 +276,8 @@ class ReportService:
         # Felder aus data extrahieren
         meter_ids_raw = data.pop("meter_ids", None)
         site_id = data.pop("site_id", None)
+        building_id = data.pop("building_id", None)
+        usage_unit_id = data.pop("usage_unit_id", None)
         root_meter_id = data.pop("root_meter_id", None)
         include_co2 = data.pop("include_co2", True)
         include_weather_correction = data.pop("include_weather_correction", False)
@@ -291,7 +316,10 @@ class ReportService:
         data["period_end"] = period_end
 
         # Scope-Filter: Zähler-IDs auflösen
-        meter_ids = await self._resolve_meter_ids(site_id, root_meter_id, meter_ids_raw)
+        meter_ids = await self._resolve_meter_ids(
+            site_id, root_meter_id, meter_ids_raw,
+            building_id=building_id, usage_unit_id=usage_unit_id,
+        )
 
         # Daten-Snapshot erstellen
         snapshot = await self._create_data_snapshot(
@@ -299,6 +327,27 @@ class ReportService:
             reference_value=reference_value,
             reference_unit=reference_unit,
         )
+
+        # Scope-Label für PDF-Deckblatt (Gebäude / Nutzungseinheit)
+        if usage_unit_id:
+            from app.models.site import UsageUnit as _UU, Building as _Bld, Site as _Site2
+            _uu = await self.db.get(_UU, usage_unit_id)
+            if _uu:
+                _bld = await self.db.get(_Bld, _uu.building_id) if _uu.building_id else None
+                _site2 = await self.db.get(_Site2, _bld.site_id) if _bld and _bld.site_id else None
+                parts = [p for p in [
+                    _site2.name if _site2 else None,
+                    _bld.name if _bld else None,
+                    _uu.name,
+                ] if p]
+                snapshot["scope_label"] = "Nutzungseinheit: " + " › ".join(parts)
+        elif building_id:
+            from app.models.site import Building as _Bld2, Site as _Site3
+            _bld2 = await self.db.get(_Bld2, building_id)
+            if _bld2:
+                _site3 = await self.db.get(_Site3, _bld2.site_id) if _bld2.site_id else None
+                parts2 = [p for p in [_site3.name if _site3 else None, _bld2.name] if p]
+                snapshot["scope_label"] = "Gebäude: " + " › ".join(parts2)
 
         # Standort-Nettoverbrauch berechnen (wenn Bericht nach Standort gefiltert)
         if site_id:
@@ -328,6 +377,8 @@ class ReportService:
         scope_config = {
             "meter_ids": [str(m) for m in meter_ids] if meter_ids else None,
             "site_id": str(site_id) if site_id else None,
+            "building_id": str(building_id) if building_id else None,
+            "usage_unit_id": str(usage_unit_id) if usage_unit_id else None,
             "root_meter_id": str(root_meter_id) if root_meter_id else None,
             "include_co2": include_co2,
             "include_weather_correction": include_weather_correction,
@@ -1082,7 +1133,10 @@ class ReportService:
         scope = report.scope or {}
         scope_info = ""
         site_net = snapshot.get("site_net_consumption")
-        if site_net:
+        _scope_label = snapshot.get("scope_label", "")
+        if _scope_label:
+            scope_info = f"<div class='scope'>{_scope_label}</div>"
+        elif site_net:
             scope_info = f"<div class='scope'>Standort: {site_net['site_name']}</div>"
         elif scope.get("root_meter_id"):
             scope_info = f"<div class='scope'>Gefiltert nach Zählerstrang-ID: {scope['root_meter_id']}</div>"

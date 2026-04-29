@@ -385,6 +385,10 @@ function CreateReportModal({
   const [sites, setSites] = useState<{ id: string; name: string }[]>([]);
   const [rootMeters, setRootMeters] = useState<{ id: string; name: string; energy_type: string }[]>([]);
   const [siteId, setSiteId] = useState('');
+  const [buildingId, setBuildingId] = useState('');
+  const [usageUnitId, setUsageUnitId] = useState('');
+  const [buildings, setBuildings] = useState<{ id: string; name: string }[]>([]);
+  const [usageUnits, setUsageUnits] = useState<{ id: string; name: string }[]>([]);
   const [rootMeterId, setRootMeterId] = useState('');
   // Bezugsgröße für Energieintensität
   const [referenceValue, setReferenceValue] = useState('');
@@ -425,18 +429,51 @@ function CreateReportModal({
       .catch(() => {});
   }, []);
 
+  // Gebäude laden wenn Standort gewählt
+  useEffect(() => {
+    if (!siteId) { setBuildings([]); setBuildingId(''); setUsageUnits([]); setUsageUnitId(''); return; }
+    apiClient.get(`/api/v1/sites/${siteId}/buildings`)
+      .then((res) => {
+        const items = (Array.isArray(res.data) ? res.data : []) as Record<string, unknown>[];
+        setBuildings(items.map((b) => ({ id: b.id as string, name: b.name as string })));
+      })
+      .catch(() => setBuildings([]));
+    setBuildingId('');
+    setUsageUnits([]);
+    setUsageUnitId('');
+  }, [siteId]);
+
+  // Nutzungseinheiten laden wenn Gebäude gewählt
+  useEffect(() => {
+    if (!siteId || !buildingId) { setUsageUnits([]); setUsageUnitId(''); return; }
+    apiClient.get(`/api/v1/sites/${siteId}/buildings/${buildingId}/units`)
+      .then((res) => {
+        const items = (Array.isArray(res.data) ? res.data : []) as Record<string, unknown>[];
+        setUsageUnits(items.map((u) => ({ id: u.id as string, name: u.name as string })));
+      })
+      .catch(() => setUsageUnits([]));
+    setUsageUnitId('');
+  }, [siteId, buildingId]);
+
   // Auto-Titel generieren
   useEffect(() => {
+    const scopeSuffix = usageUnitId
+      ? ` – ${usageUnits.find((u) => u.id === usageUnitId)?.name ?? ''}`
+      : buildingId
+        ? ` – ${buildings.find((b) => b.id === buildingId)?.name ?? ''}`
+        : siteId
+          ? ` – ${sites.find((s) => s.id === siteId)?.name ?? ''}`
+          : '';
     if (reportType === 'annual') {
-      setTitle(`Jahresbericht ${year}`);
+      setTitle(`Jahresbericht ${year}${scopeSuffix}`);
     } else if (reportType === 'quarterly') {
-      setTitle(`Q${quarter} ${year}`);
+      setTitle(`Q${quarter} ${year}${scopeSuffix}`);
     } else if (reportType === 'monthly') {
-      setTitle(`${MONTH_LABELS_FULL[month - 1]} ${year}`);
+      setTitle(`${MONTH_LABELS_FULL[month - 1]} ${year}${scopeSuffix}`);
     } else {
-      setTitle(`Bericht ${periodStart} – ${periodEnd}`);
+      setTitle(`Bericht ${periodStart} – ${periodEnd}${scopeSuffix}`);
     }
-  }, [reportType, year, quarter, month, periodStart, periodEnd]);
+  }, [reportType, year, quarter, month, periodStart, periodEnd, siteId, buildingId, usageUnitId, sites, buildings, usageUnits]);
 
   // Jahr-Optionen (2020 bis aktuelles Jahr + 1)
   const yearOptions = Array.from({ length: currentYear - 2019 }, (_, i) => currentYear - i);
@@ -475,6 +512,8 @@ function CreateReportModal({
       }
 
       if (siteId) payload.site_id = siteId;
+      if (buildingId) payload.building_id = buildingId;
+      if (usageUnitId) payload.usage_unit_id = usageUnitId;
       if (rootMeterId) payload.root_meter_id = rootMeterId;
       if (referenceValue) {
         payload.reference_value = parseFloat(referenceValue);
@@ -603,6 +642,34 @@ function CreateReportModal({
                       <option value="">Alle Standorte</option>
                       {sites.map((s) => (
                         <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {siteId && buildings.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Building2 className="h-3.5 w-3.5 text-gray-400" />
+                      <span className="text-xs text-gray-500">Gebäude</span>
+                    </div>
+                    <select className="input" value={buildingId} onChange={(e) => setBuildingId(e.target.value)}>
+                      <option value="">Gesamter Standort</option>
+                      {buildings.map((b) => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {buildingId && usageUnits.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Zap className="h-3.5 w-3.5 text-gray-400" />
+                      <span className="text-xs text-gray-500">Nutzungseinheit</span>
+                    </div>
+                    <select className="input" value={usageUnitId} onChange={(e) => setUsageUnitId(e.target.value)}>
+                      <option value="">Gesamtes Gebäude</option>
+                      {usageUnits.map((u) => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
                       ))}
                     </select>
                   </div>
