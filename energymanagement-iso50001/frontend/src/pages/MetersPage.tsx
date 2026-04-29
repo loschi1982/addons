@@ -646,6 +646,7 @@ function MeterNetworkView({
                   <FlatRow
                     key={m.id}
                     meter={m}
+                    dnd={dnd}
                     onEdit={onEdit}
                     onDelete={onDelete}
                     onPoll={onPoll}
@@ -765,21 +766,38 @@ function NetworkRow({
   );
 }
 
-// ── Flache Zeile (gefilterte Ansicht, kein DnD) ────────────────────────────
+// ── Flache Zeile (gefilterte Ansicht, mit DnD) ────────────────────────────
 
-function FlatRow({ meter, onEdit, onDelete, onPoll, onTestConnection }: {
+type DndProps = { draggingId: string | null; dragOverId: string | null; setDraggingId: (id: string | null) => void; setDragOverId: (id: string | null) => void; onDrop: (targetId: string) => void };
+
+function FlatRow({ meter, dnd, onEdit, onDelete, onPoll, onTestConnection }: {
   meter: Meter;
+  dnd: DndProps;
   onEdit: (m: Meter) => void;
   onDelete: (m: Meter) => void;
   onPoll: (m: Meter) => void;
   onTestConnection: (m: Meter) => void;
 }) {
+  const isDragging = dnd.draggingId === meter.id;
+  const isDragOver = dnd.dragOverId === meter.id;
+
   return (
-    <tr className="hover:bg-gray-50">
+    <tr
+      draggable
+      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', meter.id); dnd.setDraggingId(meter.id); }}
+      onDragEnd={() => { dnd.setDraggingId(null); dnd.setDragOverId(null); }}
+      onDragOver={e => { e.preventDefault(); if (dnd.draggingId && dnd.draggingId !== meter.id) { e.dataTransfer.dropEffect = 'move'; dnd.setDragOverId(meter.id); } }}
+      onDragLeave={() => { if (dnd.dragOverId === meter.id) dnd.setDragOverId(null); }}
+      onDrop={e => { e.preventDefault(); if (dnd.draggingId && dnd.draggingId !== meter.id) dnd.onDrop(meter.id); dnd.setDragOverId(null); }}
+      className={`select-none transition-colors ${isDragging ? 'opacity-40' : ''} ${isDragOver ? 'bg-primary-50 outline outline-2 outline-primary-400' : 'hover:bg-gray-50'}`}
+    >
       <td className="px-3 py-2">
-        <span className="font-medium text-sm text-gray-900">{meter.name}</span>
-        {meter.is_virtual && <span className="ml-1.5 rounded bg-purple-100 px-1.5 py-0.5 text-xs text-purple-700">V</span>}
-        {meter.is_feed_in && <span className="ml-1 rounded bg-green-100 px-1.5 py-0.5 text-xs text-green-700">PV</span>}
+        <div className="flex items-center min-w-0">
+          <GripVertical className="w-3 h-3 text-gray-300 mr-1 flex-shrink-0 cursor-grab active:cursor-grabbing" />
+          <span className="truncate font-medium text-sm text-gray-900">{meter.name}</span>
+          {meter.is_virtual && <span className="ml-1.5 rounded bg-purple-100 px-1.5 py-0.5 text-xs text-purple-700">V</span>}
+          {meter.is_feed_in && <span className="ml-1 rounded bg-green-100 px-1.5 py-0.5 text-xs text-green-700">PV</span>}
+        </div>
       </td>
       <td className="px-3 py-2 text-xs text-gray-500">{meter.meter_number || '–'}</td>
       <td className="px-3 py-2">
