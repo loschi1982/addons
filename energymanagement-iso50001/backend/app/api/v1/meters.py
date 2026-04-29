@@ -369,6 +369,30 @@ async def update_meter(
     return _meter_to_response(meter)
 
 
+@router.patch("/{meter_id}/parent")
+async def set_meter_parent(
+    meter_id: uuid.UUID,
+    parent_meter_id: uuid.UUID | None = None,
+    current_user: User = Depends(require_permission("meters", "update")),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Übergeordneten Zähler setzen oder entfernen (Drag & Drop).
+
+    parent_meter_id=null → Hauptzähler (kein Parent).
+    Wird als expliziter PATCH-Endpunkt angeboten, weil PUT mit exclude_unset
+    null-Werte ignoriert.
+    """
+    from app.models.meter import Meter as _Meter
+    meter = await db.get(_Meter, meter_id)
+    if not meter:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Zähler nicht gefunden")
+    meter.parent_meter_id = parent_meter_id
+    await db.commit()
+    return {"id": str(meter_id), "parent_meter_id": str(parent_meter_id) if parent_meter_id else None}
+
+
 @router.delete("/{meter_id}", response_model=DeleteResponse)
 async def delete_meter(
     meter_id: uuid.UUID,
