@@ -1140,7 +1140,7 @@ export default function SitesPage() {
         </div>
 
         {/* KPI-Kacheln */}
-        <div className={`grid gap-4 mb-6 ${hasExits ? 'grid-cols-2 sm:grid-cols-5' : 'grid-cols-2 sm:grid-cols-4'}`}>
+        <div className="grid gap-4 mb-4 grid-cols-2 sm:grid-cols-4">
           <div className="card p-4">
             <p className="text-xs text-gray-500 uppercase tracking-wide">Zähler</p>
             <p className="text-2xl font-bold text-primary-700 mt-1">{totalMeterCount || selectedSite.meter_count}</p>
@@ -1157,30 +1157,87 @@ export default function SitesPage() {
             <p className="text-xs text-gray-500 uppercase tracking-wide">Zeitzone</p>
             <p className="text-sm font-semibold text-gray-700 mt-1">{selectedSite.timezone}</p>
           </div>
-          {hasExits && siteConsumption && (
-            <div className="card p-4 border-amber-200 bg-amber-50">
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-amber-600 uppercase tracking-wide font-medium">Nettoverbrauch</p>
-                <select
-                  className="text-xs text-amber-600 bg-transparent border-none cursor-pointer"
-                  value={consumptionYear}
-                  onChange={e => setConsumptionYear(Number(e.target.value))}
-                  onClick={e => e.stopPropagation()}
-                >
-                  {Array.from({ length: 5 }, (_, i) => currentYear - 1 - i).map(y => (
-                    <option key={y} value={y}>{y}</option>
-                  ))}
-                </select>
-              </div>
-              <p className="text-xl font-bold text-amber-800 mt-1">
-                {Number(siteConsumption.net_consumption_kwh).toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh
-              </p>
-              <p className="text-xs text-amber-600 mt-0.5">
-                abzgl. {Number(siteConsumption.cross_site_exit_kwh).toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh an andere Standorte
-              </p>
-            </div>
-          )}
         </div>
+
+        {/* Verbrauchsrechnung */}
+        {siteConsumption && (
+          <div className={`card p-4 mb-6 ${hasExits ? 'border-amber-200 bg-amber-50' : 'border-gray-200'}`}>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className={`text-xs font-medium uppercase tracking-wide ${hasExits ? 'text-amber-700' : 'text-gray-500'}`}>
+                  Verbrauchsrechnung
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Berechnung nach physikalischer Zählerhierarchie
+                </p>
+              </div>
+              <select
+                className={`text-xs border rounded px-2 py-1 ${hasExits ? 'border-amber-300 text-amber-700 bg-amber-50' : 'border-gray-200 text-gray-600 bg-white'}`}
+                value={consumptionYear}
+                onChange={e => setConsumptionYear(Number(e.target.value))}
+              >
+                {Array.from({ length: 5 }, (_, i) => currentYear - 1 - i).map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1.5 text-sm">
+              {/* Bruttoverbrauch */}
+              <div className="flex items-baseline justify-between">
+                <span className="text-gray-700">
+                  Bruttoverbrauch
+                  <span className="ml-1 text-xs text-gray-400">(physikalische Eingangs-Zähler dieses Standorts)</span>
+                </span>
+                <span className="font-semibold text-gray-900 tabular-nums">
+                  {Number(siteConsumption.gross_consumption_kwh).toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh
+                </span>
+              </div>
+
+              {/* Abzüge */}
+              {hasExits && (
+                <>
+                  {siteConsumption.exit_points.map(ep => (
+                    <div key={ep.meter_id} className="flex items-baseline justify-between pl-4 text-amber-700">
+                      <span>
+                        <span className="mr-1 font-medium">−</span>
+                        {ep.meter_name}
+                        <span className="ml-1 text-xs text-amber-500">(gehört zu: {ep.owner_site_name})</span>
+                      </span>
+                      <span className="font-medium tabular-nums">
+                        {Number(ep.consumption_kwh).toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh
+                      </span>
+                    </div>
+                  ))}
+                  <div className="border-t border-amber-200 pt-1.5 flex items-baseline justify-between">
+                    <span className="text-xs text-amber-600 uppercase tracking-wide font-medium">
+                      Abzüge gesamt
+                    </span>
+                    <span className="text-amber-700 font-semibold tabular-nums">
+                      − {Number(siteConsumption.cross_site_exit_kwh).toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh
+                    </span>
+                  </div>
+                </>
+              )}
+
+              {/* Nettoverbrauch */}
+              <div className={`flex items-baseline justify-between pt-1.5 ${hasExits ? 'border-t border-amber-300' : 'border-t border-gray-200'}`}>
+                <span className={`font-semibold ${hasExits ? 'text-amber-800' : 'text-primary-700'}`}>
+                  = Nettoverbrauch {selectedSite.name}
+                </span>
+                <span className={`text-xl font-bold tabular-nums ${hasExits ? 'text-amber-900' : 'text-primary-700'}`}>
+                  {Number(siteConsumption.net_consumption_kwh).toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh
+                </span>
+              </div>
+
+              {!hasExits && (
+                <p className="text-xs text-gray-400 pt-1">
+                  Keine standortübergreifenden Subtraktionszähler vorhanden – Brutto = Netto.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex border-b border-gray-200 mb-4 gap-1">
@@ -1225,12 +1282,9 @@ export default function SitesPage() {
               </button>
             </div>
 
-            {hasExits && siteConsumption && (
-              <div className="mb-3 rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-700">
-                <strong>Subtraktionszähler vorhanden:</strong> Die amber-markierten Zähler gehören anderen Standorten und werden beim Nettoverbrauch abgezogen.
-                {siteConsumption.exit_points.map(ep => (
-                  <span key={ep.meter_id} className="ml-2">· {ep.meter_name} ({ep.owner_site_name}: {Number(ep.consumption_kwh).toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh)</span>
-                ))}
+            {hasExits && (
+              <div className="mb-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700 flex items-center gap-2">
+                <span className="font-medium">Amber-markierte Zähler</span> gehören anderen Standorten und werden in der Verbrauchsrechnung oben subtrahiert.
               </div>
             )}
 

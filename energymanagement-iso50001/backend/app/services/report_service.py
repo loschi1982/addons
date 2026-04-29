@@ -300,6 +300,30 @@ class ReportService:
             reference_unit=reference_unit,
         )
 
+        # Standort-Nettoverbrauch berechnen (wenn Bericht nach Standort gefiltert)
+        if site_id:
+            from app.services.site_consumption_service import SiteConsumptionService
+            from app.models.site import Site as _Site
+            _site_obj = await self.db.get(_Site, site_id)
+            _site_name = _site_obj.name if _site_obj else str(site_id)
+            _svc = SiteConsumptionService(self.db)
+            _net = await _svc.get_site_net_consumption(site_id, period_start, period_end)
+            snapshot["site_net_consumption"] = {
+                "site_id": str(site_id),
+                "site_name": _site_name,
+                "gross_consumption_kwh": float(_net["gross_consumption_kwh"]),
+                "cross_site_exit_kwh": float(_net["cross_site_exit_kwh"]),
+                "net_consumption_kwh": float(_net["net_consumption_kwh"]),
+                "exit_points": [
+                    {
+                        "meter_name": ep["meter_name"],
+                        "owner_site_name": ep["owner_site_name"],
+                        "consumption_kwh": float(ep["consumption_kwh"]),
+                    }
+                    for ep in _net["exit_points"]
+                ],
+            }
+
         # Scope-Konfiguration für Charts und Audit-Trail
         scope_config = {
             "meter_ids": [str(m) for m in meter_ids] if meter_ids else None,
@@ -1057,8 +1081,9 @@ class ReportService:
         # Deckblatt-Scope-Info
         scope = report.scope or {}
         scope_info = ""
-        if scope.get("site_id"):
-            scope_info = f"<div class='scope'>Gefiltert nach Standort-ID: {scope['site_id']}</div>"
+        site_net = snapshot.get("site_net_consumption")
+        if site_net:
+            scope_info = f"<div class='scope'>Standort: {site_net['site_name']}</div>"
         elif scope.get("root_meter_id"):
             scope_info = f"<div class='scope'>Gefiltert nach Zählerstrang-ID: {scope['root_meter_id']}</div>"
 
@@ -1140,6 +1165,64 @@ class ReportService:
             <div class="label">Erfasste Zähler</div>
         </div>"""
 
+        # ── Standort-Nettoverbrauch (wenn Bericht nach Standort) ──
+        site_net_html = ""
+        if site_net and site_net.get("exit_points"):
+            rows_html = ""
+            for ep in site_net["exit_points"]:
+                kwh_fmt = f"{ep['consumption_kwh']:,.0f}"
+                rows_html += f"""
+            <tr>
+                <td class="pl-6">− {ep['meter_name']}</td>
+                <td class="text-xs text-gray-500">(gehört zu: {ep['owner_site_name']})</td>
+                <td class="num text-amber-700">−&nbsp;{kwh_fmt} kWh</td>
+            </tr>"""
+            gross_fmt = f"{site_net['gross_consumption_kwh']:,.0f}"
+            exit_fmt = f"{site_net['cross_site_exit_kwh']:,.0f}"
+            net_fmt = f"{site_net['net_consumption_kwh']:,.0f}"
+            site_net_html = f"""
+<h2>{next_sec()} Standort-Nettoverbrauch: {site_net['site_name']}</h2>
+<p>Der Bruttoverbrauch der physikalischen Eingangs-Zähler wird um den Verbrauch von
+Fremdzählern bereinigt, die physisch im Zählerstrang des Standorts hängen, aber einem anderen
+Standort zugeordnet sind (<em>ExitSet</em>). Das Ergebnis ist der Nettoverbrauch,
+der ausschließlich diesem Standort zuzurechnen ist.</p>
+<table class="data-table">
+    <thead>
+        <tr><th>Position</th><th>Erläuterung</th><th class="num">Wert</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Bruttoverbrauch</strong></td>
+            <td class="text-xs text-gray-500">Summe aller physikalischen Eingangs-Zähler dieses Standorts</td>
+            <td class="num"><strong>{gross_fmt} kWh</strong></td>
+        </tr>
+        {rows_html}
+        <tr style="border-top: 2px solid #b45309; background:#fffbeb">
+            <td><strong>= Nettoverbrauch</strong></td>
+            <td class="text-xs" style="color:#92400e">Brutto minus Abzüge (standortübergreifende Zähler)</td>
+            <td class="num" style="color:#92400e"><strong>{net_fmt} kWh</strong></td>
+        </tr>
+        <tr>
+            <td colspan="2" class="text-xs text-gray-400">Abzüge gesamt</td>
+            <td class="num text-xs text-gray-500">− {exit_fmt} kWh</td>
+        </tr>
+    </tbody>
+</table>
+<p class="text-xs text-gray-400">Formel: Bruttoverbrauch [PhysicalRoots] − Abzüge [ExitSet] = Nettoverbrauch</p>"""
+        elif site_net:
+            site_net_html = f"""
+<h2>{next_sec()} Standort-Nettoverbrauch: {site_net['site_name']}</h2>
+<p>Alle Zähler dieses Standorts sind ausschließlich diesem Standort zugeordnet.
+Es existieren keine standortübergreifenden Abzüge. Bruttoverbrauch = Nettoverbrauch.</p>
+<table class="data-table">
+    <tbody>
+        <tr>
+            <td><strong>Nettoverbrauch</strong></td>
+            <td class="num"><strong>{site_net['net_consumption_kwh']:,.0f} kWh</strong></td>
+        </tr>
+    </tbody>
+</table>"""
+
         # ── Analyse-Narrativ ──
         analysis = snapshot.get("analysis", {})
         analysis_bullets = analysis.get("bullets", [])
@@ -1175,7 +1258,7 @@ class ReportService:
 </div>"""
 
         # ── Optionale Sektionen: Inhalte ohne Nummern bauen ──
-        analyse_section = analysis_html + weather_kpi
+        analyse_section = site_net_html + analysis_html + weather_kpi
         if yoy_svg:
             analyse_section += f"""
 <h2>Jahresvergleich</h2>
