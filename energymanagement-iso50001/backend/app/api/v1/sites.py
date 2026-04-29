@@ -275,6 +275,28 @@ async def get_site_meter_tree(
 
 
 # ---------------------------------------------------------------------------
+# Virtuelle Netto-Zähler synchronisieren
+# ---------------------------------------------------------------------------
+
+@router.post("/{site_id}/sync-net-meters")
+async def sync_net_meters(
+    site_id: uuid.UUID,
+    current_user: User = Depends(require_permission("meters", "create")),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Virtuelle Netto-Zähler für standortübergreifende Zählerhierarchien
+    automatisch erstellen oder aktualisieren.
+
+    Erkennt alle PhysicalRoots des Standorts, die direkte ExitSet-Unterzähler
+    (aus anderen Standorten) besitzen, und legt je einen virtuellen Differenz-Zähler
+    (Brutto − Fremdzähler) an.
+    """
+    service = SiteConsumptionService(db)
+    return await service.sync_virtual_net_meters(site_id)
+
+
+# ---------------------------------------------------------------------------
 # Gebäude (unter Standort)
 # ---------------------------------------------------------------------------
 

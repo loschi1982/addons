@@ -304,3 +304,136 @@ class SiteConsumptionService:
 
         sort_nodes(roots)
         return roots
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Virtuelle Netto-Zähler synchronisieren
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def sync_virtual_net_meters(self, site_id: uuid.UUID) -> list[dict]:
+        """
+        Erstellt oder aktualisiert virtuelle Netto-Zähler für alle PhysicalRoots
+        eines Standorts, die direkte ExitSet-Unterzähler besitzen.
+
+        Logik:
+          PhysicalRoot(S) mit ExitSet-Kindern → Virtual "Netto"-Zähler
+          virtual_config = {type: "difference", source_meter_id: root.id,
+                            subtract_meter_ids: [exit1.id, exit2.id, ...]}
+
+        Idempotent: Bei erneutem Aufruf werden bestehende virtuelle Zähler
+        aktualisiert falls der ExitSet sich geändert hat.
+        """
+        # Standortname für Zählerbezeichnung
+        site_result = await self.db.execute(
+            select(Site.name).where(Site.id == site_id)
+        )
+        site_name = site_result.scalar() or "Standort"
+
+        # ExitSet(S): Fremdzähler direkt unter einem eigenen Zähler, gruppiert nach Parent
+        ParentAlias = aliased(Meter)
+        exit_q = await self.db.execute(
+            select(
+                Meter.id,
+                Meter.name,
+                Meter.parent_meter_id,
+            )
+            .join(ParentAlias, Meter.parent_meter_id == ParentAlias.id)
+            .where(
+                ParentAlias.site_id == site_id,
+                Meter.site_id != site_id,
+                Meter.is_active == True,  # noqa: E712
+                ParentAlias.is_active == True,  # noqa: E712
+            )
+        )
+        exit_rows = exit_q.all()
+
+        if not exit_rows:
+            return []
+
+        # Gruppieren: parent_id → [exit_ids]
+        exits_by_parent: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for row in exit_rows:
+            exits_by_parent.setdefault(row.parent_meter_id, []).append(row.id)
+
+        # Parent-Zähler-Objekte laden
+        parent_ids = list(exits_by_parent.keys())
+        parents_q = await self.db.execute(
+            select(Meter).where(Meter.id.in_(parent_ids))
+        )
+        parents = {m.id: m for m in parents_q.scalars().all()}
+
+        # Bestehende virtuelle Netto-Zähler für diesen Standort laden
+        # Kennzeichen: is_virtual=True, virtual_config.type = "difference"
+        virt_q = await self.db.execute(
+            select(Meter).where(
+                Meter.site_id == site_id,
+                Meter.is_virtual == True,  # noqa: E712
+                Meter.is_active == True,  # noqa: E712
+            )
+        )
+        existing_virtual = virt_q.scalars().all()
+        # Map: source_meter_id → virtueller Zähler
+        virtual_by_source: dict[uuid.UUID, Meter] = {}
+        for vm in existing_virtual:
+            vc = vm.virtual_config or {}
+            if vc.get("type") == "difference" and vc.get("source_meter_id"):
+                try:
+                    src_id = uuid.UUID(vc["source_meter_id"])
+                    virtual_by_source[src_id] = vm
+                except (ValueError, KeyError):
+                    pass
+
+        results = []
+        for parent_id, exit_ids in exits_by_parent.items():
+            parent = parents.get(parent_id)
+            if not parent:
+                continue
+
+            subtract_ids_str = sorted(str(i) for i in exit_ids)
+            virtual_config = {
+                "type": "difference",
+                "source_meter_id": str(parent_id),
+                "subtract_meter_ids": subtract_ids_str,
+            }
+
+            existing_vm = virtual_by_source.get(parent_id)
+            if existing_vm is None:
+                # Neuen virtuellen Zähler anlegen
+                new_meter = Meter(
+                    name=f"{parent.name} – Netto {site_name}",
+                    energy_type=parent.energy_type,
+                    unit=parent.unit,
+                    site_id=site_id,
+                    parent_meter_id=None,
+                    is_virtual=True,
+                    is_active=True,
+                    virtual_config=virtual_config,
+                    data_source="virtual",
+                )
+                self.db.add(new_meter)
+                await self.db.flush()
+                action = "erstellt"
+                meter_id = new_meter.id
+                meter_name = new_meter.name
+                logger.info("virtual_net_meter_created", meter_id=str(meter_id), site_id=str(site_id))
+            else:
+                # Prüfen ob subtract_ids sich geändert haben
+                old_vc = existing_vm.virtual_config or {}
+                old_subtract = sorted(old_vc.get("subtract_meter_ids", []))
+                if old_subtract != subtract_ids_str:
+                    existing_vm.virtual_config = virtual_config
+                    action = "aktualisiert"
+                    logger.info("virtual_net_meter_updated", meter_id=str(existing_vm.id), site_id=str(site_id))
+                else:
+                    action = "unverändert"
+                meter_id = existing_vm.id
+                meter_name = existing_vm.name
+
+            results.append({
+                "id": str(meter_id),
+                "name": meter_name,
+                "action": action,
+                "subtract_count": len(exit_ids),
+            })
+
+        await self.db.commit()
+        return results

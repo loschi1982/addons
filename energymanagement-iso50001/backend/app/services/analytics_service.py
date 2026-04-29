@@ -45,17 +45,95 @@ class AnalyticsService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    # ── Hilfsmethode: Zähler-IDs eines Standorts ──
+    # ── Hilfsmethoden ──
 
     async def _meter_ids_for_site(self, site_id: uuid.UUID) -> list[uuid.UUID]:
-        """Alle aktiven Zähler eines Standorts zurückgeben."""
+        """
+        Aktive Zähler eines Standorts zurückgeben.
+
+        Wenn für einen physischen Root-Zähler ein virtueller Netto-Zähler
+        (type="difference") vorhanden ist, wird der physische Root-Zähler
+        ausgeschlossen und stattdessen der virtuelle Netto-Zähler verwendet
+        (verhindert Doppelzählung bei standortübergreifenden Zählerhierarchien).
+        """
         result = await self.db.execute(
-            select(Meter.id).where(
+            select(Meter.id, Meter.is_virtual, Meter.virtual_config).where(
                 Meter.site_id == site_id,
                 Meter.is_active == True,  # noqa: E712
             )
         )
-        return list(result.scalars().all())
+        rows = result.all()
+
+        # IDs physischer Zähler, für die ein virtueller Netto-Zähler existiert
+        virtual_source_ids: set[uuid.UUID] = set()
+        for row in rows:
+            if row.is_virtual and (row.virtual_config or {}).get("type") == "difference":
+                src = (row.virtual_config or {}).get("source_meter_id")
+                if src:
+                    try:
+                        virtual_source_ids.add(uuid.UUID(src))
+                    except ValueError:
+                        pass
+
+        return [row.id for row in rows if row.id not in virtual_source_ids]
+
+    async def _get_difference_series(
+        self,
+        meter: "Meter",  # type: ignore[name-defined]
+        trunc: str,
+        start_date: "date | None",
+        end_date: "date | None",
+    ) -> list[dict]:
+        """
+        Zeitreihe für einen virtuellen Differenz-Zähler (type='difference').
+
+        Berechnet: source_readings − sum(subtract_readings) pro Zeitbucket.
+        """
+        vc = meter.virtual_config or {}
+        source_id = uuid.UUID(vc["source_meter_id"])
+        subtract_ids = [uuid.UUID(s) for s in vc.get("subtract_meter_ids", [])]
+        conv = CONVERSION_FACTORS.get(meter.unit, Decimal("1"))
+
+        async def _fetch_bucket_map(ids: list[uuid.UUID]) -> dict[str, Decimal]:
+            """Zeitreihe als {period_iso: summe} für eine Menge von Zähler-IDs."""
+            q = (
+                select(
+                    func.date_trunc(trunc, MeterReading.timestamp).label("period"),
+                    func.sum(MeterReading.consumption).label("total"),
+                )
+                .where(MeterReading.meter_id.in_(ids))
+                .group_by("period")
+                .order_by("period")
+            )
+            if start_date:
+                q = q.where(
+                    MeterReading.timestamp >= datetime.combine(
+                        start_date, datetime.min.time(), tzinfo=timezone.utc
+                    )
+                )
+            if end_date:
+                q = q.where(
+                    MeterReading.timestamp < datetime.combine(
+                        end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+                    )
+                )
+            rows = (await self.db.execute(q)).all()
+            return {row.period.isoformat(): Decimal(str(row.total or 0)) for row in rows}
+
+        source_map = await _fetch_bucket_map([source_id])
+        subtract_map = await _fetch_bucket_map(subtract_ids) if subtract_ids else {}
+
+        all_periods = sorted(source_map.keys() | subtract_map.keys())
+        return [
+            {
+                "timestamp": p,
+                "value": float(
+                    (source_map.get(p, Decimal("0")) - subtract_map.get(p, Decimal("0"))) * conv
+                ),
+                "count": 1,
+            }
+            for p in all_periods
+        ]
 
     # ── Zeitreihen ──
 
@@ -104,6 +182,19 @@ class AnalyticsService:
 
         series = []
         for meter in meters:
+            # Virtueller Differenz-Zähler: eigene Berechnungslogik
+            if meter.is_virtual and (meter.virtual_config or {}).get("type") == "difference":
+                data_points = await self._get_difference_series(meter, trunc, start_date, end_date)
+                series.append({
+                    "meter_id": str(meter.id),
+                    "meter_name": meter.name,
+                    "energy_type": meter.energy_type,
+                    "unit": "kWh",
+                    "is_virtual": True,
+                    "data": data_points,
+                })
+                continue
+
             query = (
                 select(
                     func.date_trunc(trunc, MeterReading.timestamp).label("period"),
@@ -145,6 +236,7 @@ class AnalyticsService:
                 "meter_name": meter.name,
                 "energy_type": meter.energy_type,
                 "unit": "kWh",
+                "is_virtual": meter.is_virtual,
                 "data": data_points,
             })
 
