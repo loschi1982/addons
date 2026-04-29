@@ -423,6 +423,7 @@ function MeterNetworkView({
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [dropOverRoot, setDropOverRoot] = useState(false);
+  const [treeKey, setTreeKey] = useState(0); // erzwingt Baum-Neuaufbau nach Drop
 
   const [sortCol, setSortCol] = useState<SortCol | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -479,11 +480,12 @@ function MeterNetworkView({
     return !!(f?.text || (f?.values && f.values.size > 0));
   };
 
-  const handleDrop = async (targetId: string) => {
-    if (!draggingId || draggingId === targetId) return;
+  // Source-ID aus dataTransfer lesen – zuverlässiger als draggingId-State in async-Closures
+  const handleDrop = async (sourceId: string, targetId: string) => {
+    if (!sourceId || sourceId === targetId) return;
     try {
-      await apiClient.put(`/api/v1/meters/${draggingId}`, { parent_meter_id: targetId });
-      setFilters({});
+      await apiClient.patch(`/api/v1/meters/${sourceId}/parent?parent_meter_id=${targetId}`);
+      setTreeKey(k => k + 1);
       onReload();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string }; status?: number } };
@@ -491,16 +493,17 @@ function MeterNetworkView({
     } finally { setDraggingId(null); setDragOverId(null); }
   };
 
-  const handleDropToRoot = async () => {
-    if (!draggingId) return;
+  const handleDropToRoot = async (e: React.DragEvent) => {
     setDropOverRoot(false);
+    const sourceId = e.dataTransfer.getData('text/plain');
+    if (!sourceId) return;
     try {
-      await apiClient.put(`/api/v1/meters/${draggingId}`, { parent_meter_id: null });
-      setFilters({});
+      await apiClient.patch(`/api/v1/meters/${sourceId}/parent`);
+      setTreeKey(k => k + 1);
       onReload();
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { detail?: string }; status?: number } };
-      alert(`Fehler: ${e?.response?.data?.detail || e?.response?.status || 'Unbekannt'}`);
+      const e2 = err as { response?: { data?: { detail?: string }; status?: number } };
+      alert(`Fehler: ${e2?.response?.data?.detail || e2?.response?.status || 'Unbekannt'}`);
     } finally { setDraggingId(null); setDragOverId(null); }
   };
 
@@ -613,7 +616,7 @@ function MeterNetworkView({
       <div
         onDragOver={e => { e.preventDefault(); setDropOverRoot(true); }}
         onDragLeave={() => setDropOverRoot(false)}
-        onDrop={e => { e.preventDefault(); handleDropToRoot(); }}
+        onDrop={e => { e.preventDefault(); handleDropToRoot(e); }}
         style={{ visibility: draggingId ? 'visible' : 'hidden' }}
         className={`mb-2 flex items-center justify-center rounded-lg border-2 border-dashed py-2 text-sm transition-colors ${dropOverRoot ? 'border-orange-400 bg-orange-50 text-orange-700' : 'border-gray-300 text-gray-400'}`}
       >
@@ -642,7 +645,7 @@ function MeterNetworkView({
               <th className="px-3 py-2 text-right font-medium uppercase tracking-wide">Aktionen</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody key={treeKey} className="divide-y divide-gray-100">
             {isFiltered
               ? processedMeters.map(m => (
                   <FlatRow
@@ -693,7 +696,7 @@ function NetworkRow({
 }: {
   node: NetworkNode;
   depth: number;
-  dnd: { draggingId: string | null; dragOverId: string | null; setDraggingId: (id: string | null) => void; setDragOverId: (id: string | null) => void; onDrop: (targetId: string) => void };
+  dnd: DndProps;
   onEdit: (m: Meter) => void;
   onDelete: (m: Meter) => void;
   onPoll: (m: Meter) => void;
@@ -711,7 +714,7 @@ function NetworkRow({
         onDragEnd={() => { dnd.setDraggingId(null); dnd.setDragOverId(null); }}
         onDragOver={e => { e.preventDefault(); if (dnd.draggingId && dnd.draggingId !== node.id) { e.dataTransfer.dropEffect = 'move'; dnd.setDragOverId(node.id); } }}
         onDragLeave={() => { if (dnd.dragOverId === node.id) dnd.setDragOverId(null); }}
-        onDrop={e => { e.preventDefault(); if (dnd.draggingId && dnd.draggingId !== node.id) dnd.onDrop(node.id); dnd.setDragOverId(null); }}
+        onDrop={e => { e.preventDefault(); const src = e.dataTransfer.getData('text/plain'); if (src && src !== node.id) dnd.onDrop(src, node.id); dnd.setDragOverId(null); }}
         className={`group select-none transition-colors ${isDragging ? 'opacity-40' : ''} ${isDragOver ? 'bg-primary-50 outline outline-2 outline-primary-400' : 'hover:bg-gray-50'}`}
       >
         <td className="px-3 py-2">
@@ -770,7 +773,7 @@ function NetworkRow({
 
 // ── Flache Zeile (gefilterte Ansicht, mit DnD) ────────────────────────────
 
-type DndProps = { draggingId: string | null; dragOverId: string | null; setDraggingId: (id: string | null) => void; setDragOverId: (id: string | null) => void; onDrop: (targetId: string) => void };
+type DndProps = { draggingId: string | null; dragOverId: string | null; setDraggingId: (id: string | null) => void; setDragOverId: (id: string | null) => void; onDrop: (sourceId: string, targetId: string) => void };
 
 function FlatRow({ meter, dnd, onEdit, onDelete, onPoll, onTestConnection }: {
   meter: Meter;
@@ -790,7 +793,7 @@ function FlatRow({ meter, dnd, onEdit, onDelete, onPoll, onTestConnection }: {
       onDragEnd={() => { dnd.setDraggingId(null); dnd.setDragOverId(null); }}
       onDragOver={e => { e.preventDefault(); if (dnd.draggingId && dnd.draggingId !== meter.id) { e.dataTransfer.dropEffect = 'move'; dnd.setDragOverId(meter.id); } }}
       onDragLeave={() => { if (dnd.dragOverId === meter.id) dnd.setDragOverId(null); }}
-      onDrop={e => { e.preventDefault(); if (dnd.draggingId && dnd.draggingId !== meter.id) dnd.onDrop(meter.id); dnd.setDragOverId(null); }}
+      onDrop={e => { e.preventDefault(); const src = e.dataTransfer.getData('text/plain'); if (src && src !== meter.id) dnd.onDrop(src, meter.id); dnd.setDragOverId(null); }}
       className={`select-none transition-colors ${isDragging ? 'opacity-40' : ''} ${isDragOver ? 'bg-primary-50 outline outline-2 outline-primary-400' : 'hover:bg-gray-50'}`}
     >
       <td className="px-3 py-2">
