@@ -480,11 +480,11 @@ function MeterNetworkView({
     return !!(f?.text || (f?.values && f.values.size > 0));
   };
 
-  // Source-ID aus dataTransfer lesen – zuverlässiger als draggingId-State in async-Closures
-  const handleDrop = async (sourceId: string, targetId: string) => {
-    if (!sourceId || sourceId === targetId) return;
+  const applyParentChange = async (sourceId: string, targetId: string | null) => {
+    if (!sourceId) return;
+    if (targetId && sourceId === targetId) return;
     try {
-      await apiClient.patch(`/api/v1/meters/${sourceId}/parent?parent_meter_id=${targetId}`);
+      await apiClient.patch(`/api/v1/meters/${sourceId}/parent`, { parent_meter_id: targetId });
       setTreeKey(k => k + 1);
       onReload();
     } catch (err: unknown) {
@@ -493,18 +493,12 @@ function MeterNetworkView({
     } finally { setDraggingId(null); setDragOverId(null); }
   };
 
-  const handleDropToRoot = async (e: React.DragEvent) => {
+  const handleDrop = (sourceId: string, targetId: string) => { applyParentChange(sourceId, targetId); };
+
+  const handleDropToRoot = (e: React.DragEvent) => {
     setDropOverRoot(false);
     const sourceId = e.dataTransfer.getData('text/plain');
-    if (!sourceId) return;
-    try {
-      await apiClient.patch(`/api/v1/meters/${sourceId}/parent`);
-      setTreeKey(k => k + 1);
-      onReload();
-    } catch (err: unknown) {
-      const e2 = err as { response?: { data?: { detail?: string }; status?: number } };
-      alert(`Fehler: ${e2?.response?.data?.detail || e2?.response?.status || 'Unbekannt'}`);
-    } finally { setDraggingId(null); setDragOverId(null); }
+    applyParentChange(sourceId, null);
   };
 
   const dnd = { draggingId, dragOverId, setDraggingId, setDragOverId, onDrop: handleDrop };
@@ -712,7 +706,7 @@ function NetworkRow({
         draggable
         onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', node.id); dnd.setDraggingId(node.id); }}
         onDragEnd={() => { dnd.setDraggingId(null); dnd.setDragOverId(null); }}
-        onDragOver={e => { e.preventDefault(); if (dnd.draggingId && dnd.draggingId !== node.id) { e.dataTransfer.dropEffect = 'move'; dnd.setDragOverId(node.id); } }}
+        onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dnd.draggingId !== node.id) dnd.setDragOverId(node.id); }}
         onDragLeave={() => { if (dnd.dragOverId === node.id) dnd.setDragOverId(null); }}
         onDrop={e => { e.preventDefault(); const src = e.dataTransfer.getData('text/plain'); if (src && src !== node.id) dnd.onDrop(src, node.id); dnd.setDragOverId(null); }}
         className={`group select-none transition-colors ${isDragging ? 'opacity-40' : ''} ${isDragOver ? 'bg-primary-50 outline outline-2 outline-primary-400' : 'hover:bg-gray-50'}`}
@@ -791,7 +785,7 @@ function FlatRow({ meter, dnd, onEdit, onDelete, onPoll, onTestConnection }: {
       draggable
       onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', meter.id); dnd.setDraggingId(meter.id); }}
       onDragEnd={() => { dnd.setDraggingId(null); dnd.setDragOverId(null); }}
-      onDragOver={e => { e.preventDefault(); if (dnd.draggingId && dnd.draggingId !== meter.id) { e.dataTransfer.dropEffect = 'move'; dnd.setDragOverId(meter.id); } }}
+      onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dnd.draggingId !== meter.id) dnd.setDragOverId(meter.id); }}
       onDragLeave={() => { if (dnd.dragOverId === meter.id) dnd.setDragOverId(null); }}
       onDrop={e => { e.preventDefault(); const src = e.dataTransfer.getData('text/plain'); if (src && src !== meter.id) dnd.onDrop(src, meter.id); dnd.setDragOverId(null); }}
       className={`select-none transition-colors ${isDragging ? 'opacity-40' : ''} ${isDragOver ? 'bg-primary-50 outline outline-2 outline-primary-400' : 'hover:bg-gray-50'}`}
