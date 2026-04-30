@@ -22,6 +22,7 @@ interface Meter {
   id: string;
   name: string;
   energy_type: string;
+  location?: string | null;
 }
 
 interface TimeSeriesDataPoint {
@@ -380,7 +381,7 @@ function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
           <select className="input" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
             <option value="">— Bitte wählen —</option>
             {filteredMeters.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
+              <option key={m.id} value={m.id}>{m.location || m.name}</option>
             ))}
           </select>
         </div>
@@ -531,7 +532,7 @@ function ComparisonTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
             <select className="input w-64" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
               <option value="">— Bitte wählen —</option>
               {meters.map((m) => (
-                <option key={m.id} value={m.id}>{m.name}</option>
+                <option key={m.id} value={m.id}>{m.location || m.name}</option>
               ))}
             </select>
           </div>
@@ -747,7 +748,7 @@ function HeatmapTab({ meters }: { meters: Meter[] }) {
           <select className="input w-80" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
             <option value="">— Bitte wählen —</option>
             {filteredMeters.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
+              <option key={m.id} value={m.id}>{m.location || m.name}</option>
             ))}
           </select>
         </div>
@@ -962,7 +963,7 @@ function WeatherCorrectionTab({ meters }: { meters: Meter[] }) {
           <select className="input w-80" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
             <option value="">— Bitte wählen —</option>
             {filteredMeters.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
+              <option key={m.id} value={m.id}>{m.location || m.name}</option>
             ))}
           </select>
         </div>
@@ -1317,7 +1318,7 @@ function DurationCurveTab({ meters }: { meters: Meter[] }) {
           <label className="label">Zähler</label>
           <select className="input w-80" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
             <option value="">Bitte wählen…</option>
-            {filteredMeters.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            {filteredMeters.map((m) => <option key={m.id} value={m.id}>{m.location || m.name}</option>)}
           </select>
         </div>
         <div>
@@ -1421,7 +1422,7 @@ function CumulativeTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
             value={selectedMeters}
             onChange={(e) => setSelectedMeters(Array.from(e.target.selectedOptions, (o) => o.value))}
           >
-            {filteredMeters.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            {filteredMeters.map((m) => <option key={m.id} value={m.id}>{m.location || m.name}</option>)}
           </select>
         </div>
         <div>
@@ -1516,7 +1517,7 @@ function SubMeterContributionTab({ meters }: { meters: Meter[] }) {
           <select className="input" value={rootMeterId} onChange={(e) => setRootMeterId(e.target.value)}>
             <option value="">— Bitte wählen —</option>
             {meters.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
+              <option key={m.id} value={m.id}>{m.location || m.name}</option>
             ))}
           </select>
         </div>
@@ -1695,7 +1696,7 @@ function WeatherRegressionTab({ meters }: { meters: Meter[] }) {
           <select className="input" value={meterId} onChange={(e) => setMeterId(e.target.value)}>
             <option value="">— Bitte wählen —</option>
             {meters.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
+              <option key={m.id} value={m.id}>{m.location || m.name}</option>
             ))}
           </select>
         </div>
