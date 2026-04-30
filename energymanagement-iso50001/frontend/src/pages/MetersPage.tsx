@@ -388,20 +388,22 @@ function getSortValue(m: Meter, col: SortCol): string {
     case 'name': return m.name.toLowerCase();
     case 'meter_number': return (m.meter_number || '').toLowerCase();
     case 'energy_type': return m.energy_type;
-    case 'site': return (m.site_name || m.location || '').toLowerCase();
+    case 'site': return (m.site_name || '').toLowerCase();
     case 'data_source': return m.is_virtual ? 'virtual' : m.data_source;
   }
 }
 
 function matchesMeter(m: Meter, filters: Record<string, FilterValue>): boolean {
   const f = filters;
-  if (f.name?.text && !m.name.toLowerCase().includes(f.name.text.toLowerCase())) return false;
+  if (f.name?.text) {
+    const needle = f.name.text.toLowerCase();
+    const inName = m.name.toLowerCase().includes(needle);
+    const inLocation = (m.location || '').toLowerCase().includes(needle);
+    if (!inName && !inLocation) return false;
+  }
   if (f.meter_number?.text && !(m.meter_number || '').toLowerCase().includes(f.meter_number.text.toLowerCase())) return false;
   if (f.energy_type?.values?.size && !f.energy_type.values.has(m.energy_type)) return false;
-  if (f.site?.text) {
-    const site = (m.site_name || m.location || '').toLowerCase();
-    if (!site.includes(f.site.text.toLowerCase())) return false;
-  }
+  if (f.site?.text && !(m.site_name || '').toLowerCase().includes(f.site.text.toLowerCase())) return false;
   if (f.data_source?.values?.size) {
     const src = m.is_virtual ? 'virtual' : m.data_source;
     if (!f.data_source.values.has(src)) return false;
@@ -724,9 +726,14 @@ function NetworkRow({
                 </button>
               : <span className="mr-4 w-3 flex-shrink-0" />
             }
-            <span className="truncate font-medium text-sm text-gray-900">{node.name}</span>
-            {node.is_virtual && <span className="ml-1.5 rounded bg-purple-100 px-1.5 py-0.5 text-xs text-purple-700">V</span>}
-            {node.is_feed_in && <span className="ml-1 rounded bg-green-100 px-1.5 py-0.5 text-xs text-green-700">PV</span>}
+            <div className="min-w-0">
+              <div className="flex items-center gap-1">
+                <span className="truncate font-medium text-sm text-gray-900">{node.name}</span>
+                {node.is_virtual && <span className="rounded bg-purple-100 px-1.5 py-0.5 text-xs text-purple-700">V</span>}
+                {node.is_feed_in && <span className="rounded bg-green-100 px-1.5 py-0.5 text-xs text-green-700">PV</span>}
+              </div>
+              {node.location && <div className="text-xs text-gray-400 truncate">{node.location}</div>}
+            </div>
           </div>
         </td>
         <td className="px-3 py-2 text-xs text-gray-500">{node.meter_number || '–'}</td>
@@ -735,7 +742,7 @@ function NetworkRow({
             {ENERGY_TYPE_LABELS[node.energy_type as EnergyType] || node.energy_type}
           </span>
         </td>
-        <td className="px-3 py-2 text-xs text-gray-500">{node.site_name || node.location || '–'}</td>
+        <td className="px-3 py-2 text-xs text-gray-500">{node.site_name || '–'}</td>
         <td className="px-3 py-2 text-xs text-gray-500">
           {node.is_virtual
             ? (node.virtual_config?.type === 'parallel' ? 'Doppelzähler' : 'Virtuell')
