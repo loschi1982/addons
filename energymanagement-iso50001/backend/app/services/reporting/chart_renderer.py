@@ -968,14 +968,15 @@ def render_multi_year_trend_svg(
     multi_year_trend: list[dict],
     width: int = 520,
     height: int = 200,
+    unit: str = "kWh",
 ) -> str:
     """
-    Mehrjahres-Gesamtverbrauch als vertikales Balkendiagramm.
+    Mehrjahres-Verbrauch einer Energieart als vertikales Balkendiagramm.
 
-    multi_year_trend: Liste von {year, total_kwh, is_current}
+    multi_year_trend: Liste von {year, total_native, total_kwh, is_current}
     """
     try:
-        rows = [r for r in multi_year_trend if r.get("total_kwh", 0) > 0]
+        rows = [r for r in multi_year_trend if r.get("total_native", 0) > 0 or r.get("total_kwh", 0) > 0]
         if len(rows) < 2:
             return _fallback_svg("Nicht genug Jahresdaten für Mehrjahrestrend", width, height)
 
@@ -986,7 +987,9 @@ def render_multi_year_trend_svg(
         chart_w = width - margin_left - margin_right
         chart_h = height - margin_top - margin_bottom
 
-        max_val = max(r["total_kwh"] for r in rows)
+        max_val = max(
+            r.get("total_native", 0) or r.get("total_kwh", 0) for r in rows
+        )
         if max_val == 0:
             max_val = 1
 
@@ -1020,7 +1023,7 @@ def render_multi_year_trend_svg(
         for idx, row in enumerate(rows):
             x_center = margin_left + idx * bar_spacing + bar_spacing / 2
             x_bar = x_center - bar_w / 2
-            val = row["total_kwh"]
+            val = row.get("total_native", 0) or row.get("total_kwh", 0)
             is_current = row.get("is_current", False)
             color = COLOR_CURRENT if is_current else COLOR_NORMAL
             year = row["year"]
@@ -1053,6 +1056,12 @@ def render_multi_year_trend_svg(
         svg_parts.append(
             f'<line x1="{margin_left}" y1="{margin_top + chart_h}" '
             f'x2="{width - margin_right}" y2="{margin_top + chart_h}" stroke="#D1D5DB"/>'
+        )
+
+        # Einheit rechts
+        svg_parts.append(
+            f'<text x="{margin_left - 4}" y="{margin_top - 6}" text-anchor="end" '
+            f'fill="#9CA3AF" font-size="8">{unit}</text>'
         )
 
         # Legende

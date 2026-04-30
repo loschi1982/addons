@@ -1131,12 +1131,20 @@ class ReportService:
         yoy_svg = safe_render(render_yoy_table_svg, energy_yoy_table, "yoy_table")
         if not yoy_svg:
             yoy_svg = safe_render(render_bar_comparison_svg, charts.get("yoy_comparison"), "yoy")
-        # Mehrjahrestrend
-        multi_year_svg = (
-            safe_render(render_multi_year_trend_svg, multi_year_trend, "multi_year")
-            if render_multi_year_trend_svg and len(multi_year_trend) >= 2
-            else ""
-        )
+        # Mehrjahrestrend – ein Diagramm pro Energieart
+        multi_year_svgs: list[tuple[str, str]] = []  # [(label, svg), ...]
+        if render_multi_year_trend_svg and multi_year_trend:
+            for _et_key, _et_data in multi_year_trend.items():
+                _rows = _et_data.get("years", [])
+                if len(_rows) >= 2:
+                    _svg = safe_render(
+                        lambda d, u=_et_data.get("unit", "kWh"):
+                            render_multi_year_trend_svg(d, unit=u),
+                        _rows,
+                        f"multi_year_{_et_key}",
+                    )
+                    if _svg:
+                        multi_year_svgs.append((_et_data.get("label", _et_key), _svg))
         sankey_svg = safe_render(render_sankey_svg, charts.get("sankey"), "sankey")
         heatmap_svg = safe_render(render_heatmap_svg, charts.get("heatmap"), "heatmap")
         tree_svg = safe_render(render_meter_tree_svg, charts.get("meter_tree"), "tree")
@@ -1344,12 +1352,14 @@ Es existieren keine standortübergreifenden Abzüge. Bruttoverbrauch = Nettoverb
 <p>Verbrauch nach Energieträger im Vergleich zum Vorjahreszeitraum.</p>
 <figure>{yoy_svg}</figure>"""
 
-        if multi_year_svg:
-            yr_count = len(multi_year_trend)
-            analyse_section += f"""
-<h2>Mehrjahrestrend ({yr_count}&nbsp;Jahre)</h2>
-<p>Gesamtverbrauch aller erfassten Jahre im Vergleich (je nach Datenlage bis zu 10 Jahre r&uuml;ckwirkend).</p>
-<figure>{multi_year_svg}</figure>"""
+        if multi_year_svgs:
+            analyse_section += "<h2>Mehrjahrestrend (je Energietr&auml;ger)</h2>"
+            analyse_section += (
+                "<p>Verbrauch nach Energietr&auml;ger im Jahresvergleich "
+                "(je nach Datenlage bis zu 10 Jahre r&uuml;ckwirkend).</p>"
+            )
+            for _et_label, _et_svg in multi_year_svgs:
+                analyse_section += f"<h3>{_et_label}</h3><figure>{_et_svg}</figure>"
 
         if heatmap_svg:
             analyse_section += f"""
@@ -3085,15 +3095,37 @@ p {{ margin: 5pt 0; }}
         end: date,
         meter_ids: list[uuid.UUID] | None,
         max_years: int = 10,
-    ) -> list[dict]:
+    ) -> dict:
         """
-        Jahres-Gesamtverbrauch für bis zu max_years Vorjahre (je nach Datenlage).
+        Jahres-Verbrauch pro Energieart für bis zu max_years Vorjahre.
 
-        Gibt [{year, total_kwh, total_native_by_type: {et: native}}] zurück,
-        ältestes Jahr zuerst. Jahre ohne Daten werden weggelassen.
+        Rückgabe: {
+            et_key: {
+                "label": str,
+                "unit": str,
+                "years": [{year, total_kwh, total_native, is_current}, ...]
+            }
+        }
+        Jahre ohne Daten werden pro Energieart weggelassen.
         """
         current_year = start.year
-        results: list[dict] = []
+        # {et_key → {yr → {total_kwh, total_native}}}
+        by_et: dict[str, dict[int, dict]] = {}
+        et_meta: dict[str, dict] = {}  # label + unit pro Energieart
+
+        LABELS: dict[str, str] = {
+            "electricity": "Strom",
+            "natural_gas": "Erdgas",
+            "heating_oil": "Heizöl",
+            "district_heating": "Fernwärme",
+            "district_cooling": "Kälte",
+            "water": "Wasser",
+            "solar": "Solar",
+            "wood_pellets": "Holzpellets",
+            "biomass": "Biomasse",
+            "compressed_air": "Druckluft",
+            "steam": "Dampf",
+        }
 
         for offset in range(max_years, -1, -1):  # ältestes Jahr zuerst
             yr = current_year - offset
@@ -3126,21 +3158,45 @@ p {{ margin: 5pt 0; }}
                 q = q.where(Meter.id.in_(meter_ids))
 
             rows = (await self.db.execute(q)).all()
-            if not rows:
-                continue  # Kein Daten für dieses Jahr → überspringen
-
-            total_kwh = 0.0
+            # Pro Energieart aggregieren
+            yr_et: dict[str, dict] = {}
             for row in rows:
+                et = row.energy_type or "unknown"
                 conv = float(CONVERSION_FACTORS.get(row.unit, Decimal("1")))
-                total_kwh += float(row.total or 0) * conv
+                kwh = float(row.total or 0) * conv
+                native = float(row.total or 0)
+                if et not in yr_et:
+                    yr_et[et] = {"total_kwh": 0.0, "total_native": 0.0, "unit": row.unit}
+                yr_et[et]["total_kwh"] += kwh
+                yr_et[et]["total_native"] += native
+                # Meta nur einmal setzen
+                if et not in et_meta:
+                    et_meta[et] = {"label": LABELS.get(et, et), "unit": row.unit}
 
-            results.append({
-                "year": yr,
-                "total_kwh": round(total_kwh, 1),
-                "is_current": offset == 0,
-            })
+            for et, vals in yr_et.items():
+                if et not in by_et:
+                    by_et[et] = {}
+                by_et[et][yr] = {
+                    "total_kwh": round(vals["total_kwh"], 1),
+                    "total_native": round(vals["total_native"], 1),
+                    "is_current": offset == 0,
+                }
 
-        return results
+        # Ausgabe: nur Energiearten mit >= 2 Jahren
+        result: dict = {}
+        for et, yr_data in by_et.items():
+            if len(yr_data) < 2:
+                continue
+            result[et] = {
+                "label": et_meta.get(et, {}).get("label", et),
+                "unit": et_meta.get(et, {}).get("unit", "kWh"),
+                "years": [
+                    {"year": yr, **vals}
+                    for yr, vals in sorted(yr_data.items())
+                ],
+            }
+
+        return result
 
     async def _create_consumer_categories(
         self,

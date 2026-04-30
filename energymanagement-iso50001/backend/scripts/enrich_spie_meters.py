@@ -136,12 +136,15 @@ def main():
     conn.autocommit = False
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-    # Alle SPIE-Zähler laden
+    # Alle Zähler mit SPIE-Verknüpfung laden (spie + bacnet mit spie_nav_id)
     cur.execute("""
         SELECT id, name, display_name, source_config
         FROM meters
-        WHERE data_source = 'spie'
-          AND is_active = TRUE
+        WHERE is_active = TRUE
+          AND (
+            data_source = 'spie'
+            OR source_config->>'spie_nav_id' IS NOT NULL
+          )
         ORDER BY name
     """)
     meters = cur.fetchall()
@@ -211,16 +214,21 @@ def main():
             print("(kein nav_id)", end=" ")
 
         if DRY_RUN:
-            print(f"DRY | display={display_name_from_name!r} serial={stammdaten_serial!r} "
+            print(f"DRY | display={display_name_from_name!r} location={display_name_from_name!r} "
+                  f"serial={stammdaten_serial!r} "
                   f"install={stammdaten_install} removal={stammdaten_removal} calibr={stammdaten_calibr}")
             skipped += 1
             continue
 
-        # Nur Felder schreiben, die noch nicht gesetzt sind (display_name) oder neue Werte haben
+        # Felder schreiben:
+        #   display_name: nur wenn noch nicht gesetzt (COALESCE)
+        #   location:     immer überschreiben mit Klarname aus SPIE-Zählernamen
+        #   serial/dates: nur wenn noch nicht gesetzt
         try:
             cur.execute("""
                 UPDATE meters SET
                     display_name      = COALESCE(display_name, %s),
+                    location          = %s,
                     serial_number     = COALESCE(serial_number, %s),
                     installation_date = COALESCE(installation_date, %s),
                     removal_date      = COALESCE(removal_date, %s),
@@ -229,6 +237,7 @@ def main():
                 WHERE id = %s
             """, (
                 display_name_from_name,
+                display_name_from_name,  # location = Klarname (Standort Freitext), immer setzen
                 stammdaten_serial,
                 stammdaten_install,
                 stammdaten_removal,
