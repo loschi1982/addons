@@ -161,10 +161,14 @@ class ReportService:
             return ids if ids else None
 
         if building_id:
+            from app.models.site import UsageUnit
+            # Alle Nutzungseinheiten dieses Gebäudes
+            uu_sub = select(UsageUnit.id).where(UsageUnit.building_id == building_id)
             result = await self.db.execute(
                 select(Meter.id).where(
-                    Meter.building_id == building_id,
                     Meter.is_active == True,  # noqa: E712
+                    # Direkt dem Gebäude zugeordnet ODER über Nutzungseinheit
+                    (Meter.building_id == building_id) | (Meter.usage_unit_id.in_(uu_sub)),
                 )
             )
             ids = [row[0] for row in result.all()]
@@ -266,11 +270,12 @@ class ReportService:
                 query = query.where(Meter.id.in_(meter_ids))
             result = await self.db.execute(query)
             meters = list(result.scalars().all())
+            from app.services.analytics_service import AnalyticsService as _AS_tree
             tree_nodes = []
             for m in meters:
                 tree_nodes.append({
                     "id": str(m.id),
-                    "name": m.name,
+                    "name": _AS_tree._meter_label(m),
                     "energy_type": m.energy_type,
                     "parent_id": str(m.parent_meter_id) if m.parent_meter_id else None,
                     "unit": m.unit,
@@ -441,7 +446,7 @@ class ReportService:
         # CO₂-Zusammenfassung
         co2_summary = None
         if include_co2:
-            co2_summary = await self._create_co2_summary(period_start, period_end)
+            co2_summary = await self._create_co2_summary(period_start, period_end, meter_ids)
 
         # Kosten-Zusammenfassung
         cost_summary = await self._create_cost_summary(period_start, period_end, meter_ids)
@@ -1922,6 +1927,7 @@ p {{ margin: 5pt 0; }}
         from app.models.meter import Meter
 
         # Zähler ermitteln
+        from app.services.analytics_service import AnalyticsService as _AS_snap
         query = select(Meter).where(Meter.is_active == True)  # noqa: E712
         if meter_ids:
             query = query.where(Meter.id.in_(meter_ids))
@@ -1952,7 +1958,7 @@ p {{ margin: 5pt 0; }}
 
             top_consumers.append({
                 "meter_id": str(meter.id),
-                "name": meter.name,
+                "name": _AS_snap._meter_label(meter),
                 "energy_type": meter.energy_type,
                 "consumption_kwh": float(kwh),        # kWh-Äquivalent (nur für Sortierung)
                 "consumption_native": float(raw),     # Nativer Wert in meter.unit
@@ -2496,17 +2502,28 @@ p {{ margin: 5pt 0; }}
 
         return {"bullets": bullets, "weather": weather_analysis}
 
-    async def _create_co2_summary(self, start: date, end: date) -> dict:
+    async def _create_co2_summary(
+        self,
+        start: date,
+        end: date,
+        meter_ids: list[uuid.UUID] | None = None,
+    ) -> dict:
         """CO₂-Zusammenfassung für den Berichtszeitraum."""
+        def _meter_filter(q, prev: bool = False):
+            """Zeitraum- und optionaler Meter-Filter."""
+            s, e = (date(start.year - 1, start.month, start.day),
+                    date(end.year - 1, end.month, end.day)) if prev else (start, end)
+            q = q.where(CO2Calculation.period_start >= s, CO2Calculation.period_end <= e)
+            if meter_ids:
+                q = q.where(CO2Calculation.meter_id.in_(meter_ids))
+            return q
+
         # Gesamt-CO₂
         total_result = await self.db.execute(
-            select(
+            _meter_filter(select(
                 func.sum(CO2Calculation.co2_kg),
                 func.sum(CO2Calculation.consumption_kwh),
-            ).where(
-                CO2Calculation.period_start >= start,
-                CO2Calculation.period_end <= end,
-            )
+            ))
         )
         total_co2, total_kwh = total_result.one()
         total_co2 = float(total_co2 or 0)
@@ -2514,17 +2531,15 @@ p {{ margin: 5pt 0; }}
 
         # Nach Energietyp
         by_type_result = await self.db.execute(
-            select(
-                Meter.energy_type,
-                func.sum(CO2Calculation.co2_kg),
-                func.sum(CO2Calculation.consumption_kwh),
+            _meter_filter(
+                select(
+                    Meter.energy_type,
+                    func.sum(CO2Calculation.co2_kg),
+                    func.sum(CO2Calculation.consumption_kwh),
+                )
+                .join(Meter, Meter.id == CO2Calculation.meter_id)
+                .group_by(Meter.energy_type)
             )
-            .join(Meter, Meter.id == CO2Calculation.meter_id)
-            .where(
-                CO2Calculation.period_start >= start,
-                CO2Calculation.period_end <= end,
-            )
-            .group_by(Meter.energy_type)
         )
         by_energy_type = [
             {
@@ -2537,16 +2552,14 @@ p {{ margin: 5pt 0; }}
 
         # Scope-Aufschlüsselung
         by_scope_result = await self.db.execute(
-            select(
-                EmissionFactor.scope,
-                func.sum(CO2Calculation.co2_kg),
+            _meter_filter(
+                select(
+                    EmissionFactor.scope,
+                    func.sum(CO2Calculation.co2_kg),
+                )
+                .join(EmissionFactor, EmissionFactor.id == CO2Calculation.emission_factor_id)
+                .group_by(EmissionFactor.scope)
             )
-            .join(EmissionFactor, EmissionFactor.id == CO2Calculation.emission_factor_id)
-            .where(
-                CO2Calculation.period_start >= start,
-                CO2Calculation.period_end <= end,
-            )
-            .group_by(EmissionFactor.scope)
         )
         by_scope = [
             {"scope": scope, "co2_kg": float(co2 or 0)}
@@ -2554,13 +2567,8 @@ p {{ margin: 5pt 0; }}
         ]
 
         # Trend vs. Vorjahr
-        prev_start = date(start.year - 1, start.month, start.day)
-        prev_end = date(end.year - 1, end.month, end.day)
         prev_result = await self.db.execute(
-            select(func.sum(CO2Calculation.co2_kg)).where(
-                CO2Calculation.period_start >= prev_start,
-                CO2Calculation.period_end <= prev_end,
-            )
+            _meter_filter(select(func.sum(CO2Calculation.co2_kg)), prev=True)
         )
         prev_co2 = float(prev_result.scalar() or 0)
         trend = None
