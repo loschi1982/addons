@@ -207,9 +207,11 @@ class ReportService:
         analytics = AnalyticsService(self.db)
         charts = {}
 
-        # Sankey – immer sammeln
+        # Sankey – immer sammeln, nach Scope-Zählern filtern
         try:
-            charts["sankey"] = await analytics.get_sankey(period_start, period_end)
+            charts["sankey"] = await analytics.get_sankey(
+                period_start, period_end, meter_ids=meter_ids
+            )
         except Exception as e:
             logger.warning("chart_sankey_failed", error=str(e))
 
@@ -423,7 +425,9 @@ class ReportService:
             sankey_by_type: dict = {}
             for _et_key in energy_by_type_keys:
                 try:
-                    _sankey_et = await _analytics.get_sankey(period_start, period_end, energy_type=_et_key)
+                    _sankey_et = await _analytics.get_sankey(
+                        period_start, period_end, energy_type=_et_key, meter_ids=meter_ids
+                    )
                     if _sankey_et.get("nodes"):
                         sankey_by_type[_et_key] = _sankey_et
                 except Exception as _e:
@@ -613,6 +617,7 @@ class ReportService:
                 render_meter_tree_svg,
                 render_monthly_cost_svg,
                 render_monthly_trend_svg,
+                render_multi_year_trend_svg,
                 render_sankey_svg,
                 render_yoy_table_svg,
             )
@@ -621,6 +626,7 @@ class ReportService:
             render_bar_comparison_svg = render_heatmap_svg = render_meter_tree_svg = None  # type: ignore[assignment]
             render_monthly_trend_svg = render_monthly_cost_svg = render_sankey_svg = None  # type: ignore[assignment]
             render_energy_type_trend_svg = render_yoy_table_svg = None  # type: ignore[assignment]
+            render_multi_year_trend_svg = None  # type: ignore[assignment]
 
         def safe_render(fn, data, name: str = "chart") -> str:
             """Renderer mit try/except aufrufen, leeren String bei Fehler."""
@@ -642,6 +648,7 @@ class ReportService:
         sustainability = snapshot.get("sustainability", {})
         amortization = snapshot.get("amortization", [])
         energy_yoy_table = snapshot.get("energy_yoy_table", [])
+        multi_year_trend = snapshot.get("multi_year_trend", [])
         consumer_categories = snapshot.get("consumer_categories", [])
         renewable_pct = snapshot.get("renewable_pct", 0.0)
         renewable_kwh_snap = snapshot.get("renewable_kwh", 0.0)
@@ -1123,8 +1130,13 @@ class ReportService:
         # YoY-Vergleich immer aus energy_yoy_table rendern (immer im Snapshot)
         yoy_svg = safe_render(render_yoy_table_svg, energy_yoy_table, "yoy_table")
         if not yoy_svg:
-            # Fallback auf Analytics-Vergleich wenn yoy_table leer
             yoy_svg = safe_render(render_bar_comparison_svg, charts.get("yoy_comparison"), "yoy")
+        # Mehrjahrestrend
+        multi_year_svg = (
+            safe_render(render_multi_year_trend_svg, multi_year_trend, "multi_year")
+            if render_multi_year_trend_svg and len(multi_year_trend) >= 2
+            else ""
+        )
         sankey_svg = safe_render(render_sankey_svg, charts.get("sankey"), "sankey")
         heatmap_svg = safe_render(render_heatmap_svg, charts.get("heatmap"), "heatmap")
         tree_svg = safe_render(render_meter_tree_svg, charts.get("meter_tree"), "tree")
@@ -1328,9 +1340,16 @@ Es existieren keine standortübergreifenden Abzüge. Bruttoverbrauch = Nettoverb
         analyse_section = site_net_html + analysis_html + weather_kpi
         if yoy_svg:
             analyse_section += f"""
-<h2>Jahresvergleich</h2>
-<p>Monatlicher Verbrauchsvergleich mit dem Vorjahreszeitraum.</p>
+<h2>Jahresvergleich (Vorjahr)</h2>
+<p>Verbrauch nach Energieträger im Vergleich zum Vorjahreszeitraum.</p>
 <figure>{yoy_svg}</figure>"""
+
+        if multi_year_svg:
+            yr_count = len(multi_year_trend)
+            analyse_section += f"""
+<h2>Mehrjahrestrend ({yr_count}&nbsp;Jahre)</h2>
+<p>Gesamtverbrauch aller erfassten Jahre im Vergleich (je nach Datenlage bis zu 10 Jahre r&uuml;ckwirkend).</p>
+<figure>{multi_year_svg}</figure>"""
 
         if heatmap_svg:
             analyse_section += f"""
@@ -1999,8 +2018,11 @@ p {{ margin: 5pt 0; }}
         # Schema-Stränge aus dem Energieschema
         schema_strands = await self._create_schema_strands(start, end, meter_ids)
 
-        # Vorjahresvergleich nach Energieträger
+        # Vorjahresvergleich nach Energieträger (1 Jahr)
         energy_yoy_table = await self._create_energy_yoy_table(start, end, meter_ids, energy_by_type)
+
+        # Mehrjahrestrend (bis 10 Jahre zurück)
+        multi_year_trend = await self._create_multi_year_trend(start, end, meter_ids)
 
         # Verbrauch nach Bereichen (Consumer-Kategorien)
         consumer_categories = await self._create_consumer_categories(start, end, meter_ids)
@@ -2032,6 +2054,7 @@ p {{ margin: 5pt 0; }}
             "monthly_trend": monthly_trend,
             "energy_by_type": energy_by_type,
             "energy_yoy_table": energy_yoy_table,
+            "multi_year_trend": multi_year_trend,
             "consumer_categories": consumer_categories,
             "renewable_kwh": round(renewable_kwh, 1),
             "renewable_pct": renewable_pct,
@@ -3055,6 +3078,69 @@ p {{ margin: 5pt 0; }}
             })
 
         return result
+
+    async def _create_multi_year_trend(
+        self,
+        start: date,
+        end: date,
+        meter_ids: list[uuid.UUID] | None,
+        max_years: int = 10,
+    ) -> list[dict]:
+        """
+        Jahres-Gesamtverbrauch für bis zu max_years Vorjahre (je nach Datenlage).
+
+        Gibt [{year, total_kwh, total_native_by_type: {et: native}}] zurück,
+        ältestes Jahr zuerst. Jahre ohne Daten werden weggelassen.
+        """
+        current_year = start.year
+        results: list[dict] = []
+
+        for offset in range(max_years, -1, -1):  # ältestes Jahr zuerst
+            yr = current_year - offset
+            yr_start = start.replace(year=yr)
+            try:
+                yr_end = end.replace(year=yr)
+            except ValueError:
+                yr_end = end.replace(year=yr, day=28)
+            yr_start_dt = datetime.combine(yr_start, datetime.min.time(), tzinfo=timezone.utc)
+            yr_end_dt = datetime.combine(
+                yr_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+            )
+
+            q = (
+                select(
+                    Meter.unit,
+                    Meter.energy_type,
+                    func.sum(MeterReading.consumption).label("total"),
+                )
+                .join(MeterReading, MeterReading.meter_id == Meter.id)
+                .where(
+                    Meter.is_active == True,  # noqa: E712
+                    Meter.is_feed_in != True,
+                    MeterReading.timestamp >= yr_start_dt,
+                    MeterReading.timestamp < yr_end_dt,
+                )
+                .group_by(Meter.unit, Meter.energy_type)
+            )
+            if meter_ids:
+                q = q.where(Meter.id.in_(meter_ids))
+
+            rows = (await self.db.execute(q)).all()
+            if not rows:
+                continue  # Kein Daten für dieses Jahr → überspringen
+
+            total_kwh = 0.0
+            for row in rows:
+                conv = float(CONVERSION_FACTORS.get(row.unit, Decimal("1")))
+                total_kwh += float(row.total or 0) * conv
+
+            results.append({
+                "year": yr,
+                "total_kwh": round(total_kwh, 1),
+                "is_current": offset == 0,
+            })
+
+        return results
 
     async def _create_consumer_categories(
         self,
