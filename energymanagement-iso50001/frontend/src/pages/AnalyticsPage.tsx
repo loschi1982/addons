@@ -346,6 +346,10 @@ function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // Klarname-Map: meter_id → Anzeigename (location wenn vorhanden, sonst technischer Name)
+  const meterLabelMap = new Map(meters.map((m) => [m.id, m.location || m.name]));
+  const getLabel = (s: TimeSeriesMeter) => meterLabelMap.get(s.meter_id) || s.meter_name;
+
   // Daten für Recharts formatieren
   const chartData: Record<string, unknown>[] = [];
   if (data.length > 0) {
@@ -356,7 +360,7 @@ function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
         const dp = s.data[i];
         if (dp) {
           point.label = formatDate(dp.timestamp);
-          point[s.meter_name] = dp.value;
+          point[getLabel(s)] = dp.value;
         }
       });
       if (point.label) chartData.push(point);
@@ -381,7 +385,7 @@ function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
           <select className="input" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
             <option value="">— Bitte wählen —</option>
             {filteredMeters.map((m) => (
-              <option key={m.id} value={m.id}>{m.location || m.name}</option>
+              <option key={m.id} value={m.id}>{m.location ? `${m.name} – ${m.location}` : m.name}</option>
             ))}
           </select>
         </div>
@@ -431,13 +435,14 @@ function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
               <Legend />
               {data.map((s, idx) => {
                 const color = CHART_COLORS[idx % CHART_COLORS.length];
+                const lbl = getLabel(s);
                 if (chartType === 'bar') {
-                  return <Bar key={s.meter_id} dataKey={s.meter_name} fill={color} radius={[4, 4, 0, 0]} />;
+                  return <Bar key={s.meter_id} dataKey={lbl} fill={color} radius={[4, 4, 0, 0]} />;
                 }
                 if (chartType === 'area') {
-                  return <Area key={s.meter_id} dataKey={s.meter_name} stroke={color} fill={color} fillOpacity={0.15} />;
+                  return <Area key={s.meter_id} dataKey={lbl} stroke={color} fill={color} fillOpacity={0.15} />;
                 }
-                return <Line key={s.meter_id} dataKey={s.meter_name} stroke={color} dot={false} strokeWidth={2} />;
+                return <Line key={s.meter_id} dataKey={lbl} stroke={color} dot={false} strokeWidth={2} />;
               })}
             </ChartComp>
           </ResponsiveContainer>
@@ -532,7 +537,7 @@ function ComparisonTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
             <select className="input w-64" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
               <option value="">— Bitte wählen —</option>
               {meters.map((m) => (
-                <option key={m.id} value={m.id}>{m.location || m.name}</option>
+                <option key={m.id} value={m.id}>{m.location ? `${m.name} – ${m.location}` : m.name}</option>
               ))}
             </select>
           </div>
@@ -748,7 +753,7 @@ function HeatmapTab({ meters }: { meters: Meter[] }) {
           <select className="input w-80" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
             <option value="">— Bitte wählen —</option>
             {filteredMeters.map((m) => (
-              <option key={m.id} value={m.id}>{m.location || m.name}</option>
+              <option key={m.id} value={m.id}>{m.location ? `${m.name} – ${m.location}` : m.name}</option>
             ))}
           </select>
         </div>
@@ -963,7 +968,7 @@ function WeatherCorrectionTab({ meters }: { meters: Meter[] }) {
           <select className="input w-80" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
             <option value="">— Bitte wählen —</option>
             {filteredMeters.map((m) => (
-              <option key={m.id} value={m.id}>{m.location || m.name}</option>
+              <option key={m.id} value={m.id}>{m.location ? `${m.name} – ${m.location}` : m.name}</option>
             ))}
           </select>
         </div>
@@ -1318,7 +1323,7 @@ function DurationCurveTab({ meters }: { meters: Meter[] }) {
           <label className="label">Zähler</label>
           <select className="input w-80" value={selectedMeter} onChange={(e) => setSelectedMeter(e.target.value)}>
             <option value="">Bitte wählen…</option>
-            {filteredMeters.map((m) => <option key={m.id} value={m.id}>{m.location || m.name}</option>)}
+            {filteredMeters.map((m) => <option key={m.id} value={m.id}>{m.location ? `${m.name} – ${m.location}` : m.name}</option>)}
           </select>
         </div>
         <div>
@@ -1386,6 +1391,10 @@ function CumulativeTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // Klarname-Map für Chart-Labels
+  const meterLabelMap = new Map(meters.map((m) => [m.id, m.location || m.name]));
+  const getLabel = (s: TimeSeriesMeter) => meterLabelMap.get(s.meter_id) || s.meter_name;
+
   // Daten für Chart kombinieren
   const chartData: Record<string, number | string>[] = [];
   if (data.length > 0) {
@@ -1395,7 +1404,7 @@ function CumulativeTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
       data.forEach((s) => {
         if (s.data[i]) {
           row.label = formatDate(s.data[i].timestamp);
-          row[s.meter_name] = s.data[i].value;
+          row[getLabel(s)] = s.data[i].value;
         }
       });
       chartData.push(row);
@@ -1422,7 +1431,7 @@ function CumulativeTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
             value={selectedMeters}
             onChange={(e) => setSelectedMeters(Array.from(e.target.selectedOptions, (o) => o.value))}
           >
-            {filteredMeters.map((m) => <option key={m.id} value={m.id}>{m.location || m.name}</option>)}
+            {filteredMeters.map((m) => <option key={m.id} value={m.id}>{m.location ? `${m.name} – ${m.location}` : m.name}</option>)}
           </select>
         </div>
         <div>
@@ -1453,7 +1462,7 @@ function CumulativeTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
                 <Area
                   key={s.meter_id}
                   type="monotone"
-                  dataKey={s.meter_name}
+                  dataKey={getLabel(s)}
                   stroke={CHART_COLORS[idx % CHART_COLORS.length]}
                   fill={CHART_COLORS[idx % CHART_COLORS.length]}
                   fillOpacity={0.15}
@@ -1517,7 +1526,7 @@ function SubMeterContributionTab({ meters }: { meters: Meter[] }) {
           <select className="input" value={rootMeterId} onChange={(e) => setRootMeterId(e.target.value)}>
             <option value="">— Bitte wählen —</option>
             {meters.map((m) => (
-              <option key={m.id} value={m.id}>{m.location || m.name}</option>
+              <option key={m.id} value={m.id}>{m.location ? `${m.name} – ${m.location}` : m.name}</option>
             ))}
           </select>
         </div>
@@ -1696,7 +1705,7 @@ function WeatherRegressionTab({ meters }: { meters: Meter[] }) {
           <select className="input" value={meterId} onChange={(e) => setMeterId(e.target.value)}>
             <option value="">— Bitte wählen —</option>
             {meters.map((m) => (
-              <option key={m.id} value={m.id}>{m.location || m.name}</option>
+              <option key={m.id} value={m.id}>{m.location ? `${m.name} – ${m.location}` : m.name}</option>
             ))}
           </select>
         </div>
