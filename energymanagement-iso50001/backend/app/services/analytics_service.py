@@ -45,6 +45,11 @@ class AnalyticsService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    @staticmethod
+    def _meter_label(meter: "Meter") -> str:  # type: ignore[name-defined]
+        """Anzeigename: Klarname (location) → display_name → technischer Name."""
+        return (meter.location or "").strip() or (meter.display_name or "").strip() or meter.name
+
     # ── Hilfsmethoden ──
 
     async def _meter_ids_for_site(self, site_id: uuid.UUID) -> list[uuid.UUID]:
@@ -187,7 +192,7 @@ class AnalyticsService:
                 data_points = await self._get_difference_series(meter, trunc, start_date, end_date)
                 series.append({
                     "meter_id": str(meter.id),
-                    "meter_name": meter.name,
+                    "meter_name": self._meter_label(meter),
                     "energy_type": meter.energy_type,
                     "unit": "kWh",
                     "is_virtual": True,
@@ -233,7 +238,7 @@ class AnalyticsService:
 
             series.append({
                 "meter_id": str(meter.id),
-                "meter_name": meter.name,
+                "meter_name": self._meter_label(meter),
                 "energy_type": meter.energy_type,
                 "unit": "kWh",
                 "is_virtual": meter.is_virtual,
@@ -524,7 +529,7 @@ class AnalyticsService:
                 max_consumer_depth = max(max_consumer_depth, depth_map[meter.id])
 
         # Namen sammeln, um Duplikate zwischen Zählern und Verbrauchern zu erkennen
-        meter_names = {m.name for m in meters}
+        meter_names = {self._meter_label(m) for m in meters}
         all_consumer_names: set[str] = set()
         for m in meters:
             if m.consumers:
@@ -547,7 +552,7 @@ class AnalyticsService:
                 node_type = "unterzaehler"
 
             # Label: Bei Namenskollision Typ-Suffix anhängen
-            label = meter.name
+            label = self._meter_label(meter)
             if label in ambiguous_names:
                 label = f"{label} (Zähler)"
 
@@ -563,7 +568,7 @@ class AnalyticsService:
                     parent_type = "eigenproduktion" if getattr(parent, "is_feed_in", False) \
                         else ("hauptzaehler" if parent_depth == 0 else "unterzaehler")
                     parent_node_depth = parent_depth + 1
-                    parent_label = parent.name
+                    parent_label = self._meter_label(parent)
                     if parent_label in ambiguous_names:
                         parent_label = f"{parent_label} (Zähler)"
                     get_node_idx(parent_id, parent_label, parent_type, parent_node_depth)
@@ -707,7 +712,7 @@ class AnalyticsService:
 
         return {
             "meter_id": str(meter_id),
-            "meter_name": meter.name if meter else "",
+            "meter_name": self._meter_label(meter) if meter else "",
             "raw": raw_data,
             "corrected": corrected_data,
         }
@@ -803,6 +808,8 @@ class AnalyticsService:
             select(
                 Meter.id.label("meter_id"),
                 Meter.name.label("meter_name"),
+                Meter.location.label("meter_location"),
+                Meter.display_name.label("meter_display_name"),
                 Meter.energy_type,
                 Meter.unit,
                 func.sum(MeterReading.consumption).label("consumption"),
@@ -830,7 +837,7 @@ class AnalyticsService:
                 MeterReading.timestamp < ts_end,
             )
             .group_by(
-                Meter.id, Meter.name, Meter.energy_type, Meter.unit,
+                Meter.id, Meter.name, Meter.location, Meter.display_name, Meter.energy_type, Meter.unit,
                 UsageUnit.id, UsageUnit.name, UsageUnit.area_m2,
                 UsageUnit.occupants, UsageUnit.target_enpi_kwh_per_m2,
                 Building.id, Building.name, Building.building_type,
@@ -883,7 +890,7 @@ class AnalyticsService:
 
             entry = {
                 "meter_id": str(row.meter_id),
-                "meter_name": row.meter_name,
+                "meter_name": (row.meter_location or "").strip() or (row.meter_display_name or "").strip() or row.meter_name,
                 "energy_type": row.energy_type,
                 "consumption_kwh": kwh,
                 "area_m2": area,
@@ -1035,7 +1042,7 @@ class AnalyticsService:
                 deviation = float(reading.consumption - Decimal(str(avg))) / std if std > 0 else 0
                 anomalies.append({
                     "meter_id": str(meter.id),
-                    "meter_name": meter.name,
+                    "meter_name": self._meter_label(meter),
                     "timestamp": reading.timestamp.isoformat(),
                     "value": float(reading.consumption),
                     "avg_value": avg,
@@ -1172,7 +1179,7 @@ class AnalyticsService:
         conv = float(CONVERSION_FACTORS.get(meter.unit, Decimal("1")))
         return {
             "meter_id": str(meter_id),
-            "meter_name": meter.name,
+            "meter_name": self._meter_label(meter),
             "year": year,
             "unit": "kWh",
             "data": [
@@ -1250,7 +1257,7 @@ class AnalyticsService:
 
             series.append({
                 "meter_id": str(meter.id),
-                "meter_name": meter.name,
+                "meter_name": self._meter_label(meter),
                 "energy_type": meter.energy_type,
                 "unit": "kWh",
                 "data": data_points,
@@ -1909,7 +1916,7 @@ class AnalyticsService:
             child_total_kwh += c_kwh
             child_results.append({
                 "id": str(child.id),
-                "name": child.display_name or child.name,
+                "name": AnalyticsService._meter_label(child),
                 "kwh": round(c_kwh, 2),
                 "share_percent": 0.0,  # Berechnung nach Schleife
             })
@@ -1925,7 +1932,7 @@ class AnalyticsService:
         return {
             "root": {
                 "id": str(root_meter_id),
-                "name": root_meter.display_name or root_meter.name,
+                "name": AnalyticsService._meter_label(root_meter),
                 "unit": root_meter.unit,
                 "total_kwh": round(root_kwh, 2),
             },
@@ -2001,7 +2008,7 @@ class AnalyticsService:
             weather_station_id = (await self.db.execute(station_q)).scalar()
 
         if not weather_station_id or not daily_map:
-            return {"points": [], "regression": None, "meter_name": meter.display_name or meter.name, "unit": meter.unit}
+            return {"points": [], "regression": None, "meter_name": self._meter_label(meter), "unit": meter.unit}
 
         # Wetterdaten für Zeitraum
         weather_q = (
@@ -2028,7 +2035,7 @@ class AnalyticsService:
                 })
 
         if len(points) < 3:
-            return {"points": points, "regression": None, "meter_name": meter.display_name or meter.name, "unit": meter.unit}
+            return {"points": points, "regression": None, "meter_name": self._meter_label(meter), "unit": meter.unit}
 
         # Lineare Regression (Least Squares, numpy-frei)
         n = len(points)
@@ -2040,7 +2047,7 @@ class AnalyticsService:
         sum_xy = sum(xs[i] * ys[i] for i in range(n))
         denom = n * sum_xx - sum_x ** 2
         if denom == 0:
-            return {"points": points, "regression": None, "meter_name": meter.display_name or meter.name, "unit": meter.unit}
+            return {"points": points, "regression": None, "meter_name": self._meter_label(meter), "unit": meter.unit}
 
         slope = (n * sum_xy - sum_x * sum_y) / denom
         intercept = (sum_y - slope * sum_x) / n
@@ -2052,7 +2059,7 @@ class AnalyticsService:
         r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
 
         return {
-            "meter_name": meter.display_name or meter.name,
+            "meter_name": self._meter_label(meter),
             "unit": meter.unit or "kWh",
             "points": points,
             "regression": {

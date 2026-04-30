@@ -842,7 +842,7 @@ function MeterModal({
               />
             </div>
             <div>
-              <label className="label">Standort (Freitext)</label>
+              <label className="label">Klarname</label>
               <input
                 type="text"
                 className="input"
