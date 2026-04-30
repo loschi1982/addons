@@ -40,6 +40,8 @@ class ReportCreate(BaseModel):
     month: int | None = None    # 1-12, nur bei monthly
     # Scope-Filter
     site_id: uuid.UUID | None = None
+    building_id: uuid.UUID | None = None
+    usage_unit_id: uuid.UUID | None = None
     root_meter_id: uuid.UUID | None = None
     meter_ids: list[uuid.UUID] | None = None
     # Inhalts-Toggles
