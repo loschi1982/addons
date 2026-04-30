@@ -208,6 +208,14 @@ def main():
                     stammdaten_calibr  = _parse_date(
                         (zdata.get("eichbeglaubigung") or {}).get("dateTimeUtc")
                     )
+                    # Klarname aus bezeichnung: "AKS - Klarname" → Klarname
+                    bezeichnung = (zdata.get("bezeichnung") or "").strip()
+                    if " - " in bezeichnung:
+                        _, klarname_from_api = bezeichnung.split(" - ", 1)
+                        klarname_from_api = klarname_from_api.strip() or None
+                        if klarname_from_api:
+                            # API-Klarname hat Vorrang vor dem aus dem DB-Namen
+                            display_name_from_name = klarname_from_api
             except Exception as e:
                 print(f"WARN Stammdaten: {e}", end=" ")
         else:
