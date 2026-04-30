@@ -962,3 +962,115 @@ def render_yoy_table_svg(
     except Exception as e:
         logger.warning("render_yoy_table_failed", error=str(e))
         return _fallback_svg(f"Vorjahresvergleich nicht verfügbar: {e}", width, height)
+
+
+def render_multi_year_trend_svg(
+    multi_year_trend: list[dict],
+    width: int = 520,
+    height: int = 200,
+) -> str:
+    """
+    Mehrjahres-Gesamtverbrauch als vertikales Balkendiagramm.
+
+    multi_year_trend: Liste von {year, total_kwh, is_current}
+    """
+    try:
+        rows = [r for r in multi_year_trend if r.get("total_kwh", 0) > 0]
+        if len(rows) < 2:
+            return _fallback_svg("Nicht genug Jahresdaten für Mehrjahrestrend", width, height)
+
+        margin_left = 55
+        margin_top = 20
+        margin_bottom = 40
+        margin_right = 15
+        chart_w = width - margin_left - margin_right
+        chart_h = height - margin_top - margin_bottom
+
+        max_val = max(r["total_kwh"] for r in rows)
+        if max_val == 0:
+            max_val = 1
+
+        n = len(rows)
+        bar_w = chart_w / n * 0.65
+        bar_spacing = chart_w / n
+
+        COLOR_NORMAL = "#9BC4D6"   # Helleres Petrol für Vorjahre
+        COLOR_CURRENT = "#1B5E7B"  # Dunkel-Petrol für aktuelles Jahr
+
+        svg_parts = [
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+            f'style="width:{width}px;height:{height}px;font-family:Arial,sans-serif;font-size:9px">'
+        ]
+
+        # Y-Raster
+        for i in range(5):
+            y = margin_top + chart_h * (1 - i / 4)
+            val = max_val * i / 4
+            svg_parts.append(
+                f'<line x1="{margin_left}" y1="{y:.1f}" x2="{width - margin_right}" '
+                f'y2="{y:.1f}" stroke="#E5E7EB" stroke-dasharray="3,3"/>'
+            )
+            label = f"{val / 1000:,.0f}k" if val >= 1000 else f"{val:,.0f}"
+            svg_parts.append(
+                f'<text x="{margin_left - 4}" y="{y + 3:.1f}" text-anchor="end" '
+                f'fill="#6B7280">{label}</text>'
+            )
+
+        # Balken
+        for idx, row in enumerate(rows):
+            x_center = margin_left + idx * bar_spacing + bar_spacing / 2
+            x_bar = x_center - bar_w / 2
+            val = row["total_kwh"]
+            is_current = row.get("is_current", False)
+            color = COLOR_CURRENT if is_current else COLOR_NORMAL
+            year = row["year"]
+
+            bar_h = (val / max_val) * chart_h
+            y_bar = margin_top + chart_h - bar_h
+
+            svg_parts.append(
+                f'<rect x="{x_bar:.1f}" y="{y_bar:.1f}" '
+                f'width="{bar_w:.1f}" height="{bar_h:.1f}" fill="{color}" rx="2"/>'
+            )
+
+            # Wert über dem Balken (nur wenn Platz)
+            if bar_h > 16:
+                val_label = f"{val / 1000:,.1f}k" if val >= 1000 else f"{val:,.0f}"
+                svg_parts.append(
+                    f'<text x="{x_center:.1f}" y="{y_bar - 3:.1f}" text-anchor="middle" '
+                    f'fill="{color}" font-weight="{"700" if is_current else "400"}" '
+                    f'font-size="8">{val_label}</text>'
+                )
+
+            # Jahresbeschriftung
+            svg_parts.append(
+                f'<text x="{x_center:.1f}" y="{margin_top + chart_h + 15:.1f}" '
+                f'text-anchor="middle" fill="{"#1F2937" if is_current else "#6B7280"}" '
+                f'font-weight="{"700" if is_current else "400"}">{year}</text>'
+            )
+
+        # X-Achse
+        svg_parts.append(
+            f'<line x1="{margin_left}" y1="{margin_top + chart_h}" '
+            f'x2="{width - margin_right}" y2="{margin_top + chart_h}" stroke="#D1D5DB"/>'
+        )
+
+        # Legende
+        legend_y = height - 8
+        svg_parts.append(
+            f'<rect x="{margin_left}" y="{legend_y - 8}" width="10" height="10" '
+            f'fill="{COLOR_NORMAL}" rx="2"/>'
+            f'<text x="{margin_left + 13}" y="{legend_y}" fill="#6B7280">Vorjahr</text>'
+        )
+        svg_parts.append(
+            f'<rect x="{margin_left + 65}" y="{legend_y - 8}" width="10" height="10" '
+            f'fill="{COLOR_CURRENT}" rx="2"/>'
+            f'<text x="{margin_left + 78}" y="{legend_y}" fill="#374151">Aktuelles Jahr</text>'
+        )
+
+        svg_parts.append("</svg>")
+        return "\n".join(svg_parts)
+
+    except Exception as e:
+        logger.warning("render_multi_year_trend_failed", error=str(e))
+        return _fallback_svg(f"Mehrjahrestrend nicht verfügbar: {e}", width, height)
