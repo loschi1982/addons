@@ -158,10 +158,18 @@ class ReportService:
                 )
             )
             ids = [row[0] for row in result.all()]
-            return ids if ids else None
+            if ids:
+                return ids
+            # Keine Zähler direkt der NE zugeordnet → Gebäude-Ebene
+            from app.models.site import UsageUnit as _UU_fb
+            uu_obj = await self.db.get(_UU_fb, usage_unit_id)
+            if uu_obj and uu_obj.building_id:
+                building_id = uu_obj.building_id
+            else:
+                return None
 
         if building_id:
-            from app.models.site import UsageUnit
+            from app.models.site import UsageUnit, Building
             # Alle Nutzungseinheiten dieses Gebäudes
             uu_sub = select(UsageUnit.id).where(UsageUnit.building_id == building_id)
             result = await self.db.execute(
@@ -172,7 +180,16 @@ class ReportService:
                 )
             )
             ids = [row[0] for row in result.all()]
-            return ids if ids else None
+            if ids:
+                return ids
+            # Keine Zähler direkt dem Gebäude zugeordnet → Standort des Gebäudes als Fallback
+            if not site_id:
+                bld_obj = await self.db.get(Building, building_id)
+                if bld_obj and bld_obj.site_id:
+                    site_id = bld_obj.site_id
+                else:
+                    return None
+            # site_id weiter unten auflösen
 
         if site_id:
             result = await self.db.execute(
