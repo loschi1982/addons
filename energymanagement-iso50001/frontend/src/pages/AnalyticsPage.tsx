@@ -76,7 +76,10 @@ interface Anomaly {
   meter_name: string;
   timestamp: string;
   value: number;
+  interval_hours?: number;
+  rate_per_hour?: number;
   avg_value: number;
+  avg_rate?: number;
   deviation_sigma: number;
   severity: string;
 }
@@ -1119,8 +1122,8 @@ function AnomaliesTab() {
         <div>
           <label className="label">
             Schwellwert (σ)
-            <InfoTip title="Anomalie-Erkennung" formula="σ = (Wert − Ø) ÷ Standardabw.">
-              Werte mit einer Abweichung größer als der gewählte Schwellwert (in Standardabweichungen) werden als Anomalie markiert.
+            <InfoTip title="Anomalie-Erkennung" formula="σ = (Rate − Ø-Rate) ÷ Standardabw.">
+              Erkennung auf Basis normierter Verbrauchsrate (kWh/h). Datenlücken werden automatisch herausgefiltert – ein hoher Messwert nach einer langen Unterbrechung wird nicht als Anomalie gewertet.
             </InfoTip>
           </label>
           <input type="number" step="0.5" min="1" max="5" className="input w-24" value={threshold} onChange={(e) => setThreshold(Number(e.target.value))} />
@@ -1148,6 +1151,7 @@ function AnomaliesTab() {
                 <tr className="border-b text-left text-gray-500">
                   <th className="pb-2 font-medium">Zähler</th>
                   <th className="pb-2 font-medium">Zeitpunkt</th>
+                  <th className="pb-2 font-medium text-right">Intervall</th>
                   <th className="pb-2 font-medium text-right">Messwert</th>
                   <th className="pb-2 font-medium text-right">Durchschnitt</th>
                   <th className="pb-2 font-medium text-right">Abweichung</th>
@@ -1159,6 +1163,13 @@ function AnomaliesTab() {
                   <tr key={idx} className="border-b last:border-0">
                     <td className="py-2 font-medium text-gray-700">{a.meter_name}</td>
                     <td className="py-2 text-gray-500">{formatDate(a.timestamp)}</td>
+                    <td className="py-2 text-right text-gray-400 text-xs">
+                      {a.interval_hours != null
+                        ? a.interval_hours >= 24
+                          ? `${(a.interval_hours / 24).toFixed(1)} d`
+                          : `${a.interval_hours.toFixed(1)} h`
+                        : '–'}
+                    </td>
                     <td className="py-2 text-right text-gray-700">{formatNumber(a.value)}</td>
                     <td className="py-2 text-right text-gray-500">{formatNumber(a.avg_value)}</td>
                     <td className="py-2 text-right font-medium text-red-600">{a.deviation_sigma}σ</td>

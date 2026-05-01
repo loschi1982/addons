@@ -151,12 +151,14 @@ async def get_benchmarks(
 async def get_anomalies(
     threshold: float = Query(2.0, ge=1.0, le=5.0),
     days: int = Query(30, ge=7, le=365),
+    max_gap_hours: float = Query(0.0, ge=0.0, le=8760.0,
+        description="Max. Stunden zwischen Messungen (0=auto: 5× Median-Intervall)"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Anomalie-Erkennung für alle aktiven Zähler."""
+    """Anomalie-Erkennung für alle aktiven Zähler (lücken-robust, rate-normiert)."""
     service = AnalyticsService(db)
-    return await service.get_anomalies(threshold, days)
+    return await service.get_anomalies(threshold, days, max_gap_hours)
 
 
 @router.get("/self-consumption")
