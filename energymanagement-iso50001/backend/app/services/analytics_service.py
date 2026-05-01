@@ -50,6 +50,156 @@ class AnalyticsService:
         """Anzeigename: Klarname (location) → display_name → technischer Name."""
         return (meter.location or "").strip() or (meter.display_name or "").strip() or meter.name
 
+    # ── Einfrierungs-Erkennung ──
+
+    @staticmethod
+    async def _find_frozen_accumulations(
+        db: AsyncSession,
+        meter_id: uuid.UUID,
+        start: datetime,
+        end: datetime,
+    ) -> list[dict]:
+        """
+        Findet Messwerte nach eingefrorenen Perioden (gleicher Zählerstand über ≥2 Intervalle).
+
+        Gibt zurück: [{timestamp, frozen_from, frozen_hours, consumption}]
+        – timestamp:    Zeitpunkt des Spike (Wertewechsel nach Einfrierung)
+        – frozen_from:  Letzter Messwert mit anderem Zählerstand (Einfrierungsbeginn)
+        – frozen_hours: Akkumulierungsdauer in Stunden
+        – consumption:  Akkumulierter Verbrauch (kWh / m³ / …)
+        """
+        # Schritt 1: Spike-Ereignisse erkennen – Wert ändert sich nach 2+ identischen Ablesungen
+        spike_sql = text("""
+            WITH vals AS (
+                SELECT timestamp, value, consumption,
+                    LAG(value, 1) OVER (ORDER BY timestamp) AS pv1,
+                    LAG(value, 2) OVER (ORDER BY timestamp) AS pv2
+                FROM meter_readings
+                WHERE meter_id = :meter_id
+                  AND timestamp BETWEEN :start AND :end
+            )
+            SELECT timestamp, pv1 AS frozen_val, consumption
+            FROM vals
+            WHERE value IS DISTINCT FROM pv1
+              AND pv1 IS NOT NULL AND pv2 IS NOT NULL AND pv1 = pv2
+              AND consumption > 0
+        """)
+        result = await db.execute(spike_sql, {
+            "meter_id": str(meter_id), "start": start, "end": end
+        })
+        spikes = result.fetchall()
+
+        if not spikes:
+            return []
+
+        events = []
+        for spike in spikes:
+            # Schritt 2: Einfrierungsbeginn = letzter Messwert mit anderem Zählerstand
+            freeze_sql = text("""
+                SELECT timestamp AS frozen_from
+                FROM meter_readings
+                WHERE meter_id = :meter_id
+                  AND timestamp < :spike_ts
+                  AND value IS DISTINCT FROM :frozen_val
+                ORDER BY timestamp DESC
+                LIMIT 1
+            """)
+            res2 = await db.execute(freeze_sql, {
+                "meter_id": str(meter_id),
+                "spike_ts": spike.timestamp,
+                "frozen_val": spike.frozen_val,
+            })
+            freeze_row = res2.fetchone()
+
+            if not freeze_row or not freeze_row.frozen_from:
+                continue
+
+            frozen_from = freeze_row.frozen_from
+            frozen_hours = (spike.timestamp - frozen_from).total_seconds() / 3600
+            if frozen_hours <= 0:
+                continue
+
+            events.append({
+                "timestamp": spike.timestamp,
+                "frozen_from": frozen_from,
+                "frozen_hours": frozen_hours,
+                "consumption": float(spike.consumption or 0.0),
+            })
+
+        return events
+
+    @staticmethod
+    def _smooth_frozen(
+        data_points: list[dict],
+        frozen_events: list[dict],
+        granularity: str,
+    ) -> list[dict]:
+        """
+        Verteilt akkumulierten Verbrauch nach Einfrierungen gleichmäßig auf die betroffenen
+        Perioden und markiert alle betroffenen Datenpunkte mit is_interpolated=True.
+        """
+        # Periodenlänge je Granularität in Sekunden (Näherung für Überschneidungsberechnung)
+        period_secs = {
+            "hour": 3600,
+            "day": 86400,
+            "week": 7 * 86400,
+            "month": 30 * 86400,
+            "year": 365 * 86400,
+        }.get(granularity, 86400)
+
+        for event in frozen_events:
+            spike_ts = event["timestamp"]
+            frozen_from = event["frozen_from"]
+            total_cons = event["consumption"]
+            total_secs = (spike_ts - frozen_from).total_seconds()
+
+            if total_secs <= 0 or total_cons <= 0:
+                continue
+
+            # Timezone sicherstellen
+            if spike_ts.tzinfo is None:
+                spike_ts = spike_ts.replace(tzinfo=timezone.utc)
+            if frozen_from.tzinfo is None:
+                frozen_from = frozen_from.replace(tzinfo=timezone.utc)
+
+            for dp in data_points:
+                raw_ts = dp.get("timestamp")
+                if not raw_ts:
+                    continue
+                try:
+                    p_start = datetime.fromisoformat(raw_ts)
+                    if p_start.tzinfo is None:
+                        p_start = p_start.replace(tzinfo=timezone.utc)
+                except (ValueError, TypeError):
+                    continue
+
+                p_end = p_start + timedelta(seconds=period_secs)
+
+                # Überschneidung mit der eingefrorenen Periode [frozen_from, spike_ts]
+                overlap_start = max(p_start, frozen_from)
+                overlap_end = min(p_end, spike_ts)
+                if overlap_end <= overlap_start:
+                    continue
+
+                fraction = (overlap_end - overlap_start).total_seconds() / total_secs
+                contribution = fraction * total_cons
+                is_spike_bucket = p_start <= spike_ts < p_end
+
+                if is_spike_bucket:
+                    # Spike-Bucket: akkumulierten Verbrauch herausrechnen, Anteil zurückgeben
+                    dp["value"] = round(max(0.0, dp["value"] - total_cons + contribution), 4)
+                else:
+                    # Eingefrorener Bucket: anteiligen Verbrauch hinzufügen
+                    dp["value"] = round(dp["value"] + contribution, 4)
+
+                dp["is_interpolated"] = True
+
+        # Nicht betroffene Punkte kennzeichnen
+        for dp in data_points:
+            dp.setdefault("is_interpolated", False)
+
+        return data_points
+
     # ── Hilfsmethoden ──
 
     async def _meter_ids_for_site(self, site_id: uuid.UUID) -> list[uuid.UUID]:
@@ -234,7 +384,22 @@ class AnalyticsService:
                     "timestamp": row.period.isoformat() if row.period else None,
                     "value": float(consumption),
                     "count": row.count,
+                    "is_interpolated": False,
                 })
+
+            # Eingefrorene Akkumulierungen erkennen und Verbrauch glätten
+            if start_date and end_date and data_points:
+                ts_start = datetime.combine(
+                    start_date, datetime.min.time(), tzinfo=timezone.utc
+                )
+                ts_end = datetime.combine(
+                    end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+                )
+                frozen_events = await AnalyticsService._find_frozen_accumulations(
+                    self.db, meter.id, ts_start, ts_end
+                )
+                if frozen_events:
+                    data_points = AnalyticsService._smooth_frozen(data_points, frozen_events, trunc)
 
             series.append({
                 "meter_id": str(meter.id),
