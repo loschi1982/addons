@@ -980,11 +980,17 @@ class AnalyticsService:
         self,
         threshold: float = 2.0,
         days: int = 30,
+        max_gap_hours: float = 0.0,
     ) -> list[dict]:
         """
-        Einfache Anomalie-Erkennung: Tagesverbrauch > threshold × Durchschnitt.
+        Lücken-robuste Anomalie-Erkennung auf Basis normierter Verbrauchsrate (kWh/h).
 
-        Prüft die letzten `days` Tage.
+        Statt absolutem Verbrauch (kWh) wird rate = consumption / gap_hours geprüft.
+        Damit werden künstliche Ausreißer durch fehlende Messwerte eliminiert:
+        ein Messwert nach 30-Tage-Lücke hat eine normale Rate, obwohl der absolute
+        Wert 30× höher als üblich erscheint.
+
+        max_gap_hours=0 → automatisch 5× Median-Intervall des Zählers.
         """
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
@@ -998,54 +1004,84 @@ class AnalyticsService:
 
         anomalies = []
         for meter in meters:
-            # Durchschnittsverbrauch pro Tag
-            avg_query = (
-                select(
-                    func.avg(MeterReading.consumption).label("avg_consumption"),
-                    func.stddev(MeterReading.consumption).label("std_consumption"),
+            # LAG-Query: Zeitabstand zum Vorgänger-Messwert berechnen
+            sql = text("""
+                WITH intervals AS (
+                    SELECT
+                        id,
+                        timestamp,
+                        consumption,
+                        EXTRACT(EPOCH FROM (
+                            timestamp - LAG(timestamp) OVER (ORDER BY timestamp)
+                        )) / 3600.0 AS gap_hours
+                    FROM meter_readings
+                    WHERE meter_id = :meter_id
+                      AND timestamp >= :cutoff
+                      AND consumption IS NOT NULL
+                      AND consumption > 0
                 )
-                .where(
-                    MeterReading.meter_id == meter.id,
-                    MeterReading.timestamp >= cutoff,
-                    MeterReading.consumption.isnot(None),
-                    MeterReading.consumption > 0,
-                )
+                SELECT id, timestamp, consumption, gap_hours
+                FROM intervals
+                WHERE gap_hours IS NOT NULL AND gap_hours > 0
+                ORDER BY timestamp
+            """)
+            result = await self.db.execute(
+                sql, {"meter_id": str(meter.id), "cutoff": cutoff}
             )
-            avg_result = await self.db.execute(avg_query)
-            stats = avg_result.one()
+            rows = result.fetchall()
 
-            if not stats.avg_consumption or not stats.std_consumption:
+            if len(rows) < 5:
                 continue
 
-            avg = float(stats.avg_consumption)
-            std = float(stats.std_consumption)
+            gap_hours_list = [float(r.gap_hours) for r in rows]
+            rates = [float(r.consumption) / float(r.gap_hours) for r in rows]
 
-            if std == 0:
+            # Effektives max_gap: 5× Median-Intervall (automatisch, wenn nicht manuell gesetzt)
+            if max_gap_hours > 0:
+                effective_max_gap = max_gap_hours
+            else:
+                sorted_gaps = sorted(gap_hours_list)
+                n = len(sorted_gaps)
+                median_gap = (sorted_gaps[n // 2] + sorted_gaps[(n - 1) // 2]) / 2
+                effective_max_gap = 5.0 * median_gap
+
+            # Messungen nach Datenlücken > effective_max_gap als Artefakte ausschließen
+            valid = [
+                (r, rate)
+                for r, rate in zip(rows, rates)
+                if float(r.gap_hours) <= effective_max_gap
+            ]
+
+            if len(valid) < 5:
                 continue
 
-            # Ausreißer finden
-            anomaly_query = (
-                select(MeterReading)
-                .where(
-                    MeterReading.meter_id == meter.id,
-                    MeterReading.timestamp >= cutoff,
-                    MeterReading.consumption.isnot(None),
-                    MeterReading.consumption > Decimal(str(avg + threshold * std)),
-                )
-                .order_by(MeterReading.timestamp.desc())
-                .limit(5)
-            )
-            anomaly_result = await self.db.execute(anomaly_query)
-            outliers = list(anomaly_result.scalars().all())
+            valid_rates = [rate for _, rate in valid]
+            avg_rate = sum(valid_rates) / len(valid_rates)
+            variance = sum((r - avg_rate) ** 2 for r in valid_rates) / len(valid_rates)
+            std_rate = variance ** 0.5
 
-            for reading in outliers:
-                deviation = float(reading.consumption - Decimal(str(avg))) / std if std > 0 else 0
+            if std_rate == 0:
+                continue
+
+            avg_value = sum(float(r.consumption) for r, _ in valid) / len(valid)
+
+            # Top-5 Ausreißer nach Rate-Sigma (absteigend)
+            outliers = sorted(
+                [(r, rate) for r, rate in valid if rate > avg_rate + threshold * std_rate],
+                key=lambda x: -x[1],
+            )[:5]
+
+            for reading, rate in outliers:
+                deviation = (rate - avg_rate) / std_rate
                 anomalies.append({
                     "meter_id": str(meter.id),
                     "meter_name": self._meter_label(meter),
                     "timestamp": reading.timestamp.isoformat(),
                     "value": float(reading.consumption),
-                    "avg_value": avg,
+                    "interval_hours": round(float(reading.gap_hours), 2),
+                    "rate_per_hour": round(rate, 4),
+                    "avg_value": round(avg_value, 2),
+                    "avg_rate": round(avg_rate, 4),
                     "deviation_sigma": round(deviation, 1),
                     "severity": "hoch" if deviation > 3 else "mittel",
                 })
