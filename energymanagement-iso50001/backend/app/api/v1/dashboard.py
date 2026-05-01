@@ -141,6 +141,9 @@ async def get_anomalies(
           AND COALESCE(rg.prev_value2, 1) > 0
           AND (rg.prev_value1 IS NULL OR rg.prev_value2 IS NULL
                OR rg.prev_value1 != rg.prev_value2)
+          -- Dezimalfehler im Vorgänger: Ratio pv1/pv2 außerhalb [0.01, 100] → Größenordnungssprung
+          AND (rg.prev_value2 IS NULL OR rg.prev_value2 = 0
+               OR rg.prev_value1 / rg.prev_value2 BETWEEN 0.01 AND 100)
           AND (r.consumption / rg.days_since_prev)
               / NULLIF((ms.p95 / GREATEST(1, ms.avg_days)), 0) > :threshold
         ORDER BY factor DESC
