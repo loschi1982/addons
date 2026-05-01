@@ -100,9 +100,13 @@ async def get_anomalies(
               AND PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY consumption) >= 1
         ),
         readings_with_gap AS (
+            -- LAG läuft über ALLE Zeilen (inkl. value=0 Fehlauslesungen),
+            -- damit prev_value1/prev_value2 korrekt befüllt sind.
             SELECT
                 r.id,
                 r.meter_id,
+                LAG(r.value, 1) OVER (PARTITION BY r.meter_id ORDER BY r.timestamp) AS prev_value1,
+                LAG(r.value, 2) OVER (PARTITION BY r.meter_id ORDER BY r.timestamp) AS prev_value2,
                 GREATEST(1, ROUND(
                     EXTRACT(EPOCH FROM (
                         r.timestamp - LAG(r.timestamp) OVER (PARTITION BY r.meter_id ORDER BY r.timestamp)
@@ -133,6 +137,8 @@ async def get_anomalies(
           AND m.is_active = TRUE
           AND r.quality != 'verified'
           AND rg.days_since_prev IS NOT NULL
+          AND COALESCE(rg.prev_value1, 1) > 0
+          AND COALESCE(rg.prev_value2, 1) > 0
           AND (r.consumption / rg.days_since_prev)
               / NULLIF((ms.p95 / GREATEST(1, ms.avg_days)), 0) > :threshold
         ORDER BY factor DESC
