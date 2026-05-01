@@ -1197,6 +1197,9 @@ class AnalyticsService:
                   AND gap_hours > 0
                   AND COALESCE(prev_value1, 1) > 0
                   AND COALESCE(prev_value2, 1) > 0
+                  -- Dezimalfehler im Vorgänger: Ratio pv1/pv2 außerhalb [0.01, 100] → ausschließen
+                  AND (prev_value2 IS NULL OR prev_value2 = 0
+                       OR prev_value1 / prev_value2 BETWEEN 0.01 AND 100)
                 ORDER BY timestamp
             """)
             result = await self.db.execute(
