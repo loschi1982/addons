@@ -1004,25 +1004,34 @@ class AnalyticsService:
 
         anomalies = []
         for meter in meters:
-            # LAG-Query: Zeitabstand zum Vorgänger-Messwert berechnen
+            # LAG-Query: Zeitabstand + Vorgängerwerte berechnen.
+            # Wichtig: CTE läuft über ALLE Zeilen (auch value=0 Fehlauslesungen),
+            # damit prev_value1/prev_value2 korrekt gefüllt sind.
+            # Erst im äußeren WHERE werden Null-Ablesungen als Artefakte ausgeschlossen.
             sql = text("""
-                WITH intervals AS (
+                WITH all_readings AS (
                     SELECT
                         id,
                         timestamp,
+                        value,
                         consumption,
+                        LAG(value, 1) OVER (ORDER BY timestamp) AS prev_value1,
+                        LAG(value, 2) OVER (ORDER BY timestamp) AS prev_value2,
                         EXTRACT(EPOCH FROM (
                             timestamp - LAG(timestamp) OVER (ORDER BY timestamp)
                         )) / 3600.0 AS gap_hours
                     FROM meter_readings
                     WHERE meter_id = :meter_id
                       AND timestamp >= :cutoff
-                      AND consumption IS NOT NULL
-                      AND consumption > 0
                 )
                 SELECT id, timestamp, consumption, gap_hours
-                FROM intervals
-                WHERE gap_hours IS NOT NULL AND gap_hours > 0
+                FROM all_readings
+                WHERE consumption IS NOT NULL
+                  AND consumption > 0
+                  AND gap_hours IS NOT NULL
+                  AND gap_hours > 0
+                  AND COALESCE(prev_value1, 1) > 0
+                  AND COALESCE(prev_value2, 1) > 0
                 ORDER BY timestamp
             """)
             result = await self.db.execute(
