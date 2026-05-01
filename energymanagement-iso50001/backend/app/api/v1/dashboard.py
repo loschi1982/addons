@@ -61,9 +61,16 @@ class AnomalyReading(BaseModel):
     p95: Decimal
     factor: Decimal      # (consumption/days) / (p95/avg_days) – tagesbereinigt
     days_since_prev: int  # Tage seit vorherigem Messwert
+    quality_reason: str | None = None  # gesetzt bei Datenqualitätsproblemen
 
 
-@router.get("/anomalies", response_model=list[AnomalyReading])
+class AnomalyResponse(BaseModel):
+    """Antwort: echte Ausreißer + Datenqualitätsprobleme getrennt."""
+    anomalies: list[AnomalyReading]
+    data_quality_issues: list[AnomalyReading]
+
+
+@router.get("/anomalies", response_model=AnomalyResponse)
 async def get_anomalies(
     threshold: float = Query(5.0, ge=2.0, description="Faktor über p95 ab dem ein Ausreißer erkannt wird"),
     limit: int = Query(100, ge=1, le=500),
@@ -73,12 +80,12 @@ async def get_anomalies(
     """
     Statistische Ausreißer in Messwerten erkennen.
 
-    Liefert Messwerte, deren consumption > threshold × p95 des jeweiligen Zählers.
-    Sortiert nach Schwere (höchster Faktor zuerst).
+    Liefert echte Ausreißer (consumption > threshold × p95) getrennt von
+    Datenqualitätsproblemen (Null-Ablesungen, Einfrierungen, Dezimalfehler).
     """
-    result = await db.execute(text("""
+    # Gemeinsame CTEs für beide Queries
+    base_cte = """
         WITH reading_gaps AS (
-            -- Zuerst Lücken per Fensterfunktion berechnen – darf nicht direkt in AVG()
             SELECT
                 meter_id,
                 consumption,
@@ -89,7 +96,6 @@ async def get_anomalies(
             WHERE consumption IS NOT NULL AND consumption > 0
         ),
         meter_stats AS (
-            -- Dann aggregieren: p95 und mittlerer Ablese-Abstand in Tagen
             SELECT
                 meter_id,
                 PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY consumption) AS p95,
@@ -100,8 +106,6 @@ async def get_anomalies(
               AND PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY consumption) >= 1
         ),
         readings_with_gap AS (
-            -- LAG läuft über ALLE Zeilen (inkl. value=0 Fehlauslesungen),
-            -- damit prev_value1/prev_value2 korrekt befüllt sind.
             SELECT
                 r.id,
                 r.meter_id,
@@ -113,46 +117,71 @@ async def get_anomalies(
                     )) / 86400.0
                 )) AS days_since_prev
             FROM meter_readings r
+        ),
+        candidates AS (
+            SELECT
+                r.id            AS reading_id,
+                rg.days_since_prev,
+                rg.prev_value1,
+                rg.prev_value2,
+                m.id            AS meter_id,
+                m.name          AS meter_name,
+                m.energy_type,
+                m.unit,
+                m.site_id,
+                s.name          AS site_name,
+                r.timestamp     AT TIME ZONE 'Europe/Berlin' AS ts,
+                r.consumption,
+                ms.p95,
+                (r.consumption / rg.days_since_prev)
+                    / NULLIF((ms.p95 / GREATEST(1, ms.avg_days)), 0) AS factor,
+                -- Datenqualitäts-Klassifikation (höchste Priorität zuerst)
+                CASE
+                    WHEN COALESCE(rg.prev_value1, 1) <= 0 OR COALESCE(rg.prev_value2, 1) <= 0
+                        THEN 'Null-Ablesung im Vorgänger'
+                    WHEN rg.prev_value2 IS NOT NULL AND rg.prev_value2 != 0
+                         AND rg.prev_value1 / NULLIF(rg.prev_value2, 0) NOT BETWEEN 0.01 AND 100
+                        THEN 'Möglicher Dezimalfehler im Vorgänger'
+                    WHEN rg.prev_value1 IS NOT NULL AND rg.prev_value2 IS NOT NULL
+                         AND rg.prev_value1 = rg.prev_value2
+                        THEN 'Eingefrorener Zählerstand'
+                    ELSE NULL
+                END AS quality_reason
+            FROM meter_readings r
+            JOIN readings_with_gap rg ON r.id = rg.id
+            JOIN meter_stats ms ON r.meter_id = ms.meter_id
+            JOIN meters m ON r.meter_id = m.id
+            LEFT JOIN sites s ON m.site_id = s.id
+            WHERE r.consumption > 0
+              AND m.is_active = TRUE
+              AND r.quality != 'verified'
+              AND rg.days_since_prev IS NOT NULL
+              AND (r.consumption / rg.days_since_prev)
+                  / NULLIF((ms.p95 / GREATEST(1, ms.avg_days)), 0) > :threshold
         )
-        SELECT
-            r.id            AS reading_id,
-            rg.days_since_prev,
-            m.id            AS meter_id,
-            m.name          AS meter_name,
-            m.energy_type,
-            m.unit,
-            m.site_id,
-            s.name          AS site_name,
-            r.timestamp     AT TIME ZONE 'Europe/Berlin' AS ts,
-            r.consumption,
-            ms.p95,
-            (r.consumption / rg.days_since_prev)
-                / NULLIF((ms.p95 / GREATEST(1, ms.avg_days)), 0) AS factor
-        FROM meter_readings r
-        JOIN readings_with_gap rg ON r.id = rg.id
-        JOIN meter_stats ms ON r.meter_id = ms.meter_id
-        JOIN meters m ON r.meter_id = m.id
-        LEFT JOIN sites s ON m.site_id = s.id
-        WHERE r.consumption > 0
-          AND m.is_active = TRUE
-          AND r.quality != 'verified'
-          AND rg.days_since_prev IS NOT NULL
-          AND COALESCE(rg.prev_value1, 1) > 0
-          AND COALESCE(rg.prev_value2, 1) > 0
-          AND (rg.prev_value1 IS NULL OR rg.prev_value2 IS NULL
-               OR rg.prev_value1 != rg.prev_value2)
-          -- Dezimalfehler im Vorgänger: Ratio pv1/pv2 außerhalb [0.01, 100] → Größenordnungssprung
-          AND (rg.prev_value2 IS NULL OR rg.prev_value2 = 0
-               OR rg.prev_value1 / rg.prev_value2 BETWEEN 0.01 AND 100)
-          AND (r.consumption / rg.days_since_prev)
-              / NULLIF((ms.p95 / GREATEST(1, ms.avg_days)), 0) > :threshold
+    """
+
+    # Echte Ausreißer (alle Qualitätsfilter bestehen)
+    anomaly_sql = base_cte + """
+        SELECT * FROM candidates
+        WHERE quality_reason IS NULL
         ORDER BY factor DESC
         LIMIT :limit
-    """), {"threshold": threshold, "limit": limit})
+    """
 
-    rows = result.fetchall()
-    return [
-        AnomalyReading(
+    # Datenqualitätsprobleme (mindestens ein Filter schlägt an)
+    quality_sql = base_cte + """
+        SELECT * FROM candidates
+        WHERE quality_reason IS NOT NULL
+        ORDER BY factor DESC
+        LIMIT :limit
+    """
+
+    anomaly_rows = (await db.execute(text(anomaly_sql), {"threshold": threshold, "limit": limit})).fetchall()
+    quality_rows = (await db.execute(text(quality_sql), {"threshold": threshold, "limit": limit})).fetchall()
+
+    def _to_model(row: object, quality_reason: str | None = None) -> AnomalyReading:
+        return AnomalyReading(
             reading_id=row.reading_id,
             meter_id=row.meter_id,
             meter_name=row.meter_name,
@@ -165,9 +194,13 @@ async def get_anomalies(
             p95=Decimal(str(row.p95)),
             factor=Decimal(str(row.factor)),
             days_since_prev=int(row.days_since_prev),
+            quality_reason=quality_reason or row.quality_reason,
         )
-        for row in rows
-    ]
+
+    return AnomalyResponse(
+        anomalies=[_to_model(r) for r in anomaly_rows],
+        data_quality_issues=[_to_model(r) for r in quality_rows],
+    )
 
 
 @router.delete("/anomalies/{reading_id}")
