@@ -28,6 +28,7 @@ interface Meter {
 interface TimeSeriesDataPoint {
   timestamp: string;
   value: number;
+  is_interpolated?: boolean;
 }
 
 interface TimeSeriesMeter {
@@ -363,7 +364,10 @@ function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
         const dp = s.data[i];
         if (dp) {
           point.label = formatDate(dp.timestamp);
-          point[getLabel(s)] = dp.value;
+          const lbl = getLabel(s);
+          point[lbl] = dp.value;
+          // Interpolierte Punkte (nach eingefrorenen Messwerten) kennzeichnen
+          if (dp.is_interpolated) point[`__interp_${lbl}`] = true;
         }
       });
       if (point.label) chartData.push(point);
@@ -434,18 +438,56 @@ function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="label" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip formatter={(val: number) => [`${formatNumber(val)} ${data[0]?.unit ?? ''}`, '']} />
+              <Tooltip
+                content={({ active, payload, label: tooltipLabel }) => {
+                  if (!active || !payload?.length) return null;
+                  const unit = data[0]?.unit ?? '';
+                  const hasInterp = payload.some((p) => p.payload[`__interp_${String(p.dataKey)}`]);
+                  return (
+                    <div className="bg-white border border-gray-200 rounded p-2 text-sm shadow">
+                      <p className="font-medium mb-1 text-gray-700">{tooltipLabel}</p>
+                      {payload.map((p) => (
+                        <p key={String(p.dataKey)} style={{ color: p.color }}>
+                          {String(p.dataKey)}: {formatNumber(Number(p.value))} {unit}
+                          {p.payload[`__interp_${String(p.dataKey)}`] ? ' ⚠' : ''}
+                        </p>
+                      ))}
+                      {hasInterp && (
+                        <p className="text-amber-600 text-xs mt-1 border-t pt-1">
+                          ⚠ Interpoliert – Zähler war eingefroren
+                        </p>
+                      )}
+                    </div>
+                  );
+                }}
+              />
               <Legend />
               {data.map((s, idx) => {
                 const color = CHART_COLORS[idx % CHART_COLORS.length];
                 const lbl = getLabel(s);
+                // Benutzerdefinierter Dot: ⚠ für interpolierte Punkte (nach Einfrierung)
+                const interpDot = (props: Record<string, unknown>) => {
+                  const payload = props.payload as Record<string, unknown> | undefined;
+                  if (payload?.[`__interp_${lbl}`]) {
+                    return (
+                      <text
+                        key={String(props.key ?? props.index)}
+                        x={Number(props.cx) - 6}
+                        y={Number(props.cy) + 4}
+                        fontSize={10}
+                        fill="#F59E0B"
+                      >⚠</text>
+                    );
+                  }
+                  return <g key={String(props.key ?? props.index)} />;
+                };
                 if (chartType === 'bar') {
                   return <Bar key={s.meter_id} dataKey={lbl} fill={color} radius={[4, 4, 0, 0]} />;
                 }
                 if (chartType === 'area') {
-                  return <Area key={s.meter_id} dataKey={lbl} stroke={color} fill={color} fillOpacity={0.15} />;
+                  return <Area key={s.meter_id} dataKey={lbl} stroke={color} fill={color} fillOpacity={0.15} dot={interpDot} />;
                 }
-                return <Line key={s.meter_id} dataKey={lbl} stroke={color} dot={false} strokeWidth={2} />;
+                return <Line key={s.meter_id} dataKey={lbl} stroke={color} dot={interpDot} strokeWidth={2} />;
               })}
             </ChartComp>
           </ResponsiveContainer>

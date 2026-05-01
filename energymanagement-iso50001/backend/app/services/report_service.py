@@ -302,6 +302,25 @@ class ReportService:
         except Exception as e:
             logger.warning("chart_tree_failed", error=str(e))
 
+        # Eingefrorene Messperioden prüfen – Fußnote im Bericht wenn vorhanden
+        try:
+            from datetime import datetime, timezone
+            if meter_ids:
+                ts_start = datetime.combine(period_start, datetime.min.time(), tzinfo=timezone.utc)
+                ts_end = datetime.combine(period_end, datetime.min.time(), tzinfo=timezone.utc)
+                frozen_found = False
+                for mid in meter_ids[:10]:  # Stichprobe der ersten 10 Zähler
+                    events = await AnalyticsService._find_frozen_accumulations(
+                        self.db, mid, ts_start, ts_end
+                    )
+                    if events:
+                        frozen_found = True
+                        break
+                if frozen_found:
+                    charts["has_frozen_readings"] = True
+        except Exception as e:
+            logger.warning("chart_frozen_check_failed", error=str(e))
+
         return charts
 
     async def create_report(
@@ -1926,6 +1945,8 @@ p {{ margin: 5pt 0; }}
 <!-- {n_fazit}. Fazit -->
 <h1>{n_fazit}. Fazit</h1>
 {fazit_body}
+
+{'<div style="margin-top:24pt;padding:8pt 12pt;background:#FFFBEB;border-left:3px solid #F59E0B;font-size:8pt;color:#92400E"><strong>⚠ Hinweis zur Datenqualität:</strong> Für einzelne Zähler wurden im Berichtszeitraum eingefrorene Messwerte erkannt. Der Verbrauch wurde gleichmäßig auf den Einfrierungszeitraum verteilt (interpoliert). Originalwerte sind unverändert in der Datenbank gespeichert.</div>' if charts.get("has_frozen_readings") else ''}
 
 </body>
 </html>"""

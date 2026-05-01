@@ -139,6 +139,8 @@ async def get_anomalies(
           AND rg.days_since_prev IS NOT NULL
           AND COALESCE(rg.prev_value1, 1) > 0
           AND COALESCE(rg.prev_value2, 1) > 0
+          AND (rg.prev_value1 IS NULL OR rg.prev_value2 IS NULL
+               OR rg.prev_value1 != rg.prev_value2)
           AND (r.consumption / rg.days_since_prev)
               / NULLIF((ms.p95 / GREATEST(1, ms.avg_days)), 0) > :threshold
         ORDER BY factor DESC
