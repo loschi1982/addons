@@ -416,6 +416,12 @@ interface AnomalyReading {
   p95: number;
   factor: number;
   days_since_prev: number;
+  quality_reason?: string | null;
+}
+
+interface AnomalyResponse {
+  anomalies: AnomalyReading[];
+  data_quality_issues: AnomalyReading[];
 }
 
 const ENERGY_TYPE_COLORS_BG: Record<string, string> = {
@@ -429,8 +435,10 @@ const ENERGY_TYPE_COLORS_BG: Record<string, string> = {
 function AnomalyPanel() {
   const navigate = useNavigate();
   const [anomalies, setAnomalies] = useState<AnomalyReading[]>([]);
+  const [qualityIssues, setQualityIssues] = useState<AnomalyReading[]>([]);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
+  const [qualityCollapsed, setQualityCollapsed] = useState(true);
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
   const [accepting, setAccepting] = useState<Set<string>>(new Set());
   const [threshold, setThreshold] = useState(5);
@@ -438,10 +446,11 @@ function AnomalyPanel() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get<AnomalyReading[]>('/api/v1/dashboard/anomalies', {
+      const res = await apiClient.get<AnomalyResponse>('/api/v1/dashboard/anomalies', {
         params: { threshold, limit: 50 },
       });
-      setAnomalies(res.data);
+      setAnomalies(res.data.anomalies);
+      setQualityIssues(res.data.data_quality_issues);
     } catch { /* interceptor */ } finally { setLoading(false); }
   };
 
@@ -487,7 +496,7 @@ function AnomalyPanel() {
     </div>
   );
 
-  if (anomalies.length === 0) return null;
+  if (anomalies.length === 0 && qualityIssues.length === 0) return null;
 
   return (
     <div className="mt-6 rounded-xl border-2 border-red-300 bg-red-50 shadow-sm">
@@ -614,6 +623,81 @@ function AnomalyPanel() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Datenqualitätsprobleme */}
+      {qualityIssues.length > 0 && (
+        <div className="mt-4 rounded-xl border-2 border-amber-300 bg-amber-50 shadow-sm">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-amber-200">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0" />
+              <h2 className="font-semibold text-amber-800">
+                {qualityIssues.length} Datenqualitätsprobleme
+              </h2>
+              <span className="text-xs text-amber-500">
+                (gefiltert – kein echter Mehrverbrauch)
+              </span>
+            </div>
+            <button onClick={() => setQualityCollapsed(c => !c)} className="p-1 text-amber-500 hover:text-amber-700">
+              {qualityCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+            </button>
+          </div>
+          {!qualityCollapsed && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-amber-200 bg-amber-100/50 text-xs uppercase text-amber-700">
+                  <tr>
+                    <th className="px-4 py-2 text-left">Zeitpunkt</th>
+                    <th className="px-4 py-2 text-left">Zähler</th>
+                    <th className="px-4 py-2 text-left">Standort</th>
+                    <th className="px-4 py-2 text-left">Energieart</th>
+                    <th className="px-4 py-2 text-right">Scheinwert</th>
+                    <th className="px-4 py-2 text-left">Ursache</th>
+                    <th className="px-4 py-2 text-right">Aktionen</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-amber-100">
+                  {qualityIssues.map(a => (
+                    <tr key={a.reading_id} className="hover:bg-amber-100/40 transition-colors">
+                      <td className="px-4 py-2 font-mono text-xs text-gray-600 whitespace-nowrap">{a.timestamp}</td>
+                      <td className="px-4 py-2 max-w-[200px]">
+                        <span className="block font-medium text-gray-900 truncate" title={a.meter_name}>{a.meter_name}</span>
+                      </td>
+                      <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">{a.site_name ?? '–'}</td>
+                      <td className="px-4 py-2">
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${ENERGY_TYPE_COLORS_BG[a.energy_type] || 'bg-gray-100 text-gray-700'}`}>
+                          {ENERGY_TYPE_LABELS[a.energy_type as keyof typeof ENERGY_TYPE_LABELS] || a.energy_type}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-right font-bold text-amber-700 whitespace-nowrap">
+                        {Number(a.consumption).toLocaleString('de-DE', { maximumFractionDigits: 1 })} {a.unit}
+                      </td>
+                      <td className="px-4 py-2 text-xs text-amber-600">{a.quality_reason ?? '–'}</td>
+                      <td className="px-4 py-2 text-right">
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            onClick={() => navigate(`/readings?meter_id=${a.meter_id}&highlight=${a.reading_id}`)}
+                            className="rounded p-1 text-gray-400 hover:text-primary-600"
+                            title="Messwerte anzeigen"
+                          >
+                            <Activity className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => a.site_id ? navigate(`/sites?site=${a.site_id}&meter=${a.meter_id}`) : navigate(`/meters?id=${a.meter_id}`)}
+                            className="rounded p-1 text-gray-400 hover:text-primary-600"
+                            title="Zum Zähler"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
