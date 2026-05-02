@@ -453,39 +453,39 @@ class AnalyticsService:
         if not meter_ids:
             return {"period1": {"start": "", "end": "", "data": {}}, "period2": {"start": "", "end": "", "data": {}}}
 
+        # Alle Zähler-Metadaten einmalig laden (Einheit für Umrechnung)
+        meters_result = await self.db.execute(
+            select(Meter.id, Meter.unit).where(Meter.id.in_(meter_ids))
+        )
+        unit_by_meter = {row.id: row.unit for row in meters_result.all()}
+
         async def _aggregate(start: date, end: date) -> dict[str, list]:
-            result = {}
-            for mid in meter_ids:
-                meter = await self.db.get(Meter, mid)
-                if not meter:
-                    continue
-                trunc = "month" if granularity == "monthly" else "day"
-                query = (
-                    select(
-                        func.date_trunc(trunc, MeterReading.timestamp).label("period"),
-                        func.sum(MeterReading.consumption).label("consumption"),
-                    )
-                    .where(
-                        MeterReading.meter_id == mid,
-                        MeterReading.timestamp >= datetime.combine(
-                            start, datetime.min.time(), tzinfo=timezone.utc
-                        ),
-                        MeterReading.timestamp < datetime.combine(
-                            end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
-                        ),
-                    )
-                    .group_by(text("period"))
-                    .order_by(text("period"))
+            """Verbrauch aller Zähler in einer einzigen GROUP-BY-Abfrage."""
+            trunc = "month" if granularity == "monthly" else "day"
+            start_ts = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
+            end_ts = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+            rows = (await self.db.execute(
+                select(
+                    MeterReading.meter_id,
+                    func.date_trunc(trunc, MeterReading.timestamp).label("period"),
+                    func.sum(MeterReading.consumption).label("consumption"),
                 )
-                rows = (await self.db.execute(query)).all()
-                conv = CONVERSION_FACTORS.get(meter.unit, Decimal("1"))
-                result[str(mid)] = [
-                    {
-                        "period": r.period.isoformat() if r.period else None,
-                        "value": float((r.consumption or Decimal("0")) * conv),
-                    }
-                    for r in rows
-                ]
+                .where(
+                    MeterReading.meter_id.in_(meter_ids),
+                    MeterReading.timestamp >= start_ts,
+                    MeterReading.timestamp < end_ts,
+                )
+                .group_by(MeterReading.meter_id, text("period"))
+                .order_by(MeterReading.meter_id, text("period"))
+            )).all()
+
+            result: dict[str, list] = {str(mid): [] for mid in meter_ids}
+            for row in rows:
+                conv = CONVERSION_FACTORS.get(unit_by_meter.get(row.meter_id, "kWh"), Decimal("1"))
+                result[str(row.meter_id)].append({
+                    "period": row.period.isoformat() if row.period else None,
+                    "value": float((row.consumption or Decimal("0")) * conv),
+                })
             return result
 
         period1 = await _aggregate(period1_start, period1_end)
@@ -650,23 +650,27 @@ class AnalyticsService:
         meters_result = await self.db.execute(query)
         meters = list(meters_result.scalars().all())
 
-        # Verbrauch pro Zähler im Zeitraum
-        consumption_map: dict[uuid.UUID, float] = {}
-        for meter in meters:
-            result = await self.db.execute(
-                select(func.sum(MeterReading.consumption)).where(
-                    MeterReading.meter_id == meter.id,
-                    MeterReading.timestamp >= datetime.combine(
-                        start_date, datetime.min.time(), tzinfo=timezone.utc
-                    ),
-                    MeterReading.timestamp < datetime.combine(
-                        end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
-                    ),
-                )
+        # Verbrauch pro Zähler im Zeitraum – eine Batch-Abfrage statt N Einzelabfragen
+        meter_ids_list = [m.id for m in meters]
+        start_ts = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+        end_ts = datetime.combine(end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+        rows = (await self.db.execute(
+            select(
+                MeterReading.meter_id,
+                func.sum(MeterReading.consumption).label("total"),
             )
-            raw = result.scalar() or Decimal("0")
-            conv = CONVERSION_FACTORS.get(meter.unit, Decimal("1"))
-            consumption_map[meter.id] = float(raw * conv)
+            .where(
+                MeterReading.meter_id.in_(meter_ids_list),
+                MeterReading.timestamp >= start_ts,
+                MeterReading.timestamp < end_ts,
+            )
+            .group_by(MeterReading.meter_id)
+        )).all()
+        raw_by_meter = {row.meter_id: row.total or Decimal("0") for row in rows}
+        consumption_map: dict[uuid.UUID, float] = {
+            m.id: float((raw_by_meter.get(m.id) or Decimal("0")) * CONVERSION_FACTORS.get(m.unit, Decimal("1")))
+            for m in meters
+        }
 
         # Hierarchie-Tiefe berechnen (für korrekte Spaltenplatzierung)
         meter_by_id = {m.id: m for m in meters}
