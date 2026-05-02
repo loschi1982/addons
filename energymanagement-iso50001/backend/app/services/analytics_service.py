@@ -429,15 +429,26 @@ class AnalyticsService:
         # Standortfilter → Zähler-IDs auflösen
         if site_id and not meter_ids:
             meter_ids = await self._meter_ids_for_site(site_id)
-        # Wenn energy_type gesetzt, Zähler automatisch ermitteln
-        if not meter_ids and energy_type:
-            meter_query = select(Meter.id).where(
+        # Zähler nach energy_type filtern (unabhängig ob aus site_id oder direkt übergeben)
+        if energy_type:
+            et_query = select(Meter.id).where(
                 Meter.is_active == True,  # noqa: E712
                 Meter.is_feed_in != True,
                 Meter.parent_meter_id.is_(None),
                 Meter.energy_type == energy_type,
             )
-            result = await self.db.execute(meter_query)
+            if meter_ids:
+                et_query = et_query.where(Meter.id.in_(meter_ids))
+            result = await self.db.execute(et_query)
+            meter_ids = [row[0] for row in result.all()]
+        elif not meter_ids:
+            # Weder site_id noch energy_type → alle aktiven Hauptzähler
+            all_query = select(Meter.id).where(
+                Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,
+                Meter.parent_meter_id.is_(None),
+            )
+            result = await self.db.execute(all_query)
             meter_ids = [row[0] for row in result.all()]
         if not meter_ids:
             return {"period1": {"start": "", "end": "", "data": {}}, "period2": {"start": "", "end": "", "data": {}}}
