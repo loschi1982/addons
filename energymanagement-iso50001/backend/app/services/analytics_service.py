@@ -1266,6 +1266,7 @@ class AnalyticsService:
             for reading, rate in outliers:
                 deviation = (rate - avg_rate) / std_rate
                 anomalies.append({
+                    "reading_id": str(reading.id),
                     "meter_id": str(meter.id),
                     "meter_name": self._meter_label(meter),
                     "timestamp": reading.timestamp.isoformat(),

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, lazy, Suspense } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area,
   ComposedChart, Scatter,
@@ -7,7 +7,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Activity } from 'lucide-react';
 import InfoTip from '@/components/ui/InfoTip';
 import SankeyDiagram from '@/components/charts/SankeyDiagram';
 import { apiClient } from '@/utils/api';
@@ -73,6 +73,7 @@ interface SankeyData {
 }
 
 interface Anomaly {
+  reading_id?: string;
   meter_id: string;
   meter_name: string;
   timestamp: string;
@@ -1140,6 +1141,7 @@ function CO2PathTab() {
 /* ── Tab: Anomalien ── */
 
 function AnomaliesTab() {
+  const navigate = useNavigate();
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
   const [threshold, setThreshold] = useState(2.0);
   const [days, setDays] = useState(30);
@@ -1198,6 +1200,7 @@ function AnomaliesTab() {
                   <th className="pb-2 font-medium text-right">Durchschnitt</th>
                   <th className="pb-2 font-medium text-right">Abweichung</th>
                   <th className="pb-2 font-medium text-center">Schwere</th>
+                  <th className="pb-2 font-medium text-right"></th>
                 </tr>
               </thead>
               <tbody>
@@ -1225,6 +1228,17 @@ function AnomaliesTab() {
                       >
                         {a.severity === 'hoch' ? 'Hoch' : 'Mittel'}
                       </span>
+                    </td>
+                    <td className="py-2 text-right">
+                      {a.reading_id && (
+                        <button
+                          onClick={() => navigate(`/readings?meter_id=${a.meter_id}&highlight=${a.reading_id}`)}
+                          className="rounded p-1 text-gray-400 hover:text-primary-600"
+                          title="Zum Messwert springen"
+                        >
+                          <Activity className="h-4 w-4" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
