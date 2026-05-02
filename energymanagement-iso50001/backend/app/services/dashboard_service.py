@@ -280,35 +280,52 @@ class DashboardService:
             return Decimal("0")
 
     async def _total_cost(self, start: date, end: date) -> Decimal:
-        """Geschätzte Gesamtkosten aus Tarif-Informationen."""
+        """Geschätzte Gesamtkosten aus Tarif-Informationen (einzelne Batch-Abfrage)."""
+        # Alle aktiven Hauptzähler mit Tarif in einer Abfrage laden
         meters_result = await self.db.execute(
             select(Meter).where(
                 Meter.is_active == True,  # noqa: E712
-                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
+                Meter.is_feed_in != True,
                 Meter.tariff_info.isnot(None),
             )
         )
         meters = list(meters_result.scalars().all())
+        if not meters:
+            return Decimal("0")
+
+        # Zähler mit positivem Tarif filtern (kein DB-Roundtrip mehr pro Zähler)
+        priced_meters = [
+            m for m in meters
+            if Decimal(str((m.tariff_info or {}).get("price_per_kwh", 0))) > 0
+        ]
+        if not priced_meters:
+            return Decimal("0")
+
+        meter_id_list = [m.id for m in priced_meters]
+        start_ts = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
+        end_ts = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+
+        # Verbrauch aller Zähler in einer einzigen GROUP-BY-Abfrage
+        rows = (await self.db.execute(
+            select(
+                MeterReading.meter_id,
+                func.sum(MeterReading.consumption).label("total_consumption"),
+            )
+            .where(
+                MeterReading.meter_id.in_(meter_id_list),
+                MeterReading.timestamp >= start_ts,
+                MeterReading.timestamp < end_ts,
+            )
+            .group_by(MeterReading.meter_id)
+        )).all()
+
+        consumption_by_meter = {row.meter_id: row.total_consumption or Decimal("0") for row in rows}
+        meter_lookup = {m.id: m for m in priced_meters}
 
         total_cost = Decimal("0")
-        for meter in meters:
-            tariff = meter.tariff_info or {}
-            price_per_kwh = Decimal(str(tariff.get("price_per_kwh", 0)))
-            if price_per_kwh <= 0:
-                continue
-
-            result = await self.db.execute(
-                select(func.sum(MeterReading.consumption)).where(
-                    MeterReading.meter_id == meter.id,
-                    MeterReading.timestamp >= datetime.combine(
-                        start, datetime.min.time(), tzinfo=timezone.utc
-                    ),
-                    MeterReading.timestamp < datetime.combine(
-                        end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
-                    ),
-                )
-            )
-            consumption = result.scalar() or Decimal("0")
+        for meter_id, consumption in consumption_by_meter.items():
+            meter = meter_lookup[meter_id]
+            price_per_kwh = Decimal(str((meter.tariff_info or {}).get("price_per_kwh", 0)))
             conv = CONVERSION_FACTORS.get(meter.unit, Decimal("1"))
             total_cost += consumption * conv * price_per_kwh
 
