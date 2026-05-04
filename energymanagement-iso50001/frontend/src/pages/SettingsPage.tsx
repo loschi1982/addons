@@ -196,6 +196,7 @@ function ProgressBar({ progress }: { progress: BackupProgress }) {
   const isError = progress.status === 'error';
   const isDone = progress.status === 'done';
   const isCount = progress.phase === 'count';
+  const isLoading = progress.phase === 'loading';
 
   const tableLabel = progress.table ? progress.table : '…';
   const rowInfo = (progress.rows_done !== undefined && progress.total_rows !== undefined && progress.total_rows > 0)
@@ -209,7 +210,11 @@ function ProgressBar({ progress }: { progress: BackupProgress }) {
     <div className="space-y-2">
       <div className="flex justify-between text-xs text-gray-500">
         <span>
-          {isError ? 'Fehler' : isDone ? 'Abgeschlossen' : isCount ? 'Tabellen zählen…' : tableInfo}
+          {isError ? 'Fehler'
+            : isDone ? 'Abgeschlossen'
+            : isCount ? 'Tabellen zählen…'
+            : isLoading ? `${tableLabel}: wird geladen…`
+            : tableInfo}
         </span>
         <span>{pct}%</span>
       </div>
@@ -219,7 +224,7 @@ function ProgressBar({ progress }: { progress: BackupProgress }) {
           style={{ width: `${pct}%` }}
         />
       </div>
-      {!isDone && !isError && !isCount && rowInfo && (
+      {!isDone && !isError && !isCount && !isLoading && rowInfo && (
         <p className="text-xs text-gray-400">{rowInfo}</p>
       )}
       {isError && <p className="text-xs text-red-600">{progress.error}</p>}
