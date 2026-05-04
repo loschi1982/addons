@@ -181,9 +181,13 @@ def _serialize_row(row: Any) -> dict:
     return {k: v for k, v in row._mapping.items()}
 
 
-async def export_database(db: AsyncSession) -> bytes:
+async def export_database(db: AsyncSession, progress_callback=None) -> bytes:
     """
     Exportiert alle Tabellen als komprimiertes JSON.
+
+    Args:
+        db:                Datenbankverbindung.
+        progress_callback: Optionale Funktion(step, total, table, phase) für Fortschrittsmeldungen.
 
     Returns:
         Gzip-komprimierte JSON-Bytes.
@@ -195,8 +199,9 @@ async def export_database(db: AsyncSession) -> bytes:
     }
 
     skipped: list[str] = []
+    total = len(EXPORT_TABLES)
 
-    for table in EXPORT_TABLES:
+    for i, table in enumerate(EXPORT_TABLES):
         try:
             result = await db.execute(text(f"SELECT * FROM {table}"))  # noqa: S608
             rows = result.fetchall()
@@ -206,6 +211,8 @@ async def export_database(db: AsyncSession) -> bytes:
             # Tabelle existiert noch nicht (z.B. nach Migration) – überspringen
             skipped.append(table)
             logger.warning("backup_export_table_skipped", table=table, error=str(e))
+        if progress_callback:
+            progress_callback(step=i + 1, total=total, table=table, phase="export")
 
     if skipped:
         export_data["skipped_tables"] = skipped
@@ -220,14 +227,20 @@ async def export_database(db: AsyncSession) -> bytes:
     return compressed
 
 
-async def import_database(db: AsyncSession, backup_bytes: bytes, replace: bool = True) -> dict:
+async def import_database(
+    db: AsyncSession,
+    backup_bytes: bytes,
+    replace: bool = True,
+    progress_callback=None,
+) -> dict:
     """
     Importiert einen Datenbank-Backup.
 
     Args:
-        db:           Datenbankverbindung.
-        backup_bytes: Gzip-komprimierte JSON-Bytes (vom Export).
-        replace:      True = bestehende Daten löschen vor Import (empfohlen).
+        db:                Datenbankverbindung.
+        backup_bytes:      Gzip-komprimierte JSON-Bytes (vom Export).
+        replace:           True = bestehende Daten löschen vor Import (empfohlen).
+        progress_callback: Optionale Funktion(step, total, table, phase) für Fortschrittsmeldungen.
 
     Returns:
         Dict mit Statistiken: {imported, skipped, errors}.
@@ -245,6 +258,8 @@ async def import_database(db: AsyncSession, backup_bytes: bytes, replace: bool =
 
     tables_data: dict[str, list[dict]] = data.get("tables", {})
     stats = {"imported": 0, "skipped": 0, "errors": []}
+    import_tables = [t for t in EXPORT_TABLES if tables_data.get(t)]
+    total_steps = len(import_tables)
 
     # Foreign-Key-Checks deaktivieren während des Imports
     await db.execute(text("SET session_replication_role = 'replica'"))
@@ -260,11 +275,13 @@ async def import_database(db: AsyncSession, backup_bytes: bytes, replace: bool =
                         pass  # Tabelle existiert vielleicht nicht
 
         # Daten einfügen
+        step = 0
         for table in EXPORT_TABLES:
             rows = tables_data.get(table)
             if not rows:
                 continue
 
+            step += 1
             try:
                 await _insert_rows(db, table, rows)
                 stats["imported"] += len(rows)
@@ -273,6 +290,9 @@ async def import_database(db: AsyncSession, backup_bytes: bytes, replace: bool =
                 stats["errors"].append(f"{table}: {e}")
                 stats["skipped"] += 1
                 logger.warning("backup_import_table_failed", table=table, error=str(e))
+
+            if progress_callback:
+                progress_callback(step=step, total=total_steps, table=table, phase="import")
 
         await db.commit()
 

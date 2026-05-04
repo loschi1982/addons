@@ -1,13 +1,18 @@
 """
 backup.py – API-Endpunkte für Datenbank-Export und -Import.
 
-GET  /backup/export          → Datenbank als .json.gz herunterladen
-POST /backup/import          → .json.gz hochladen und importieren
-GET  /backup/info            → Metadaten eines Backup-Files prüfen (ohne Import)
+GET  /backup/export               → Datenbank als .json.gz herunterladen (synchron)
+POST /backup/export/start         → Async-Export starten, gibt job_id zurück
+GET  /backup/download/{job_id}    → Fertigen Export herunterladen
+POST /backup/import               → .json.gz hochladen und importieren (synchron)
+POST /backup/import/start         → Async-Import starten, gibt job_id zurück
+GET  /backup/progress/{job_id}    → Fortschritt eines laufenden Jobs abrufen
+GET  /backup/info                 → Metadaten eines Backup-Files prüfen (ohne Import)
 """
 
 import gzip
 import json
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
@@ -54,6 +59,97 @@ async def export_backup(
             "Content-Length": str(len(compressed)),
         },
     )
+
+
+@router.post("/export/start")
+async def start_export(
+    current_user: User = Depends(require_permission("settings", "update")),
+):
+    """
+    Startet einen asynchronen Datenbank-Export via Celery.
+
+    Gibt eine job_id zurück, über die der Fortschritt mit
+    GET /backup/progress/{job_id} abgefragt werden kann.
+    Nach Abschluss steht der Download unter GET /backup/download/{job_id}
+    für 30 Minuten bereit.
+    """
+    from app.tasks import backup_export as backup_export_task
+    job_id = str(uuid.uuid4())
+    backup_export_task.delay(job_id)
+    return {"job_id": job_id}
+
+
+@router.get("/progress/{job_id}")
+async def get_backup_progress(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Fortschritt eines laufenden Backup-Jobs abrufen."""
+    from app.core.cache import get_redis
+    redis = await get_redis()
+    if not redis:
+        raise HTTPException(status_code=503, detail="Redis nicht verfügbar.")
+    raw = await redis.get(f"backup:{job_id}")
+    if not raw:
+        raise HTTPException(status_code=404, detail="Job nicht gefunden oder abgelaufen.")
+    return json.loads(raw)
+
+
+@router.get("/download/{job_id}")
+async def download_backup_result(
+    job_id: str,
+    current_user: User = Depends(require_permission("settings", "update")),
+):
+    """Fertigen asynchronen Export herunterladen (gültig 30 Minuten nach Abschluss)."""
+    import redis as redis_lib
+    from app.config import get_settings
+    settings = get_settings()
+    r = redis_lib.Redis.from_url(settings.redis_url, decode_responses=False)
+    compressed = r.get(f"backup:result:{job_id}")
+    if not compressed:
+        raise HTTPException(status_code=404, detail="Export nicht gefunden oder abgelaufen.")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"energy_backup_{timestamp}.json.gz"
+    return Response(
+        content=compressed,
+        media_type="application/gzip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(compressed)),
+        },
+    )
+
+
+@router.post("/import/start")
+async def start_import(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_permission("settings", "update")),
+):
+    """
+    Lädt eine Backup-Datei hoch und startet den asynchronen Import via Celery.
+
+    Gibt eine job_id zurück, über die der Fortschritt mit
+    GET /backup/progress/{job_id} abgefragt werden kann.
+    """
+    if not file.filename or not file.filename.endswith(".gz"):
+        raise HTTPException(status_code=400, detail="Bitte eine .json.gz-Backup-Datei hochladen.")
+
+    backup_bytes = await file.read()
+    if len(backup_bytes) < 20:
+        raise HTTPException(status_code=400, detail="Datei ist leer oder beschädigt.")
+
+    job_id = str(uuid.uuid4())
+
+    # Datei in Redis zwischenspeichern (1 Stunde TTL)
+    import redis as redis_lib
+    from app.config import get_settings
+    settings = get_settings()
+    r = redis_lib.Redis.from_url(settings.redis_url, decode_responses=False)
+    r.set(f"backup:upload:{job_id}", backup_bytes, ex=3600)
+
+    from app.tasks import backup_import as backup_import_task
+    backup_import_task.delay(job_id)
+    return {"job_id": job_id}
 
 
 @router.post("/import")
