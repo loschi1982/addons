@@ -30,6 +30,7 @@ async def get_dashboard(
     period_start: date | None = None,
     period_end: date | None = None,
     granularity: str = Query("monthly", pattern="^(daily|weekly|monthly|yearly)$"),
+    site_id: uuid.UUID | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -38,7 +39,7 @@ async def get_dashboard(
     logger = structlog.get_logger()
     try:
         service = DashboardService(db)
-        result = await service.get_dashboard(period_start, period_end, granularity)
+        result = await service.get_dashboard(period_start, period_end, granularity, site_id)
         return result
     except Exception as e:
         logger.error("dashboard_error", error=str(e), error_type=type(e).__name__)
