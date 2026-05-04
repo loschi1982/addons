@@ -267,21 +267,25 @@ def backup_export(job_id: str):
     def _set_progress(data: dict):
         r.set(f"backup:{job_id}", json.dumps(data), ex=3600)
 
-    def progress_callback(step: int, total: int, table: str, phase: str):
+    def progress_callback(rows_done: int, total_rows: int, table: str,
+                          table_rows: int, table_total: int, phase: str):
+        pct = round(rows_done / total_rows * 100) if total_rows else 0
         _set_progress({
             "status": "running",
             "phase": phase,
-            "step": step,
-            "total": total,
+            "rows_done": rows_done,
+            "total_rows": total_rows,
             "table": table,
-            "percent": round(step / total * 100),
+            "table_rows": table_rows,
+            "table_total": table_total,
+            "percent": pct,
         })
 
     async def _run():
         async with _task_db_session() as db:
             return await export_database(db, progress_callback=progress_callback)
 
-    _set_progress({"status": "running", "phase": "export", "step": 0, "total": len(EXPORT_TABLES), "percent": 0, "table": ""})
+    _set_progress({"status": "running", "phase": "count", "rows_done": 0, "total_rows": 0, "percent": 0, "table": ""})
     try:
         compressed = _run_async(_run())
         r_binary.set(f"backup:result:{job_id}", compressed, ex=1800)  # 30 Min
@@ -311,14 +315,17 @@ def backup_import(job_id: str):
     def _set_progress(data: dict):
         r.set(f"backup:{job_id}", json.dumps(data), ex=3600)
 
-    def progress_callback(step: int, total: int, table: str, phase: str):
+    def progress_callback(rows_done: int, total_rows: int, table: str,
+                          table_rows: int, table_total: int, phase: str, percent: int = 0):
         _set_progress({
             "status": "running",
             "phase": phase,
-            "step": step,
-            "total": total,
+            "rows_done": rows_done,
+            "total_rows": total_rows,
             "table": table,
-            "percent": round(step / total * 100),
+            "table_rows": table_rows,
+            "table_total": table_total,
+            "percent": percent,
         })
 
     backup_bytes = r_binary.get(f"backup:upload:{job_id}")
@@ -326,7 +333,7 @@ def backup_import(job_id: str):
         _set_progress({"status": "error", "error": "Upload-Daten nicht gefunden oder abgelaufen."})
         return
 
-    _set_progress({"status": "running", "phase": "import", "step": 0, "total": 0, "percent": 0, "table": ""})
+    _set_progress({"status": "running", "phase": "import", "rows_done": 0, "total_rows": 0, "percent": 0, "table": ""})
 
     async def _run():
         async with _task_db_session() as db:
