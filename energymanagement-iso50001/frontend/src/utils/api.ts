@@ -36,6 +36,12 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+// Wird auf true gesetzt während ein Backup-Export oder -Import läuft.
+// In diesem Fall wird der automatische Logout bei 401 unterdrückt,
+// da lange Backup-Requests den Token-Ablauf auslösen können.
+let _backupRunning = false;
+export function setBackupRunning(active: boolean) { _backupRunning = active; }
+
 // Response-Interceptor: Bei 401 automatisch ausloggen
 apiClient.interceptors.response.use(
   (response) => response,
@@ -44,6 +50,8 @@ apiClient.interceptors.response.use(
       // Setup- und Login-Endpunkte nicht umleiten
       const url = error.config?.url || '';
       if (!url.includes('/auth/setup') && !url.includes('/auth/login')) {
+        // Während eines laufenden Backups keinen Logout auslösen
+        if (_backupRunning) return Promise.reject(error);
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
         window.location.hash = '#/login';

@@ -112,7 +112,7 @@ const navGroups: NavGroup[] = [
 
 export default function Sidebar() {
   const dispatch = useAppDispatch();
-  const { sidebarOpen } = useAppSelector((state) => state.ui);
+  const { sidebarOpen, backupLocked } = useAppSelector((state) => state.ui);
   const { t, i18n } = useTranslation();
 
   // Gruppen auf-/zuklappen – standardmäßig alle offen
@@ -155,7 +155,19 @@ export default function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto py-2" aria-label="Hauptnavigation">
+      <nav className="flex-1 overflow-y-auto py-2 relative" aria-label="Hauptnavigation">
+        {/* Backup-Sperre: halbtransparente Überlagerung + Hinweis */}
+        {backupLocked && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-primary-900/80 cursor-not-allowed select-none">
+            <AlertTriangle size={20} className="text-amber-400 mb-2" />
+            {sidebarOpen && (
+              <p className="text-xs text-amber-300 text-center px-4 leading-snug">
+                Datensicherung läuft –<br />Navigation gesperrt
+              </p>
+            )}
+          </div>
+        )}
+
         {navGroups.map((group) => {
           const isCollapsed = collapsed.has(group.labelKey);
           return (
@@ -163,7 +175,7 @@ export default function Sidebar() {
               {/* Gruppenüberschrift – nur bei offener Sidebar */}
               {sidebarOpen ? (
                 <button
-                  onClick={() => toggleGroup(group.labelKey)}
+                  onClick={() => !backupLocked && toggleGroup(group.labelKey)}
                   className="flex w-full items-center justify-between px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-primary-400 hover:text-primary-200 transition-colors"
                 >
                   <span>{t(group.labelKey)}</span>
@@ -182,6 +194,8 @@ export default function Sidebar() {
                   key={path}
                   to={path}
                   aria-label={t(labelKey)}
+                  aria-disabled={backupLocked}
+                  onClick={(e) => { if (backupLocked) e.preventDefault(); }}
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-4 py-2 text-sm transition-colors ${
                       isActive

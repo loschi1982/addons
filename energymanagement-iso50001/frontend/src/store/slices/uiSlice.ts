@@ -9,6 +9,7 @@ interface UIState {
     type: 'success' | 'error' | 'warning' | 'info';
     message: string;
   }>;
+  backupLocked: boolean;
 }
 
 const initialState: UIState = {
@@ -16,6 +17,7 @@ const initialState: UIState = {
   language: 'de',
   theme: 'light',
   notifications: [],
+  backupLocked: false,
 };
 
 const uiSlice = createSlice({
@@ -40,8 +42,11 @@ const uiSlice = createSlice({
     removeNotification(state, action: PayloadAction<string>) {
       state.notifications = state.notifications.filter((n) => n.id !== action.payload);
     },
+    setBackupLocked(state, action: PayloadAction<boolean>) {
+      state.backupLocked = action.payload;
+    },
   },
 });
 
-export const { toggleSidebar, setLanguage, addNotification, removeNotification } = uiSlice.actions;
+export const { toggleSidebar, setLanguage, addNotification, removeNotification, setBackupLocked } = uiSlice.actions;
 export default uiSlice.reducer;
