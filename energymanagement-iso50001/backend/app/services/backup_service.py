@@ -228,18 +228,37 @@ async def export_database(db: AsyncSession, progress_callback=None) -> bytes:
             table="", table_rows=0, table_total=0, phase="count",
         )
 
-    # ── Phase 2: Zeilen per Streaming exportieren ──
+    # ── Phase 2: Zeilen exportieren (fetchall + chunked Serialisierung) ──
+    # fetchall() ist zuverlässig gegenüber db.stream() in Celery-Umgebungen.
+    # Der Fortschritt wird nach jedem EXPORT_CHUNK_SIZE-Block gemeldet – das
+    # greift vor allem bei großen Tabellen (meter_readings), wo die
+    # Serialisierung 24 Mio. Zeilen tatsächlich mehrere Sekunden dauert.
     rows_done = 0
 
     for table in EXPORT_TABLES:
         table_total = table_counts.get(table, 0)
         table_rows_done = 0
-        table_data: list[dict] = []
+
+        # Lade-Status melden bevor der DB-Fetch beginnt
+        if progress_callback and table_total > 0:
+            progress_callback(
+                rows_done=rows_done,
+                total_rows=total_rows,
+                table=table,
+                table_rows=0,
+                table_total=table_total,
+                phase="loading",
+            )
 
         try:
-            stream = await db.stream(text(f"SELECT * FROM {table}"))  # noqa: S608
-            async for partition in stream.partitions(EXPORT_CHUNK_SIZE):
-                chunk = [_serialize_row(r) for r in partition]
+            result = await db.execute(text(f"SELECT * FROM {table}"))  # noqa: S608
+            all_rows = result.fetchall()
+            table_data: list[dict] = []
+
+            # Serialisierung in Chunks → Fortschritt während der Verarbeitung
+            for i in range(0, len(all_rows), EXPORT_CHUNK_SIZE):
+                chunk_rows = all_rows[i : i + EXPORT_CHUNK_SIZE]
+                chunk = [_serialize_row(r) for r in chunk_rows]
                 table_data.extend(chunk)
                 chunk_len = len(chunk)
                 table_rows_done += chunk_len
@@ -259,10 +278,11 @@ async def export_database(db: AsyncSession, progress_callback=None) -> bytes:
             logger.info("backup_export_table", table=table, rows=len(table_data))
 
         except Exception as e:
+            import traceback
             skipped.append(table)
-            logger.warning("backup_export_table_skipped", table=table, error=str(e))
+            logger.warning("backup_export_table_skipped", table=table, error=str(e), tb=traceback.format_exc())
 
-        # Leere Tabellen: Callback trotzdem senden damit Fortschritt sichtbar bleibt
+        # Leere Tabellen: Callback trotzdem senden damit Tabellen-Index vorwärts geht
         if table_total == 0 and progress_callback:
             progress_callback(
                 rows_done=rows_done, total_rows=total_rows,
