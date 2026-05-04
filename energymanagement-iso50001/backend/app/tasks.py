@@ -256,16 +256,21 @@ def recalculate_objectives():
 
 @celery_app.task(name="app.tasks.backup_export")
 def backup_export(job_id: str):
-    """Datenbank-Export als Hintergrund-Task mit Fortschrittsverfolgung."""
+    """Datenbank-Export als Hintergrund-Task mit Fortschrittsverfolgung.
+
+    Die fertige Datei wird auf Disk abgelegt (nicht in Redis, da das Backup
+    mehrere hundert MB groß sein kann und Redis nur 128 MB RAM hat).
+    """
     import json
+    import os
+    import tempfile
     import redis as redis_lib
-    from app.services.backup_service import export_database, EXPORT_TABLES
+    from app.services.backup_service import export_database
 
     r = redis_lib.Redis.from_url(settings.redis_url, decode_responses=True)
-    r_binary = redis_lib.Redis.from_url(settings.redis_url, decode_responses=False)
 
     def _set_progress(data: dict):
-        r.set(f"backup:{job_id}", json.dumps(data), ex=3600)
+        r.set(f"backup:{job_id}", json.dumps(data), ex=7200)
 
     def progress_callback(rows_done: int, total_rows: int, table: str,
                           table_rows: int, table_total: int, phase: str):
@@ -285,17 +290,25 @@ def backup_export(job_id: str):
         async with _task_db_session() as db:
             return await export_database(db, progress_callback=progress_callback)
 
+    # Zieldatei im System-Temp-Verzeichnis – wird vom Download-Endpunkt gelesen
+    tmp_dir = tempfile.gettempdir()
+    result_path = os.path.join(tmp_dir, f"backup_result_{job_id}.json.gz")
+
     _set_progress({"status": "running", "phase": "count", "rows_done": 0, "total_rows": 0, "percent": 0, "table": ""})
     try:
         compressed = _run_async(_run())
-        r_binary.set(f"backup:result:{job_id}", compressed, ex=1800)  # 30 Min
+
+        # Auf Disk schreiben statt in Redis
+        with open(result_path, "wb") as f:
+            f.write(compressed)
+
+        size_kb = round(len(compressed) / 1024, 1)
         _set_progress({
             "status": "done",
             "phase": "export",
-            "step": len(EXPORT_TABLES),
-            "total": len(EXPORT_TABLES),
             "percent": 100,
-            "size_kb": round(len(compressed) / 1024, 1),
+            "size_kb": size_kb,
+            "result_path": result_path,
         })
     except Exception as e:
         _set_progress({"status": "error", "error": str(e)})
@@ -304,16 +317,21 @@ def backup_export(job_id: str):
 
 @celery_app.task(name="app.tasks.backup_import")
 def backup_import(job_id: str):
-    """Datenbank-Import als Hintergrund-Task mit Fortschrittsverfolgung."""
+    """Datenbank-Import als Hintergrund-Task mit Fortschrittsverfolgung.
+
+    Die Upload-Datei wird von Disk gelesen (nicht aus Redis, da sie mehrere
+    hundert MB groß sein kann).
+    """
     import json
+    import os
+    import tempfile
     import redis as redis_lib
     from app.services.backup_service import import_database
 
     r = redis_lib.Redis.from_url(settings.redis_url, decode_responses=True)
-    r_binary = redis_lib.Redis.from_url(settings.redis_url, decode_responses=False)
 
     def _set_progress(data: dict):
-        r.set(f"backup:{job_id}", json.dumps(data), ex=3600)
+        r.set(f"backup:{job_id}", json.dumps(data), ex=7200)
 
     def progress_callback(rows_done: int, total_rows: int, table: str,
                           table_rows: int, table_total: int, phase: str, percent: int = 0):
@@ -328,10 +346,16 @@ def backup_import(job_id: str):
             "percent": percent,
         })
 
-    backup_bytes = r_binary.get(f"backup:upload:{job_id}")
-    if not backup_bytes:
-        _set_progress({"status": "error", "error": "Upload-Daten nicht gefunden oder abgelaufen."})
+    # Upload-Datei von Disk lesen
+    tmp_dir = tempfile.gettempdir()
+    upload_path = os.path.join(tmp_dir, f"backup_upload_{job_id}.json.gz")
+
+    if not os.path.exists(upload_path):
+        _set_progress({"status": "error", "error": "Upload-Datei nicht gefunden oder abgelaufen."})
         return
+
+    with open(upload_path, "rb") as f:
+        backup_bytes = f.read()
 
     _set_progress({"status": "running", "phase": "import", "rows_done": 0, "total_rows": 0, "percent": 0, "table": ""})
 
@@ -349,11 +373,15 @@ def backup_import(job_id: str):
             "skipped": stats["skipped"],
             "errors": stats["errors"],
         })
-        # Upload-Daten aus Redis entfernen
-        r_binary.delete(f"backup:upload:{job_id}")
     except Exception as e:
         _set_progress({"status": "error", "error": str(e)})
         raise
+    finally:
+        # Upload-Datei nach Import löschen
+        try:
+            os.unlink(upload_path)
+        except OSError:
+            pass
 
 
 @celery_app.task(name="app.tasks.calculate_weather_correction")
