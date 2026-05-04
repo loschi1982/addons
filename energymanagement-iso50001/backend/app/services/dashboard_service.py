@@ -5,6 +5,7 @@ Stellt KPI-Karten, Energieaufschlüsselung, Top-Verbraucher,
 Zeitreihen und Warnungen für die Dashboard-Übersicht bereit.
 """
 
+import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
