@@ -100,23 +100,26 @@ async def download_backup_result(
     job_id: str,
     current_user: User = Depends(require_permission("settings", "update")),
 ):
-    """Fertigen asynchronen Export herunterladen (gültig 30 Minuten nach Abschluss)."""
-    import redis as redis_lib
-    from app.config import get_settings
-    settings = get_settings()
-    r = redis_lib.Redis.from_url(settings.redis_url, decode_responses=False)
-    compressed = r.get(f"backup:result:{job_id}")
-    if not compressed:
-        raise HTTPException(status_code=404, detail="Export nicht gefunden oder abgelaufen.")
+    """Fertigen asynchronen Export herunterladen (Datei liegt auf Disk)."""
+    import os
+    import tempfile
+    from fastapi.responses import FileResponse
+
+    # Sicherheitscheck: job_id darf nur UUID-Zeichen enthalten
+    import re
+    if not re.match(r'^[0-9a-f\-]{36}$', job_id):
+        raise HTTPException(status_code=400, detail="Ungültige Job-ID.")
+
+    result_path = os.path.join(tempfile.gettempdir(), f"backup_result_{job_id}.json.gz")
+    if not os.path.exists(result_path):
+        raise HTTPException(status_code=404, detail="Export nicht gefunden oder bereits gelöscht.")
+
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     filename = f"energy_backup_{timestamp}.json.gz"
-    return Response(
-        content=compressed,
+    return FileResponse(
+        path=result_path,
         media_type="application/gzip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Length": str(len(compressed)),
-        },
+        filename=filename,
     )
 
 
@@ -128,9 +131,12 @@ async def start_import(
     """
     Lädt eine Backup-Datei hoch und startet den asynchronen Import via Celery.
 
-    Gibt eine job_id zurück, über die der Fortschritt mit
-    GET /backup/progress/{job_id} abgefragt werden kann.
+    Die Datei wird auf Disk zwischengespeichert (nicht in Redis, da sie
+    mehrere hundert MB groß sein kann).
     """
+    import os
+    import tempfile
+
     if not file.filename or not file.filename.endswith(".gz"):
         raise HTTPException(status_code=400, detail="Bitte eine .json.gz-Backup-Datei hochladen.")
 
@@ -140,12 +146,10 @@ async def start_import(
 
     job_id = str(uuid.uuid4())
 
-    # Datei in Redis zwischenspeichern (1 Stunde TTL)
-    import redis as redis_lib
-    from app.config import get_settings
-    settings = get_settings()
-    r = redis_lib.Redis.from_url(settings.redis_url, decode_responses=False)
-    r.set(f"backup:upload:{job_id}", backup_bytes, ex=3600)
+    # Datei auf Disk schreiben statt in Redis
+    upload_path = os.path.join(tempfile.gettempdir(), f"backup_upload_{job_id}.json.gz")
+    with open(upload_path, "wb") as f:
+        f.write(backup_bytes)
 
     from app.tasks import backup_import as backup_import_task
     backup_import_task.delay(job_id)
