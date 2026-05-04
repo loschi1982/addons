@@ -170,32 +170,95 @@ interface InspectResult {
   skipped_tables: string[];
 }
 
+interface BackupProgress {
+  status: 'running' | 'done' | 'error';
+  phase: string;
+  step?: number;
+  total?: number;
+  table?: string;
+  percent?: number;
+  size_kb?: number;
+  imported?: number;
+  skipped?: number;
+  errors?: string[];
+  error?: string;
+}
+
+function ProgressBar({ progress }: { progress: BackupProgress }) {
+  const pct = progress.percent ?? 0;
+  const isError = progress.status === 'error';
+  const isDone = progress.status === 'done';
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between text-xs text-gray-500">
+        <span>
+          {isError ? 'Fehler' : isDone ? 'Abgeschlossen' : progress.table || '…'}
+        </span>
+        <span>{pct}%</span>
+      </div>
+      <div className="w-full bg-gray-100 rounded-full h-2.5">
+        <div
+          className={`h-2.5 rounded-full transition-all duration-300 ${isError ? 'bg-red-500' : isDone ? 'bg-green-500' : 'bg-primary-500'}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {!isDone && !isError && progress.step !== undefined && progress.total !== undefined && (
+        <p className="text-xs text-gray-400">
+          Tabelle {progress.step} von {progress.total}
+        </p>
+      )}
+      {isError && <p className="text-xs text-red-600">{progress.error}</p>}
+    </div>
+  );
+}
+
 function BackupPanel() {
-  const [exporting, setExporting] = useState(false);
-  const [importing, setImporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState<BackupProgress | null>(null);
+  const [importProgress, setImportProgress] = useState<BackupProgress | null>(null);
   const [inspecting, setInspecting] = useState(false);
   const [inspectResult, setInspectResult] = useState<InspectResult | null>(null);
   const [importFile, setImportFile] = useState<File | null>(null);
-  const [importResult, setImportResult] = useState<{ imported_rows: number; skipped_tables: number; errors: string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const exportPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const importPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const pollProgress = (jobId: string, setter: (p: BackupProgress) => void, pollRef: React.MutableRefObject<ReturnType<typeof setInterval> | null>, onDone?: (p: BackupProgress) => void) => {
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await apiClient.get(`/api/v1/backup/progress/${jobId}`);
+        const p: BackupProgress = res.data;
+        setter(p);
+        if (p.status === 'done' || p.status === 'error') {
+          if (pollRef.current) clearInterval(pollRef.current);
+          if (p.status === 'done' && onDone) onDone(p);
+        }
+      } catch {
+        if (pollRef.current) clearInterval(pollRef.current);
+      }
+    }, 1000);
+  };
 
   const handleExport = async () => {
-    setExporting(true);
     setError(null);
+    setExportProgress({ status: 'running', phase: 'export', percent: 0, table: '' });
     try {
-      const res = await apiClient.get('/api/v1/backup/export', { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const a = document.createElement('a');
-      const now = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      a.href = url;
-      a.download = `energy_backup_${now}.json.gz`;
-      a.click();
-      window.URL.revokeObjectURL(url);
+      const res = await apiClient.post('/api/v1/backup/export/start');
+      const { job_id } = res.data;
+      pollProgress(job_id, setExportProgress, exportPollRef, async () => {
+        // Download auslösen
+        const dl = await apiClient.get(`/api/v1/backup/download/${job_id}`, { responseType: 'blob' });
+        const url = window.URL.createObjectURL(new Blob([dl.data]));
+        const a = document.createElement('a');
+        const now = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+        a.href = url;
+        a.download = `energy_backup_${now}.json.gz`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+      });
     } catch {
-      setError('Export fehlgeschlagen. Bitte erneut versuchen.');
-    } finally {
-      setExporting(false);
+      setError('Export konnte nicht gestartet werden.');
+      setExportProgress(null);
     }
   };
 
@@ -204,10 +267,9 @@ function BackupPanel() {
     if (!file) return;
     setImportFile(file);
     setInspectResult(null);
-    setImportResult(null);
+    setImportProgress(null);
     setError(null);
 
-    // Direkt Metadaten prüfen
     setInspecting(true);
     try {
       const formData = new FormData();
@@ -225,23 +287,26 @@ function BackupPanel() {
 
   const handleImport = async () => {
     if (!importFile) return;
-    setImporting(true);
     setError(null);
-    setImportResult(null);
+    setImportProgress({ status: 'running', phase: 'import', percent: 0, table: '' });
     try {
       const formData = new FormData();
       formData.append('file', importFile);
-      const res = await apiClient.post('/api/v1/backup/import?replace=true', formData, {
+      const res = await apiClient.post('/api/v1/backup/import/start', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setImportResult(res.data);
+      const { job_id } = res.data;
+      pollProgress(job_id, setImportProgress, importPollRef);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setError(msg || 'Import fehlgeschlagen.');
-    } finally {
-      setImporting(false);
+      setError(msg || 'Import konnte nicht gestartet werden.');
+      setImportProgress(null);
     }
   };
+
+  const exportRunning = exportProgress?.status === 'running';
+  const importRunning = importProgress?.status === 'running';
+  const importDone = importProgress?.status === 'done';
 
   return (
     <div className="space-y-8">
@@ -262,16 +327,26 @@ function BackupPanel() {
           Erstellt eine vollständige Sicherung aller Zähler, Messwerte, Einstellungen,
           ISO 50001-Daten und Benutzer als <code>.json.gz</code>-Datei.
         </p>
-        <button
-          onClick={handleExport}
-          disabled={exporting}
-          className="btn-primary flex items-center gap-2"
-        >
-          {exporting
-            ? <><RefreshCw className="w-4 h-4 animate-spin" /> Exportiere…</>
-            : <><Download className="w-4 h-4" /> Backup herunterladen</>
-          }
-        </button>
+        {exportProgress ? (
+          <div className="space-y-3">
+            <ProgressBar progress={exportProgress} />
+            {exportProgress.status === 'done' && (
+              <div className="flex items-center gap-2 text-sm text-green-700">
+                <CheckCircle className="w-4 h-4" />
+                Export abgeschlossen – Download wird gestartet ({exportProgress.size_kb?.toLocaleString('de-DE')} KB)
+              </div>
+            )}
+            {exportProgress.status !== 'running' && (
+              <button onClick={() => setExportProgress(null)} className="btn-secondary text-sm">
+                Neuer Export
+              </button>
+            )}
+          </div>
+        ) : (
+          <button onClick={handleExport} disabled={exportRunning} className="btn-primary flex items-center gap-2">
+            <Download className="w-4 h-4" /> Backup herunterladen
+          </button>
+        )}
       </div>
 
       {/* Import */}
@@ -299,6 +374,7 @@ function BackupPanel() {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
+            disabled={importRunning}
             className="btn-secondary flex items-center gap-2"
           >
             <Upload className="w-4 h-4" />
@@ -348,35 +424,35 @@ function BackupPanel() {
           </div>
         )}
 
+        {/* Fortschrittsbalken Import */}
+        {importProgress && <ProgressBar progress={importProgress} />}
+
         {/* Import-Button */}
-        {inspectResult?.compatible && !importResult && (
+        {inspectResult?.compatible && !importProgress && (
           <button
             onClick={handleImport}
-            disabled={importing}
+            disabled={importRunning}
             className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
           >
-            {importing
-              ? <><RefreshCw className="w-4 h-4 animate-spin" /> Importiere…</>
-              : <><Upload className="w-4 h-4" /> Jetzt importieren (Daten überschreiben)</>
-            }
+            <Upload className="w-4 h-4" /> Jetzt importieren (Daten überschreiben)
           </button>
         )}
 
         {/* Import-Ergebnis */}
-        {importResult && (
+        {importDone && importProgress && (
           <div className="rounded-lg border border-green-200 bg-green-50 p-4 space-y-2">
             <div className="flex items-center gap-2">
               <CheckCircle className="w-4 h-4 text-green-600" />
               <span className="text-sm font-medium text-green-800">Import erfolgreich abgeschlossen</span>
             </div>
             <div className="text-sm text-green-700">
-              {importResult.imported_rows.toLocaleString('de-DE')} Datensätze importiert
+              {importProgress.imported?.toLocaleString('de-DE')} Datensätze importiert
             </div>
-            {importResult.errors.length > 0 && (
+            {importProgress.errors && importProgress.errors.length > 0 && (
               <div className="text-xs text-amber-700 mt-1">
                 <strong>Hinweise:</strong>
                 <ul className="list-disc ml-4 mt-1">
-                  {importResult.errors.map((e, i) => <li key={i}>{e}</li>)}
+                  {importProgress.errors.map((e, i) => <li key={i}>{e}</li>)}
                 </ul>
               </div>
             )}

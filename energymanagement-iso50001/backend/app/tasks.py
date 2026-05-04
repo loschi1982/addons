@@ -254,6 +254,101 @@ def recalculate_objectives():
     return _run_async(_run())
 
 
+@celery_app.task(name="app.tasks.backup_export")
+def backup_export(job_id: str):
+    """Datenbank-Export als Hintergrund-Task mit Fortschrittsverfolgung."""
+    import json
+    import redis as redis_lib
+    from app.services.backup_service import export_database, EXPORT_TABLES
+
+    r = redis_lib.Redis.from_url(settings.redis_url, decode_responses=True)
+    r_binary = redis_lib.Redis.from_url(settings.redis_url, decode_responses=False)
+
+    def _set_progress(data: dict):
+        r.set(f"backup:{job_id}", json.dumps(data), ex=3600)
+
+    def progress_callback(step: int, total: int, table: str, phase: str):
+        _set_progress({
+            "status": "running",
+            "phase": phase,
+            "step": step,
+            "total": total,
+            "table": table,
+            "percent": round(step / total * 100),
+        })
+
+    async def _run():
+        async with _task_db_session() as db:
+            return await export_database(db, progress_callback=progress_callback)
+
+    _set_progress({"status": "running", "phase": "export", "step": 0, "total": len(EXPORT_TABLES), "percent": 0, "table": ""})
+    try:
+        compressed = _run_async(_run())
+        r_binary.set(f"backup:result:{job_id}", compressed, ex=1800)  # 30 Min
+        _set_progress({
+            "status": "done",
+            "phase": "export",
+            "step": len(EXPORT_TABLES),
+            "total": len(EXPORT_TABLES),
+            "percent": 100,
+            "size_kb": round(len(compressed) / 1024, 1),
+        })
+    except Exception as e:
+        _set_progress({"status": "error", "error": str(e)})
+        raise
+
+
+@celery_app.task(name="app.tasks.backup_import")
+def backup_import(job_id: str):
+    """Datenbank-Import als Hintergrund-Task mit Fortschrittsverfolgung."""
+    import json
+    import redis as redis_lib
+    from app.services.backup_service import import_database
+
+    r = redis_lib.Redis.from_url(settings.redis_url, decode_responses=True)
+    r_binary = redis_lib.Redis.from_url(settings.redis_url, decode_responses=False)
+
+    def _set_progress(data: dict):
+        r.set(f"backup:{job_id}", json.dumps(data), ex=3600)
+
+    def progress_callback(step: int, total: int, table: str, phase: str):
+        _set_progress({
+            "status": "running",
+            "phase": phase,
+            "step": step,
+            "total": total,
+            "table": table,
+            "percent": round(step / total * 100),
+        })
+
+    backup_bytes = r_binary.get(f"backup:upload:{job_id}")
+    if not backup_bytes:
+        _set_progress({"status": "error", "error": "Upload-Daten nicht gefunden oder abgelaufen."})
+        return
+
+    _set_progress({"status": "running", "phase": "import", "step": 0, "total": 0, "percent": 0, "table": ""})
+
+    async def _run():
+        async with _task_db_session() as db:
+            return await import_database(db, backup_bytes, replace=True, progress_callback=progress_callback)
+
+    try:
+        stats = _run_async(_run())
+        _set_progress({
+            "status": "done",
+            "phase": "import",
+            "percent": 100,
+            "imported": stats["imported"],
+            "skipped": stats["skipped"],
+            "errors": stats["errors"],
+        })
+        # Upload-Daten aus Redis entfernen
+        r_binary.delete(f"backup:upload:{job_id}")
+    except Exception as e:
+        _set_progress({"status": "error", "error": str(e)})
+        raise
+
+
 @celery_app.task(name="app.tasks.calculate_weather_correction")
 def calculate_weather_correction(meter_id: str, start_date: str, end_date: str):
     """Witterungskorrektur im Hintergrund berechnen."""
