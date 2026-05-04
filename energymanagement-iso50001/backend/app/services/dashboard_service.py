@@ -33,11 +33,22 @@ class DashboardService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def _meter_ids_for_site(self, site_id: uuid.UUID) -> list[uuid.UUID]:
+        """Alle aktiven Zähler-IDs für einen Standort."""
+        result = await self.db.execute(
+            select(Meter.id).where(
+                Meter.site_id == site_id,
+                Meter.is_active == True,  # noqa: E712
+            )
+        )
+        return [row[0] for row in result.all()]
+
     async def get_dashboard(
         self,
         period_start: date | None = None,
         period_end: date | None = None,
         granularity: str = "monthly",
+        site_id: uuid.UUID | None = None,
     ) -> dict:
         """Komplette Dashboard-Daten zusammenstellen."""
         today = date.today()
@@ -46,30 +57,35 @@ class DashboardService:
         if not period_end:
             period_end = today
 
+        # Standort-Filter: Zähler-IDs vorab auflösen
+        meter_ids: list[uuid.UUID] | None = None
+        if site_id:
+            meter_ids = await self._meter_ids_for_site(site_id)
+
         # Vorjahreszeitraum für Trends
         prev_start = date(period_start.year - 1, period_start.month, period_start.day)
         prev_end = date(period_end.year - 1, period_end.month, period_end.day)
 
         try:
-            kpi_cards = await self._build_kpi_cards(period_start, period_end, prev_start, prev_end)
+            kpi_cards = await self._build_kpi_cards(period_start, period_end, prev_start, prev_end, meter_ids)
         except Exception as e:
             logger.error("dashboard_kpi_error", error=str(e))
             kpi_cards = []
 
         try:
-            breakdown = await self._get_energy_breakdown(period_start, period_end)
+            breakdown = await self._get_energy_breakdown(period_start, period_end, meter_ids)
         except Exception as e:
             logger.error("dashboard_breakdown_error", error=str(e))
             breakdown = []
 
         try:
-            chart = await self._get_consumption_chart(period_start, period_end, granularity)
+            chart = await self._get_consumption_chart(period_start, period_end, granularity, meter_ids)
         except Exception as e:
             logger.error("dashboard_chart_error", error=str(e))
             chart = []
 
         try:
-            top_consumers = await self._get_top_consumers(period_start, period_end)
+            top_consumers = await self._get_top_consumers(period_start, period_end, meter_ids)
         except Exception as e:
             logger.error("dashboard_top_consumers_error", error=str(e))
             top_consumers = []
@@ -98,14 +114,15 @@ class DashboardService:
         }
 
     async def _build_kpi_cards(
-        self, start: date, end: date, prev_start: date, prev_end: date
+        self, start: date, end: date, prev_start: date, prev_end: date,
+        meter_ids: list | None = None,
     ) -> list[dict]:
         """KPI-Karten berechnen."""
         cards = []
 
         # 1. Gesamtverbrauch
-        consumption = await self._total_consumption(start, end)
-        prev_consumption = await self._total_consumption(prev_start, prev_end)
+        consumption = await self._total_consumption(start, end, meter_ids)
+        prev_consumption = await self._total_consumption(prev_start, prev_end, meter_ids)
         trend = self._calc_trend(consumption, prev_consumption)
 
         cards.append({
@@ -119,8 +136,8 @@ class DashboardService:
         })
 
         # 2. CO₂-Emissionen
-        co2 = await self._total_co2(start, end)
-        prev_co2 = await self._total_co2(prev_start, prev_end)
+        co2 = await self._total_co2(start, end, meter_ids)
+        prev_co2 = await self._total_co2(prev_start, prev_end, meter_ids)
         co2_trend = self._calc_trend(co2, prev_co2)
 
         cards.append({
@@ -134,8 +151,8 @@ class DashboardService:
         })
 
         # 3. Geschätzte Kosten
-        cost = await self._total_cost(start, end)
-        prev_cost = await self._total_cost(prev_start, prev_end)
+        cost = await self._total_cost(start, end, meter_ids)
+        prev_cost = await self._total_cost(prev_start, prev_end, meter_ids)
         cost_trend = self._calc_trend(cost, prev_cost)
 
         cards.append({
@@ -186,7 +203,7 @@ class DashboardService:
 
         return cards
 
-    async def _total_consumption(self, start: date, end: date) -> Decimal:
+    async def _total_consumption(self, start: date, end: date, meter_ids: list | None = None) -> Decimal:
         """Gesamtverbrauch in kWh (nur Hauptzähler)."""
         query = (
             select(
@@ -207,6 +224,8 @@ class DashboardService:
             )
             .group_by(Meter.unit)
         )
+        if meter_ids is not None:
+            query = query.where(Meter.id.in_(meter_ids))
         result = await self.db.execute(query)
         total = Decimal("0")
         for row in result.all():
@@ -214,14 +233,13 @@ class DashboardService:
             total += (row.total or Decimal("0")) * conv
         return Decimal(str(round(float(total), 1)))
 
-    async def _total_co2(self, start: date, end: date) -> Decimal:
+    async def _total_co2(self, start: date, end: date, meter_ids: list | None = None) -> Decimal:
         """Gesamt-CO₂ in kg – aus vorberechneten Daten oder Echtzeit-Schätzung."""
-        result = await self.db.execute(
-            select(func.sum(CO2Calculation.co2_kg)).where(
-                CO2Calculation.period_start >= start,
-                CO2Calculation.period_end <= end,
-            )
+        co2_query = select(func.sum(CO2Calculation.co2_kg)).where(
+            CO2Calculation.period_start >= start,
+            CO2Calculation.period_end <= end,
         )
+        result = await self.db.execute(co2_query)
         co2_kg = result.scalar() or Decimal("0")
         if co2_kg > 0:
             return Decimal(str(round(float(co2_kg), 1)))
@@ -229,7 +247,7 @@ class DashboardService:
         # Fallback: Schätzung aus Verbrauchsdaten × Emissionsfaktoren
         try:
             # Verbrauch je Energietyp laden
-            cons_result = await self.db.execute(
+            cons_q = (
                 select(
                     Meter.energy_type,
                     Meter.unit,
@@ -246,6 +264,9 @@ class DashboardService:
                 )
                 .group_by(Meter.energy_type, Meter.unit)
             )
+            if meter_ids is not None:
+                cons_q = cons_q.where(Meter.id.in_(meter_ids))
+            cons_result = await self.db.execute(cons_q)
             # Neuesten Emissionsfaktor je Energietyp laden (nach Jahr/Monat, nicht max-Wert)
             latest_year_sub = (
                 select(
@@ -279,16 +300,17 @@ class DashboardService:
         except Exception:
             return Decimal("0")
 
-    async def _total_cost(self, start: date, end: date) -> Decimal:
+    async def _total_cost(self, start: date, end: date, meter_ids: list | None = None) -> Decimal:
         """Geschätzte Gesamtkosten aus Tarif-Informationen (einzelne Batch-Abfrage)."""
         # Alle aktiven Hauptzähler mit Tarif in einer Abfrage laden
-        meters_result = await self.db.execute(
-            select(Meter).where(
-                Meter.is_active == True,  # noqa: E712
-                Meter.is_feed_in != True,
-                Meter.tariff_info.isnot(None),
-            )
+        meters_q = select(Meter).where(
+            Meter.is_active == True,  # noqa: E712
+            Meter.is_feed_in != True,
+            Meter.tariff_info.isnot(None),
         )
+        if meter_ids is not None:
+            meters_q = meters_q.where(Meter.id.in_(meter_ids))
+        meters_result = await self.db.execute(meters_q)
         meters = list(meters_result.scalars().all())
         if not meters:
             return Decimal("0")
@@ -337,7 +359,7 @@ class DashboardService:
         )
         return result.scalar() or 0
 
-    async def _get_energy_breakdown(self, start: date, end: date) -> list[dict]:
+    async def _get_energy_breakdown(self, start: date, end: date, meter_ids: list | None = None) -> list[dict]:
         """Verbrauch nach Energietyp aufschlüsseln (mit Originaleinheiten, Kosten, CO₂)."""
         # Schritt 1: Verbrauch je Zähler aggregieren (kein JSON im GROUP BY)
         query = (
@@ -361,6 +383,8 @@ class DashboardService:
             )
             .group_by(Meter.id, Meter.energy_type, Meter.unit)
         )
+        if meter_ids is not None:
+            query = query.where(Meter.id.in_(meter_ids))
         result = await self.db.execute(query)
         rows = result.all()
 
@@ -439,7 +463,7 @@ class DashboardService:
         ]
 
     async def _get_consumption_chart(
-        self, start: date, end: date, granularity: str
+        self, start: date, end: date, granularity: str, meter_ids: list | None = None
     ) -> list[dict]:
         """Verbrauchszeitreihe nach Energieträger aggregiert (nicht je Zähler)."""
         trunc_map = {"daily": "day", "weekly": "week", "monthly": "month", "yearly": "year"}
@@ -466,6 +490,8 @@ class DashboardService:
             .group_by(Meter.energy_type, Meter.unit, text("period"))
             .order_by(Meter.energy_type, text("period"))
         )
+        if meter_ids is not None:
+            query = query.where(Meter.id.in_(meter_ids))
         result = await self.db.execute(query)
         rows = result.all()
 
@@ -498,7 +524,7 @@ class DashboardService:
 
         return list(charts.values())
 
-    async def _get_top_consumers(self, start: date, end: date) -> list[dict]:
+    async def _get_top_consumers(self, start: date, end: date, meter_ids: list | None = None) -> list[dict]:
         """Top-5 Verbraucher nach Verbrauch."""
         query = (
             select(
@@ -524,6 +550,8 @@ class DashboardService:
             .order_by(func.sum(MeterReading.consumption).desc())
             .limit(5)
         )
+        if meter_ids is not None:
+            query = query.where(Meter.id.in_(meter_ids))
         result = await self.db.execute(query)
         return [
             {

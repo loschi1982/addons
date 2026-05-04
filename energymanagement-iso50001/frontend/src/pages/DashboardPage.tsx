@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
@@ -185,65 +185,76 @@ function AlertBanner({ alerts }: { alerts: Alert[] }) {
 
 interface YearComparisonPoint {
   label: string;
-  vorjahr: number;
-  aktuell: number;
+  [year: string]: number | string;
 }
 
-function YearComparisonCard() {
+// Farben für die 5 Jahre: ältestes hellgrau → aktuelles Petrol
+const YEAR_COLORS = ['#CBD5E1', '#94A3B8', '#64748B', '#334155', '#1B5E7B'];
+const MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+
+function YearComparisonCard({ energyType, siteId }: { energyType: string; siteId: string }) {
   const [data, setData] = useState<YearComparisonPoint[]>([]);
   const [loading, setLoading] = useState(true);
+  const thisYear = new Date().getFullYear();
+  const years = [thisYear - 4, thisYear - 3, thisYear - 2, thisYear - 1, thisYear];
 
   useEffect(() => {
-    const thisYear = new Date().getFullYear();
-    apiClient.get('/api/v1/analytics/comparison', {
-      params: {
-        period1_start: `${thisYear - 1}-01-01`,
-        period1_end: `${thisYear - 1}-12-31`,
-        period2_start: `${thisYear}-01-01`,
-        period2_end: `${thisYear}-12-31`,
-        granularity: 'monthly',
-        energy_type: 'electricity',
-      },
-    }).then((res) => {
-      const months = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
-      const p1 = (res.data.period1 as Record<string, unknown>)?.data as Record<string, { period: string; value: number }[]> | undefined;
-      const p2 = (res.data.period2 as Record<string, unknown>)?.data as Record<string, { period: string; value: number }[]> | undefined;
-      if (p1 && p2) {
-        const agg1 = new Array(12).fill(0);
-        const agg2 = new Array(12).fill(0);
-        for (const series of Object.values(p1)) {
-          series.forEach((pt, i) => { if (i < 12) agg1[i] += pt.value || 0; });
+    setLoading(true);
+    Promise.all(years.map(y =>
+      apiClient.get('/api/v1/analytics/comparison', {
+        params: {
+          period1_start: `${y}-01-01`,
+          period1_end: `${y}-12-31`,
+          period2_start: `${y}-01-01`,
+          period2_end: `${y}-12-31`,
+          granularity: 'monthly',
+          energy_type: energyType,
+          ...(siteId ? { site_id: siteId } : {}),
+        },
+      }).then(res => {
+        const p1 = (res.data.period1 as Record<string, unknown>)?.data as Record<string, { period: string; value: number }[]> | undefined;
+        const agg = new Array(12).fill(0);
+        if (p1) {
+          for (const series of Object.values(p1)) {
+            series.forEach((pt, i) => { if (i < 12) agg[i] += pt.value || 0; });
+          }
         }
-        for (const series of Object.values(p2)) {
-          series.forEach((pt, i) => { if (i < 12) agg2[i] += pt.value || 0; });
-        }
-        setData(months.map((m, i) => ({ label: m, vorjahr: agg1[i], aktuell: agg2[i] })));
-      }
-    }).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+        return { year: y, agg };
+      }).catch(() => ({ year: y, agg: new Array(12).fill(0) }))
+    )).then(results => {
+      const points: YearComparisonPoint[] = MONTHS.map((m, i) => {
+        const row: YearComparisonPoint = { label: m };
+        results.forEach(({ year, agg }) => { row[String(year)] = agg[i]; });
+        return row;
+      });
+      setData(points);
+    }).finally(() => setLoading(false));
+  }, [energyType, siteId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const thisYear = new Date().getFullYear();
+  const label = ENERGY_TYPE_LABELS[energyType as keyof typeof ENERGY_TYPE_LABELS] || energyType;
+  const hasData = data.some(d => years.some(y => (d[String(y)] as number) > 0));
 
   return (
     <div className="card">
       <h2 className="mb-4 text-lg font-semibold text-gray-900">
-        Jahresvergleich Strom
-        <span className="ml-2 text-sm font-normal text-gray-400">{thisYear - 1} vs. {thisYear}</span>
+        Jahresvergleich {label}
+        <span className="ml-2 text-sm font-normal text-gray-400">{years[0]}–{thisYear}</span>
       </h2>
       {loading ? (
         <div className="flex h-48 items-center justify-center">
           <div className="h-6 w-6 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
         </div>
-      ) : data.length > 0 && data.some((d) => d.vorjahr > 0 || d.aktuell > 0) ? (
-        <ResponsiveContainer width="100%" height={200}>
-          <BarChart data={data}>
+      ) : hasData ? (
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={data} barCategoryGap="20%" barGap={2}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis dataKey="label" tick={{ fontSize: 10 }} />
             <YAxis tick={{ fontSize: 10 }} />
             <Tooltip formatter={(value: number) => [`${formatNumber(value)} kWh`, '']} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Bar dataKey="vorjahr" name={`${thisYear - 1}`} fill="#94a3b8" radius={[3, 3, 0, 0]} />
-            <Bar dataKey="aktuell" name={`${thisYear}`} fill="#1B5E7B" radius={[3, 3, 0, 0]} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            {years.map((y, idx) => (
+              <Bar key={y} dataKey={String(y)} name={String(y)} fill={YEAR_COLORS[idx]} radius={[2, 2, 0, 0]} />
+            ))}
           </BarChart>
         </ResponsiveContainer>
       ) : (
@@ -399,6 +410,14 @@ function EnPIOverviewCard() {
   );
 }
 
+interface Site {
+  id: string;
+  name: string;
+}
+
+const today = () => new Date().toISOString().slice(0, 10);
+const yearStart = () => `${new Date().getFullYear()}-01-01`;
+
 /* ── Hauptseite ── */
 
 export default function DashboardPage() {
@@ -406,17 +425,28 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [granularity, setGranularity] = useState('monthly');
+  const [periodStart, setPeriodStart] = useState(yearStart());
+  const [periodEnd, setPeriodEnd] = useState(today());
+  const [selectedSite, setSelectedSite] = useState('');
+  const [sites, setSites] = useState<Site[]>([]);
 
+  // Standorte einmalig laden
   useEffect(() => {
-    fetchDashboard();
-  }, [granularity]);
+    apiClient.get('/api/v1/sites', { params: { page_size: 100 } })
+      .then(res => setSites(res.data.items || []))
+      .catch(() => {});
+  }, []);
 
-  const fetchDashboard = async () => {
+  const fetchDashboard = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await apiClient.get('/api/v1/dashboard', {
-        params: { granularity },
-      });
+      const params: Record<string, string> = {
+        granularity,
+        period_start: periodStart,
+        period_end: periodEnd,
+      };
+      if (selectedSite) params.site_id = selectedSite;
+      const res = await apiClient.get('/api/v1/dashboard', { params });
       setData(res.data);
       setError('');
     } catch {
@@ -424,7 +454,9 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [granularity, periodStart, periodEnd, selectedSite]);
+
+  useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
 
   if (loading) {
     return (
@@ -445,47 +477,65 @@ export default function DashboardPage() {
     );
   }
 
-  // Daten für kombinierten Chart vorbereiten
-  const chartLabels: string[] = [];
-  const combinedData: Record<string, number>[] = [];
-  if (data.consumption_chart.length > 0) {
-    const firstSeries = data.consumption_chart[0];
-    firstSeries.data.forEach((dp, idx) => {
-      const row: Record<string, number> = {};
-      data.consumption_chart.forEach((s) => {
-        if (s.data[idx]) {
-          row[s.meter_name] = s.data[idx].value;
-        }
-      });
-      chartLabels.push(dp.label);
-      combinedData.push(row);
-    });
-  }
-
-  const barChartData = combinedData.map((row, idx) => ({
-    label: chartLabels[idx],
-    ...row,
-  }));
-
   return (
     <div>
-      <div className="flex items-center justify-between">
+      {/* Header + Filter */}
+      <div className="flex flex-wrap items-end gap-3 justify-between">
         <div>
           <h1 className="page-title">Dashboard</h1>
           <p className="mt-1 text-sm text-gray-500">
             {data.period_start} bis {data.period_end}
           </p>
         </div>
-        <select
-          value={granularity}
-          onChange={(e) => setGranularity(e.target.value)}
-          className="input w-auto"
-        >
-          <option value="daily">Täglich</option>
-          <option value="weekly">Wöchentlich</option>
-          <option value="monthly">Monatlich</option>
-          <option value="yearly">Jährlich</option>
-        </select>
+        <div className="flex flex-wrap items-end gap-2">
+          {/* Standort */}
+          <div>
+            <label className="label">Standort</label>
+            <select
+              value={selectedSite}
+              onChange={(e) => setSelectedSite(e.target.value)}
+              className="input w-auto"
+            >
+              <option value="">Alle Standorte</option>
+              {sites.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+          {/* Zeitraum */}
+          <div>
+            <label className="label">Von</label>
+            <input
+              type="date"
+              value={periodStart}
+              onChange={(e) => setPeriodStart(e.target.value)}
+              className="input"
+            />
+          </div>
+          <div>
+            <label className="label">Bis</label>
+            <input
+              type="date"
+              value={periodEnd}
+              onChange={(e) => setPeriodEnd(e.target.value)}
+              className="input"
+            />
+          </div>
+          {/* Auflösung */}
+          <div>
+            <label className="label">Auflösung</label>
+            <select
+              value={granularity}
+              onChange={(e) => setGranularity(e.target.value)}
+              className="input w-auto"
+            >
+              <option value="daily">Täglich</option>
+              <option value="weekly">Wöchentlich</option>
+              <option value="monthly">Monatlich</option>
+              <option value="yearly">Jährlich</option>
+            </select>
+          </div>
+        </div>
       </div>
 
       {/* Warnungen */}
@@ -505,84 +555,54 @@ export default function DashboardPage() {
       {/* Automatische Zusammenfassung */}
       <InsightsSummary data={data} />
 
-      {/* Charts-Bereich */}
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Verbrauchschart */}
-        <div className="card lg:col-span-2">
-          <h2 className="mb-4 text-lg font-semibold text-gray-900">Verbrauchsentwicklung</h2>
-          {barChartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={320}>
-              <BarChart data={barChartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip
-                  formatter={(value: number) => [`${formatNumber(value)} kWh`, '']}
-                  contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb' }}
-                />
-                <Legend />
-                {data.consumption_chart.map((series, idx) => (
-                  <Bar
-                    key={series.meter_id}
-                    dataKey={series.meter_name}
-                    fill={PIE_COLORS[idx % PIE_COLORS.length]}
-                    radius={[4, 4, 0, 0]}
-                  />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex h-64 items-center justify-center text-gray-400">
-              Keine Verbrauchsdaten vorhanden
-            </div>
-          )}
-        </div>
-
-        {/* Energieaufteilung */}
+      {/* Energieaufteilung (Tortendiagramm) */}
+      <div className="mt-6">
         <div className="card">
           <h2 className="mb-4 text-lg font-semibold text-gray-900">Energieaufteilung</h2>
           {data.energy_breakdown.length > 0 ? (
-            <>
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie
-                    data={data.energy_breakdown}
-                    dataKey="consumption_kwh"
-                    nameKey="energy_type"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={80}
-                    paddingAngle={2}
-                  >
-                    {data.energy_breakdown.map((entry, idx) => (
-                      <Cell
-                        key={entry.energy_type}
-                        fill={
-                          ENERGY_TYPE_COLORS[entry.energy_type as keyof typeof ENERGY_TYPE_COLORS]
-                          || PIE_COLORS[idx % PIE_COLORS.length]
+            <div className="flex flex-col md:flex-row items-center gap-6">
+              <div className="flex-shrink-0">
+                <ResponsiveContainer width={260} height={260}>
+                  <PieChart>
+                    <Pie
+                      data={data.energy_breakdown}
+                      dataKey="consumption_kwh"
+                      nameKey="energy_type"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={0}
+                      outerRadius={110}
+                      paddingAngle={2}
+                    >
+                      {data.energy_breakdown.map((entry, idx) => (
+                        <Cell
+                          key={entry.energy_type}
+                          fill={
+                            ENERGY_TYPE_COLORS[entry.energy_type as keyof typeof ENERGY_TYPE_COLORS]
+                            || PIE_COLORS[idx % PIE_COLORS.length]
+                          }
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value: number, name: string) => {
+                        const entry = data.energy_breakdown.find(b => b.energy_type === name);
+                        const lbl = ENERGY_TYPE_LABELS[name as keyof typeof ENERGY_TYPE_LABELS] || name;
+                        if (entry?.original_unit && entry.original_unit !== 'kWh') {
+                          return [`${formatNumber(entry.original_value)} ${entry.original_unit} (${formatNumber(value)} kWh)`, lbl];
                         }
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value: number, name: string) => {
-                      const entry = data.energy_breakdown.find(b => b.energy_type === name);
-                      const label = ENERGY_TYPE_LABELS[name as keyof typeof ENERGY_TYPE_LABELS] || name;
-                      if (entry?.original_unit && entry.original_unit !== 'kWh') {
-                        return [`${formatNumber(entry.original_value)} ${entry.original_unit} (${formatNumber(value)} kWh)`, label];
-                      }
-                      return [`${formatNumber(value)} kWh`, label];
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="mt-2 space-y-2">
+                        return [`${formatNumber(value)} kWh`, lbl];
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex-1 space-y-3">
                 {data.energy_breakdown.map((b, idx) => (
                   <div key={b.energy_type} className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
                       <div
-                        className="h-3 w-3 rounded-full"
+                        className="h-3 w-3 flex-shrink-0 rounded-full"
                         style={{
                           backgroundColor:
                             ENERGY_TYPE_COLORS[b.energy_type as keyof typeof ENERGY_TYPE_COLORS]
@@ -603,19 +623,23 @@ export default function DashboardPage() {
                   </div>
                 ))}
               </div>
-            </>
+            </div>
           ) : (
-            <div className="flex h-64 items-center justify-center text-gray-400">
+            <div className="flex h-48 items-center justify-center text-gray-400">
               Keine Daten vorhanden
             </div>
           )}
         </div>
       </div>
 
-      {/* Jahresvergleich */}
-      <div className="mt-6">
-        <YearComparisonCard />
-      </div>
+      {/* Jahresvergleich – eine Karte je Energieart */}
+      {data.energy_breakdown.length > 0 && (
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {data.energy_breakdown.map(b => (
+            <YearComparisonCard key={b.energy_type} energyType={b.energy_type} siteId={selectedSite} />
+          ))}
+        </div>
+      )}
 
       {/* Untere Reihe: Top-Verbraucher + EnPI */}
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
