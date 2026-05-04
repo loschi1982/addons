@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell, Monitor, Download, CheckCircle, AlertTriangle, XCircle, Plug2, HeartPulse, Database, Server, Clock, HardDrive, Play, RotateCcw, Wifi, WifiOff, ScrollText, Trash2, Upload, ShieldCheck } from 'lucide-react';
-import { apiClient } from '@/utils/api';
+import { apiClient, setBackupRunning } from '@/utils/api';
 import { useAppDispatch } from '@/hooks/useRedux';
 import { logout } from '@/store/slices/authSlice';
+import { setBackupLocked } from '@/store/slices/uiSlice';
 
 interface SettingEntry {
   value: Record<string, unknown>;
@@ -227,6 +228,7 @@ function ProgressBar({ progress }: { progress: BackupProgress }) {
 }
 
 function BackupPanel() {
+  const dispatch = useAppDispatch();
   const [exportProgress, setExportProgress] = useState<BackupProgress | null>(null);
   const [importProgress, setImportProgress] = useState<BackupProgress | null>(null);
   const [inspecting, setInspecting] = useState(false);
@@ -237,6 +239,9 @@ function BackupPanel() {
   const exportPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const importPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const lock = () => { dispatch(setBackupLocked(true)); setBackupRunning(true); };
+  const unlock = () => { dispatch(setBackupLocked(false)); setBackupRunning(false); };
+
   const pollProgress = (jobId: string, setter: (p: BackupProgress) => void, pollRef: React.MutableRefObject<ReturnType<typeof setInterval> | null>, onDone?: (p: BackupProgress) => void) => {
     pollRef.current = setInterval(async () => {
       try {
@@ -245,10 +250,12 @@ function BackupPanel() {
         setter(p);
         if (p.status === 'done' || p.status === 'error') {
           if (pollRef.current) clearInterval(pollRef.current);
+          unlock();
           if (p.status === 'done' && onDone) onDone(p);
         }
       } catch {
         if (pollRef.current) clearInterval(pollRef.current);
+        unlock();
       }
     }, 1000);
   };
@@ -256,6 +263,7 @@ function BackupPanel() {
   const handleExport = async () => {
     setError(null);
     setExportProgress({ status: 'running', phase: 'export', percent: 0, table: '' });
+    lock();
     try {
       const res = await apiClient.post('/api/v1/backup/export/start');
       const { job_id } = res.data;
@@ -273,6 +281,7 @@ function BackupPanel() {
     } catch {
       setError('Export konnte nicht gestartet werden.');
       setExportProgress(null);
+      unlock();
     }
   };
 
@@ -303,6 +312,7 @@ function BackupPanel() {
     if (!importFile) return;
     setError(null);
     setImportProgress({ status: 'running', phase: 'import', percent: 0, table: '' });
+    lock();
     try {
       const formData = new FormData();
       formData.append('file', importFile);
@@ -315,6 +325,7 @@ function BackupPanel() {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setError(msg || 'Import konnte nicht gestartet werden.');
       setImportProgress(null);
+      unlock();
     }
   };
 
