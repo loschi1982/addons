@@ -173,9 +173,11 @@ interface InspectResult {
 interface BackupProgress {
   status: 'running' | 'done' | 'error';
   phase: string;
-  step?: number;
-  total?: number;
+  rows_done?: number;
+  total_rows?: number;
   table?: string;
+  table_rows?: number;
+  table_total?: number;
   percent?: number;
   size_kb?: number;
   imported?: number;
@@ -184,15 +186,29 @@ interface BackupProgress {
   error?: string;
 }
 
+function fmt(n: number): string {
+  return n.toLocaleString('de-DE');
+}
+
 function ProgressBar({ progress }: { progress: BackupProgress }) {
   const pct = progress.percent ?? 0;
   const isError = progress.status === 'error';
   const isDone = progress.status === 'done';
+  const isCount = progress.phase === 'count';
+
+  const tableLabel = progress.table ? progress.table : '…';
+  const rowInfo = (progress.rows_done !== undefined && progress.total_rows !== undefined && progress.total_rows > 0)
+    ? `${fmt(progress.rows_done)} / ${fmt(progress.total_rows)} Zeilen`
+    : null;
+  const tableInfo = (progress.table_total !== undefined && progress.table_total > 0 && progress.table_rows !== undefined)
+    ? `${tableLabel}: ${fmt(progress.table_rows)} / ${fmt(progress.table_total)}`
+    : tableLabel;
+
   return (
     <div className="space-y-2">
       <div className="flex justify-between text-xs text-gray-500">
         <span>
-          {isError ? 'Fehler' : isDone ? 'Abgeschlossen' : progress.table || '…'}
+          {isError ? 'Fehler' : isDone ? 'Abgeschlossen' : isCount ? 'Tabellen zählen…' : tableInfo}
         </span>
         <span>{pct}%</span>
       </div>
@@ -202,10 +218,8 @@ function ProgressBar({ progress }: { progress: BackupProgress }) {
           style={{ width: `${pct}%` }}
         />
       </div>
-      {!isDone && !isError && progress.step !== undefined && progress.total !== undefined && (
-        <p className="text-xs text-gray-400">
-          Tabelle {progress.step} von {progress.total}
-        </p>
+      {!isDone && !isError && !isCount && rowInfo && (
+        <p className="text-xs text-gray-400">{rowInfo}</p>
       )}
       {isError && <p className="text-xs text-red-600">{progress.error}</p>}
     </div>

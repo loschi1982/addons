@@ -181,13 +181,23 @@ def _serialize_row(row: Any) -> dict:
     return {k: v for k, v in row._mapping.items()}
 
 
+# Anzahl Zeilen pro Streaming-Partition (Speicher vs. Granularität abgewogen)
+EXPORT_CHUNK_SIZE = 10_000
+
+
 async def export_database(db: AsyncSession, progress_callback=None) -> bytes:
     """
     Exportiert alle Tabellen als komprimiertes JSON.
 
+    Nutzt Server-Side Streaming (partitions) damit der Fortschritt
+    zeilenweise gemeldet wird statt erst nach dem vollständigen Laden
+    einer Tabelle.
+
     Args:
         db:                Datenbankverbindung.
-        progress_callback: Optionale Funktion(step, total, table, phase) für Fortschrittsmeldungen.
+        progress_callback: Optionale Funktion mit Keyword-Argumenten:
+                           rows_done, total_rows, table, table_rows,
+                           table_total, phase.
 
     Returns:
         Gzip-komprimierte JSON-Bytes.
@@ -199,20 +209,65 @@ async def export_database(db: AsyncSession, progress_callback=None) -> bytes:
     }
 
     skipped: list[str] = []
-    total = len(EXPORT_TABLES)
 
-    for i, table in enumerate(EXPORT_TABLES):
+    # ── Phase 1: Zeilenzahlen vorab ermitteln (schnell, kein Scan) ──
+    total_rows = 0
+    table_counts: dict[str, int] = {}
+    for table in EXPORT_TABLES:
         try:
-            result = await db.execute(text(f"SELECT * FROM {table}"))  # noqa: S608
-            rows = result.fetchall()
-            export_data["tables"][table] = [_serialize_row(r) for r in rows]
-            logger.info("backup_export_table", table=table, rows=len(rows))
+            r = await db.execute(text(f"SELECT COUNT(*) FROM {table}"))  # noqa: S608
+            cnt = int(r.scalar() or 0)
+        except Exception:
+            cnt = 0
+        table_counts[table] = cnt
+        total_rows += cnt
+
+    if progress_callback:
+        progress_callback(
+            rows_done=0, total_rows=total_rows,
+            table="", table_rows=0, table_total=0, phase="count",
+        )
+
+    # ── Phase 2: Zeilen per Streaming exportieren ──
+    rows_done = 0
+
+    for table in EXPORT_TABLES:
+        table_total = table_counts.get(table, 0)
+        table_rows_done = 0
+        table_data: list[dict] = []
+
+        try:
+            stream = await db.stream(text(f"SELECT * FROM {table}"))  # noqa: S608
+            async for partition in stream.partitions(EXPORT_CHUNK_SIZE):
+                chunk = [_serialize_row(r) for r in partition]
+                table_data.extend(chunk)
+                chunk_len = len(chunk)
+                table_rows_done += chunk_len
+                rows_done += chunk_len
+
+                if progress_callback:
+                    progress_callback(
+                        rows_done=rows_done,
+                        total_rows=total_rows,
+                        table=table,
+                        table_rows=table_rows_done,
+                        table_total=table_total,
+                        phase="export",
+                    )
+
+            export_data["tables"][table] = table_data
+            logger.info("backup_export_table", table=table, rows=len(table_data))
+
         except Exception as e:
-            # Tabelle existiert noch nicht (z.B. nach Migration) – überspringen
             skipped.append(table)
             logger.warning("backup_export_table_skipped", table=table, error=str(e))
-        if progress_callback:
-            progress_callback(step=i + 1, total=total, table=table, phase="export")
+
+        # Leere Tabellen: Callback trotzdem senden damit Fortschritt sichtbar bleibt
+        if table_total == 0 and progress_callback:
+            progress_callback(
+                rows_done=rows_done, total_rows=total_rows,
+                table=table, table_rows=0, table_total=0, phase="export",
+            )
 
     if skipped:
         export_data["skipped_tables"] = skipped
@@ -258,8 +313,10 @@ async def import_database(
 
     tables_data: dict[str, list[dict]] = data.get("tables", {})
     stats = {"imported": 0, "skipped": 0, "errors": []}
-    import_tables = [t for t in EXPORT_TABLES if tables_data.get(t)]
-    total_steps = len(import_tables)
+
+    # Gesamtzeilenzahl vorab berechnen
+    total_rows = sum(len(rows) for rows in tables_data.values())
+    rows_done = 0
 
     # Foreign-Key-Checks deaktivieren während des Imports
     await db.execute(text("SET session_replication_role = 'replica'"))
@@ -275,24 +332,41 @@ async def import_database(
                         pass  # Tabelle existiert vielleicht nicht
 
         # Daten einfügen
-        step = 0
         for table in EXPORT_TABLES:
             rows = tables_data.get(table)
             if not rows:
                 continue
 
-            step += 1
+            table_total = len(rows)
+
+            def _make_row_callback(t: str, tt: int):
+                def cb(inserted: int):
+                    nonlocal rows_done
+                    rows_done += inserted
+                    if progress_callback:
+                        pct = round(rows_done / total_rows * 100) if total_rows else 0
+                        progress_callback(
+                            rows_done=rows_done,
+                            total_rows=total_rows,
+                            table=t,
+                            table_rows=rows_done,  # running total
+                            table_total=tt,
+                            phase="import",
+                            percent=pct,
+                        )
+                return cb
+
+            row_cb = _make_row_callback(table, table_total)
+
             try:
-                await _insert_rows(db, table, rows)
-                stats["imported"] += len(rows)
-                logger.info("backup_import_table", table=table, rows=len(rows))
+                await _insert_rows(db, table, rows, row_callback=row_cb)
+                stats["imported"] += table_total
+                logger.info("backup_import_table", table=table, rows=table_total)
             except Exception as e:
+                rows_done += table_total  # trotzdem Fortschritt buchen
                 stats["errors"].append(f"{table}: {e}")
                 stats["skipped"] += 1
                 logger.warning("backup_import_table_failed", table=table, error=str(e))
-
-            if progress_callback:
-                progress_callback(step=step, total=total_steps, table=table, phase="import")
 
         await db.commit()
 
@@ -308,8 +382,18 @@ async def import_database(
     return stats
 
 
-async def _insert_rows(db: AsyncSession, table: str, rows: list[dict]) -> None:
-    """Fügt Rows in eine Tabelle ein (batched, via parameterized INSERT)."""
+async def _insert_rows(
+    db: AsyncSession,
+    table: str,
+    rows: list[dict],
+    row_callback=None,
+) -> None:
+    """Fügt Rows in eine Tabelle ein (batched, via parameterized INSERT).
+
+    Args:
+        row_callback: Optionale Funktion(inserted: int) – wird nach jedem Batch
+                      mit der Anzahl eingefügter Zeilen aufgerufen.
+    """
     if not rows:
         return
 
@@ -342,3 +426,5 @@ async def _insert_rows(db: AsyncSession, table: str, rows: list[dict]) -> None:
     for i in range(0, len(converted_rows), batch_size):
         batch = converted_rows[i : i + batch_size]
         await db.execute(sql, batch)
+        if row_callback:
+            row_callback(len(batch))
