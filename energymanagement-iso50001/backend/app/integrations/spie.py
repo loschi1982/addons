@@ -54,17 +54,34 @@ class SpieClient:
         self._page = None
 
     async def __aenter__(self):
+        import socket
         from playwright.async_api import async_playwright
+
+        # Chromium startet eigene DNS-Resolution die im Container fehlschlagen kann.
+        # Python's socket kann den Host auflösen – IP vorher ermitteln und als
+        # host-resolver-rule übergeben, damit Chromium kein eigenes DNS braucht.
+        host = BASE_URL.replace("https://", "").replace("http://", "").split("/")[0]
+        try:
+            spie_ip = socket.gethostbyname(host)
+            resolver_rule = f"MAP {host} {spie_ip}"
+            logger.debug("spie_dns_resolved", host=host, ip=spie_ip)
+        except socket.gaierror:
+            resolver_rule = None
+            logger.warning("spie_dns_failed", host=host)
+
+        chromium_args = [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+        ]
+        if resolver_rule:
+            chromium_args.append(f"--host-resolver-rules={resolver_rule}")
 
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
             headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-            ],
+            args=chromium_args,
         )
         self._context = await self._browser.new_context(
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
