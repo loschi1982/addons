@@ -32,6 +32,7 @@ from app.api.v1 import (
     schemas,
     settings,
     sites,
+    spie,
     system,
     trainings,
     users,
@@ -93,3 +94,6 @@ api_router.include_router(system.router, prefix="/system", tags=["System"])
 
 # Datensicherung (Export / Import)
 api_router.include_router(backup.router, prefix="/backup", tags=["Datensicherung"])
+
+# SPIE-Automatik-Import
+api_router.include_router(spie.router, prefix="/spie", tags=["SPIE-Import"])

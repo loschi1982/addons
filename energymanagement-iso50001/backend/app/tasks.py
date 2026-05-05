@@ -68,6 +68,10 @@ celery_app.conf.update(
             "task": "app.tasks.recalculate_objectives",
             "schedule": 86400.0,  # einmal täglich
         },
+        "spie-auto-import-every-3-days": {
+            "task": "app.tasks.spie_auto_import",
+            "schedule": 259200.0,  # alle 3 Tage
+        },
     },
 )
 
@@ -399,5 +403,24 @@ def calculate_weather_correction(meter_id: str, start_date: str, end_date: str):
                 date.fromisoformat(start_date),
                 date.fromisoformat(end_date),
             )
+
+    return _run_async(_run())
+
+
+@celery_app.task(name="app.tasks.spie_auto_import")
+def spie_auto_import():
+    """Automatischer SPIE-Import alle 3 Tage (wenn aktiviert)."""
+    import uuid as _uuid
+
+    async def _run():
+        from app.services.spie_service import SpieService
+
+        async with _task_db_session() as db:
+            svc = SpieService(db)
+            cfg = await svc.get_config_raw()
+            if not cfg or not cfg.get("enabled"):
+                return {"skipped": True, "reason": "nicht aktiviert"}
+            job_id = str(_uuid.uuid4())
+            return await svc.run_import(job_id=job_id)
 
     return _run_async(_run())
