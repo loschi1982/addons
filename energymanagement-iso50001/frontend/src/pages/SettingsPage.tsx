@@ -175,8 +175,9 @@ function ProgressBar({ progress }: { progress: BackupProgress }) {
 
   const phaseLabel: Record<string, string> = {
     export: 'Datenbank wird gesichert…',
-    prepare: 'Datenbank wird vorbereitet…',
+    prepare: 'TimescaleDB wird vorbereitet…',
     import: 'Daten werden wiederhergestellt…',
+    finalize: 'TimescaleDB wird finalisiert…',
   };
 
   return (
