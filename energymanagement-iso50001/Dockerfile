@@ -20,36 +20,52 @@ COPY frontend/ ./
 RUN npm run build
 
 # ── Stage 2: Backend + Frontend zusammenführen ──
-FROM python:3.12-alpine
+FROM python:3.12-slim
 
 # System-Abhängigkeiten
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     # Build-Tools für Python C-Extensions:
     gcc \
     g++ \
-    musl-dev \
     libffi-dev \
     # PostgreSQL-Client (für asyncpg):
-    postgresql16-dev \
-    postgresql16-client \
+    libpq-dev \
+    postgresql-client \
     # WeasyPrint (PDF):
-    pango \
-    cairo \
-    cairo-dev \
-    gdk-pixbuf \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libcairo2 \
+    libgdk-pixbuf-2.0-0 \
     shared-mime-info \
     fontconfig \
-    ttf-freefont \
-    font-noto \
+    fonts-freefont-ttf \
+    fonts-noto \
+    # Playwright/Chromium (SPIE-Import):
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
     # Sonstiges:
     curl \
-    bash
+    bash \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Python-Abhängigkeiten installieren
 COPY backend/requirements.txt ./backend/
 RUN pip install --no-cache-dir -r backend/requirements.txt
+
+# Playwright-Browser (Chromium) installieren
+RUN playwright install chromium --with-deps 2>/dev/null || \
+    python -m playwright install chromium --with-deps
 
 # Backend-Code kopieren
 COPY backend/ ./backend/
