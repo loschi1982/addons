@@ -211,6 +211,27 @@ async def probe_spie_readings(
     }
 
 
+@router.post("/probe-endpoint")
+async def probe_spie_endpoint(
+    spie_endpoint: str = Body(...),
+    nav_id: str = Body(...),
+    payload: dict = Body(...),
+    current_user: User = Depends(require_permission("settings", "update")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generischer Diagnose-Endpoint: beliebigen SPIE-Endpoint aufrufen."""
+    svc = SpieService(db)
+    cfg = await svc.get_config_raw()
+    if not cfg or not cfg.get("username"):
+        raise HTTPException(status_code=400, detail="SPIE nicht konfiguriert.")
+
+    async with SpieClient() as client:
+        await client.login(cfg["username"], cfg["password"])
+        result = await client.raw_probe(nav_id, spie_endpoint, payload)
+
+    return result
+
+
 @router.post("/probe-auto")
 async def probe_spie_auto(
     current_user: User = Depends(require_permission("settings", "update")),
