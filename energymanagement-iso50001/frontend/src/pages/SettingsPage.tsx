@@ -203,6 +203,9 @@ function ProgressBar({ progress }: { progress: BackupProgress }) {
   );
 }
 
+const LS_EXPORT_JOB = 'backup_export_job_id';
+const LS_IMPORT_JOB = 'backup_import_job_id';
+
 function BackupPanel() {
   const dispatch = useAppDispatch();
   const [exportProgress, setExportProgress] = useState<BackupProgress | null>(null);
@@ -216,7 +219,15 @@ function BackupPanel() {
   const lock = () => { dispatch(setBackupLocked(true)); setBackupRunning(true); };
   const unlock = () => { dispatch(setBackupLocked(false)); setBackupRunning(false); };
 
-  const pollProgress = (jobId: string, setter: (p: BackupProgress) => void, pollRef: React.MutableRefObject<ReturnType<typeof setInterval> | null>, onDone?: (p: BackupProgress) => void) => {
+  const startPoll = (
+    jobId: string,
+    setter: (p: BackupProgress) => void,
+    pollRef: React.MutableRefObject<ReturnType<typeof setInterval> | null>,
+    lsKey: string,
+    onDone?: (p: BackupProgress) => void,
+  ) => {
+    localStorage.setItem(lsKey, jobId);
+    lock();
     pollRef.current = setInterval(async () => {
       try {
         const res = await apiClient.get(`/api/v1/backup/progress/${jobId}`);
@@ -224,25 +235,51 @@ function BackupPanel() {
         setter(p);
         if (p.status === 'done' || p.status === 'error') {
           if (pollRef.current) clearInterval(pollRef.current);
+          localStorage.removeItem(lsKey);
           unlock();
           if (p.status === 'done' && onDone) onDone(p);
         }
       } catch {
-        if (pollRef.current) clearInterval(pollRef.current);
-        unlock();
+        // 404 = Job unbekannt (Backend neugestartet, Status-Datei noch nicht da)
+        // → weiter pollen bis Datei erscheint oder Timeout
       }
-    }, 1000);
+    }, 2000);
   };
+
+  // Beim Mounten: laufende Jobs aus localStorage wiederherstellen
+  useEffect(() => {
+    const exportJobId = localStorage.getItem(LS_EXPORT_JOB);
+    if (exportJobId) {
+      setExportProgress({ status: 'running', phase: 'export' });
+      startPoll(exportJobId, setExportProgress, exportPollRef, LS_EXPORT_JOB, async (_p) => {
+        const dl = await apiClient.get(`/api/v1/backup/download/${exportJobId}`, { responseType: 'blob' });
+        const url = window.URL.createObjectURL(new Blob([dl.data]));
+        const a = document.createElement('a');
+        const now = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+        a.href = url;
+        a.download = `energy_backup_${now}.dump`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+      });
+    }
+    const importJobId = localStorage.getItem(LS_IMPORT_JOB);
+    if (importJobId) {
+      setImportProgress({ status: 'running', phase: 'import' });
+      startPoll(importJobId, setImportProgress, importPollRef, LS_IMPORT_JOB, undefined);
+    }
+    return () => {
+      if (exportPollRef.current) clearInterval(exportPollRef.current);
+      if (importPollRef.current) clearInterval(importPollRef.current);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleExport = async () => {
     setError(null);
-    setExportProgress({ status: 'running', phase: 'export', percent: 0 });
-    lock();
+    setExportProgress({ status: 'running', phase: 'export' });
     try {
       const res = await apiClient.post('/api/v1/backup/export/start');
       const { job_id } = res.data;
-      pollProgress(job_id, setExportProgress, exportPollRef, async () => {
-        // Download auslösen
+      startPoll(job_id, setExportProgress, exportPollRef, LS_EXPORT_JOB, async () => {
         const dl = await apiClient.get(`/api/v1/backup/download/${job_id}`, { responseType: 'blob' });
         const url = window.URL.createObjectURL(new Blob([dl.data]));
         const a = document.createElement('a');
@@ -270,8 +307,7 @@ function BackupPanel() {
   const handleImport = async () => {
     if (!importFile) return;
     setError(null);
-    setImportProgress({ status: 'running', phase: 'import', percent: 0 });
-    lock();
+    setImportProgress({ status: 'running', phase: 'prepare' });
     try {
       const formData = new FormData();
       formData.append('file', importFile);
@@ -279,7 +315,7 @@ function BackupPanel() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       const { job_id } = res.data;
-      pollProgress(job_id, setImportProgress, importPollRef);
+      startPoll(job_id, setImportProgress, importPollRef, LS_IMPORT_JOB);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setError(msg || 'Import konnte nicht gestartet werden.');
