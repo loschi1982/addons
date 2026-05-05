@@ -84,10 +84,11 @@ async def _cleanup_job(job_id: str, delay: int = 7200) -> None:
 
 async def _run_export(job_id: str) -> None:
     """
-    Exportiert die Datenbank via pg_dump (Custom-Format, nur public-Schema).
+    Exportiert die komplette Datenbank via pg_dump (Custom-Format, alle Schemas).
 
+    Kein --schema-Filter: TimescaleDB-Hypertables speichern ihre Daten in
+    _timescaledb_internal als Chunks – ohne dieses Schema wäre das Backup leer.
     Schreibt die Ausgabe direkt auf Disk – kein RAM-Limit.
-    Fortschritt: phase 'export' während pg_dump läuft, 'done' danach.
     """
     from app.config import get_settings
     settings = get_settings()
@@ -108,7 +109,9 @@ async def _run_export(job_id: str) -> None:
             "--format=custom",      # komprimiertes Binärformat
             "--no-acl",             # keine GRANT-Statements
             "--no-owner",           # keine ALTER OWNER-Statements
-            "--schema=public",      # nur public-Schema (kein _timescaledb_internal etc.)
+            # Kein --schema=public! TimescaleDB-Chunks liegen in _timescaledb_internal.
+            # Nur timescaledb_information ausschließen (nur Views, kein Datenverlust).
+            "--exclude-schema=timescaledb_information",
             "-f", result_path,
             env=env,
             stdout=asyncio.subprocess.PIPE,
@@ -142,12 +145,33 @@ async def _run_export(job_id: str) -> None:
 
 # ── Import ──────────────────────────────────────────────────────────────────
 
+async def _psql_cmd(pg: dict, env: dict, sql: str) -> tuple[int, str]:
+    """Führt einen einzelnen SQL-Befehl via psql aus. Gibt (returncode, stderr) zurück."""
+    proc = await asyncio.create_subprocess_exec(
+        "psql",
+        "-h", pg["host"],
+        "-p", pg["port"],
+        "-U", pg["user"],
+        "-d", pg["dbname"],
+        "-c", sql,
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    return proc.returncode, stderr.decode(errors="replace").strip()
+
+
 async def _run_import(job_id: str) -> None:
     """
-    Importiert ein pg_dump-Backup via pg_restore.
+    Importiert ein pg_dump-Backup via pg_restore (TimescaleDB-kompatibel).
 
-    Löscht zuerst alle Objekte im public-Schema, dann stellt pg_restore wieder her.
-    Fortschritt: phase 'prepare' während DROP läuft, 'import' während pg_restore läuft.
+    TimescaleDB-Restore-Prozedur:
+      1. timescaledb_pre_restore()  – deaktiviert Jobs, versetzt DB in Restore-Modus
+      2. pg_restore --clean         – löscht + restauriert alle Objekte inkl. Chunks
+      3. timescaledb_post_restore() – aktiviert Jobs, rebuildet Metadaten
+
+    Kein manuelles DROP SCHEMA nötig – pg_restore --clean übernimmt das.
     """
     from app.config import get_settings
     settings = get_settings()
@@ -161,29 +185,15 @@ async def _run_import(job_id: str) -> None:
     logger.info("backup_import_start", job_id=job_id)
 
     try:
-        # Schritt 1: Schema leeren (DROP + CREATE public)
-        _jobs[job_id] = {"status": "running", "phase": "prepare", "percent": 10}
-        drop_sql = "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
-        proc_drop = await asyncio.create_subprocess_exec(
-            "psql",
-            "-h", pg["host"],
-            "-p", pg["port"],
-            "-U", pg["user"],
-            "-d", pg["dbname"],
-            "-c", drop_sql,
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr_drop = await proc_drop.communicate()
-        if proc_drop.returncode != 0:
-            err = stderr_drop.decode(errors="replace").strip()
-            logger.error("backup_import_drop_failed", job_id=job_id, stderr=err)
-            _jobs[job_id] = {"status": "error", "error": f"Schema-Reset fehlgeschlagen: {err}"}
-            return
+        # Schritt 1: TimescaleDB in Restore-Modus versetzen
+        _jobs[job_id] = {"status": "running", "phase": "prepare", "percent": 5}
+        rc, err = await _psql_cmd(pg, env, "SELECT timescaledb_pre_restore();")
+        if rc != 0:
+            logger.warning("backup_import_pre_restore_warn", stderr=err)
+            # Kein harter Fehler – läuft auch ohne TimescaleDB-Extension
 
-        # Schritt 2: pg_restore
-        _jobs[job_id] = {"status": "running", "phase": "import", "percent": 30}
+        # Schritt 2: pg_restore (--clean = bestehende Objekte vorher löschen)
+        _jobs[job_id] = {"status": "running", "phase": "import", "percent": 20}
         proc = await asyncio.create_subprocess_exec(
             "pg_restore",
             "-h", pg["host"],
@@ -192,7 +202,8 @@ async def _run_import(job_id: str) -> None:
             "-d", pg["dbname"],
             "--no-acl",
             "--no-owner",
-            "--schema=public",
+            "--clean",          # DROP IF EXISTS vor jedem CREATE
+            "--if-exists",      # verhindert Fehler bei nicht-existierenden Objekten
             upload_path,
             env=env,
             stdout=asyncio.subprocess.PIPE,
@@ -200,21 +211,26 @@ async def _run_import(job_id: str) -> None:
         )
         _, stderr = await proc.communicate()
 
-        # pg_restore gibt auch bei Erfolg Warnungen auf stderr aus (returncode kann 1 sein)
-        # → nur bei returncode >= 2 als Fehler werten
+        # pg_restore: returncode 1 = Warnungen (normal), >= 2 = echter Fehler
         if proc.returncode >= 2:
-            err = stderr.decode(errors="replace").strip()
-            logger.error("backup_import_failed", job_id=job_id, returncode=proc.returncode, stderr=err)
-            _jobs[job_id] = {"status": "error", "error": f"pg_restore fehlgeschlagen (Code {proc.returncode}): {err}"}
+            err_text = stderr.decode(errors="replace").strip()
+            logger.error("backup_import_failed", job_id=job_id, returncode=proc.returncode, stderr=err_text)
+            _jobs[job_id] = {"status": "error", "error": f"pg_restore fehlgeschlagen (Code {proc.returncode}): {err_text}"}
+            # Restore-Modus trotzdem beenden
+            await _psql_cmd(pg, env, "SELECT timescaledb_post_restore();")
             return
 
         warnings = stderr.decode(errors="replace").strip()
         if warnings:
             logger.warning("backup_import_warnings", job_id=job_id, warnings=warnings[:500])
 
-        _jobs[job_id] = {
-            "status": "done", "phase": "import", "percent": 100,
-        }
+        # Schritt 3: TimescaleDB Restore-Modus beenden
+        _jobs[job_id] = {"status": "running", "phase": "finalize", "percent": 95}
+        rc, err = await _psql_cmd(pg, env, "SELECT timescaledb_post_restore();")
+        if rc != 0:
+            logger.warning("backup_import_post_restore_warn", stderr=err)
+
+        _jobs[job_id] = {"status": "done", "phase": "import", "percent": 100}
         logger.info("backup_import_done", job_id=job_id)
 
     except FileNotFoundError:
