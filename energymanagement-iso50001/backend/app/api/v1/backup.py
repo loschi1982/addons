@@ -1,182 +1,230 @@
 """
-backup.py – API-Endpunkte für Datenbank-Export und -Import.
+backup.py – API-Endpunkte für Datenbank-Export und -Import via pg_dump/pg_restore.
 
-GET  /backup/export               → Datenbank als .json.gz herunterladen (synchron)
-POST /backup/export/start         → Async-Export starten (asyncio.Task), gibt job_id zurück
-GET  /backup/download/{job_id}    → Fertigen Export herunterladen (Datei auf Disk)
-POST /backup/import/start         → Async-Import starten (asyncio.Task), gibt job_id zurück
+GET  /backup/export/start         → Async-Export starten (pg_dump), gibt job_id zurück
+GET  /backup/download/{job_id}    → Fertigen Export herunterladen
+POST /backup/import/start         → Backup hochladen und Async-Import starten (pg_restore)
 GET  /backup/progress/{job_id}    → Fortschritt eines laufenden Jobs abrufen
-POST /backup/inspect              → Metadaten einer Backup-Datei prüfen (ohne Import)
 POST /backup/factory-reset        → System auf Werkseinstellungen zurücksetzen
 
-Wichtig: Export und Import laufen als asyncio.Task im FastAPI-Prozess selbst –
-nicht via Celery. Das vermeidet Probleme mit Speicherlimits und Session-Timeouts
-die beim Celery-Worker auftreten.
+Export und Import verwenden pg_dump / pg_restore (postgresql16-client ist im Image).
+Das ist zuverlässiger und schneller als die frühere Python-Row-Iteration.
+Fortschritt wird in einem In-Memory-Dict (_jobs) gespeichert, kein Redis nötig.
 """
 
 import asyncio
-import gzip
-import json
 import os
 import re
 import tempfile
 import uuid
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 import structlog
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_permission
-from app.core.security import hash_password, verify_password
+from app.core.security import verify_password
 from app.models.user import User
-from app.services.backup_service import (
-    BACKUP_FORMAT_VERSION,
-    export_database,
-    factory_reset,
-    import_database,
-)
+from app.services.backup_service import factory_reset
 
 logger = structlog.get_logger()
 router = APIRouter()
 
 # ── In-Memory Job-Registry ──────────────────────────────────────────────────
-# Speichert Fortschritt laufender und abgeschlossener Backup-Jobs.
-# TTL wird durch asyncio-Task selbst verwaltet (Eintrag nach 2 Stunden gelöscht).
 _jobs: dict[str, dict[str, Any]] = {}
 _TMP = tempfile.gettempdir()
 
 
-def _job_path(job_id: str, prefix: str) -> str:
+def _job_path(job_id: str, suffix: str) -> str:
     """Sicherer Pfad für temporäre Backup-Dateien."""
-    return os.path.join(_TMP, f"backup_{prefix}_{job_id}.json.gz")
+    return os.path.join(_TMP, f"backup_{suffix}_{job_id}.dump")
+
+
+def _pg_env(database_url: str) -> tuple[dict, dict]:
+    """
+    Parst die DATABASE_URL und gibt (pg_kwargs, env) zurück.
+
+    pg_kwargs: dict mit host, port, user, dbname für CLI-Flags
+    env:       Umgebungsvariablen für den Subprocess (mit PGPASSWORD)
+    """
+    # postgresql+asyncpg://user:pass@host:port/dbname → postgresql://...
+    url = database_url.replace("+asyncpg", "")
+    parsed = urlparse(url)
+    env = os.environ.copy()
+    env["PGPASSWORD"] = parsed.password or ""
+    pg = {
+        "host": parsed.hostname or "localhost",
+        "port": str(parsed.port or 5432),
+        "user": parsed.username or "energy",
+        "dbname": parsed.path.lstrip("/"),
+    }
+    return pg, env
 
 
 async def _cleanup_job(job_id: str, delay: int = 7200) -> None:
     """Job-Eintrag und temp. Datei nach `delay` Sekunden löschen."""
     await asyncio.sleep(delay)
     _jobs.pop(job_id, None)
-    for prefix in ("result", "upload"):
-        path = _job_path(job_id, prefix)
+    for suffix in ("result", "upload"):
+        path = _job_path(job_id, suffix)
         try:
             os.unlink(path)
         except OSError:
             pass
 
 
-async def _run_export(job_id: str) -> None:
-    """Export-Task: läuft im selben asyncio-Event-Loop wie FastAPI."""
-    from app.config import get_settings
+# ── Export ──────────────────────────────────────────────────────────────────
 
+async def _run_export(job_id: str) -> None:
+    """
+    Exportiert die Datenbank via pg_dump (Custom-Format, nur public-Schema).
+
+    Schreibt die Ausgabe direkt auf Disk – kein RAM-Limit.
+    Fortschritt: phase 'export' während pg_dump läuft, 'done' danach.
+    """
+    from app.config import get_settings
     settings = get_settings()
 
-    def _progress(rows_done: int, total_rows: int, table: str,
-                  table_rows: int, table_total: int, phase: str) -> None:
-        pct = round(rows_done / total_rows * 100) if total_rows else 0
-        _jobs[job_id] = {
-            "status": "running",
-            "phase": phase,
-            "rows_done": rows_done,
-            "total_rows": total_rows,
-            "table": table,
-            "table_rows": table_rows,
-            "table_total": table_total,
-            "percent": pct,
-        }
+    _jobs[job_id] = {"status": "running", "phase": "export", "percent": 50}
+    result_path = _job_path(job_id, "result")
+    pg, env = _pg_env(settings.database_url)
 
-    _jobs[job_id] = {"status": "running", "phase": "count", "rows_done": 0,
-                     "total_rows": 0, "percent": 0, "table": ""}
-
-    # Eigene DB-Engine für den Background-Task (vermeidet Session-Sharing)
-    engine = create_async_engine(
-        settings.database_url, echo=False, pool_size=2, max_overflow=2,
-        pool_recycle=3600,
-        connect_args={"command_timeout": None},  # kein Statement-Timeout
-    )
-    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    logger.info("backup_export_start", job_id=job_id, host=pg["host"], db=pg["dbname"])
 
     try:
-        async with session_factory() as db:
-            compressed = await export_database(db, progress_callback=_progress)
+        proc = await asyncio.create_subprocess_exec(
+            "pg_dump",
+            "-h", pg["host"],
+            "-p", pg["port"],
+            "-U", pg["user"],
+            "-d", pg["dbname"],
+            "--format=custom",      # komprimiertes Binärformat
+            "--no-acl",             # keine GRANT-Statements
+            "--no-owner",           # keine ALTER OWNER-Statements
+            "--schema=public",      # nur public-Schema (kein _timescaledb_internal etc.)
+            "-f", result_path,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
 
-        result_path = _job_path(job_id, "result")
-        with open(result_path, "wb") as f:
-            f.write(compressed)
+        if proc.returncode != 0:
+            err = stderr.decode(errors="replace").strip()
+            logger.error("backup_export_failed", job_id=job_id, returncode=proc.returncode, stderr=err)
+            _jobs[job_id] = {"status": "error", "error": f"pg_dump fehlgeschlagen (Code {proc.returncode}): {err}"}
+            return
 
-        size_kb = round(len(compressed) / 1024, 1)
+        size_kb = round(os.path.getsize(result_path) / 1024, 1)
         _jobs[job_id] = {
             "status": "done", "phase": "export", "percent": 100,
             "size_kb": size_kb, "result_path": result_path,
         }
         logger.info("backup_export_done", job_id=job_id, size_kb=size_kb)
 
+    except FileNotFoundError:
+        msg = "pg_dump nicht gefunden. Ist postgresql-client installiert?"
+        logger.error("backup_export_failed", job_id=job_id, error=msg)
+        _jobs[job_id] = {"status": "error", "error": msg}
     except Exception as e:
         logger.error("backup_export_failed", job_id=job_id, error=str(e))
         _jobs[job_id] = {"status": "error", "error": str(e)}
-    finally:
-        await engine.dispose()
 
     asyncio.create_task(_cleanup_job(job_id))
 
 
+# ── Import ──────────────────────────────────────────────────────────────────
+
 async def _run_import(job_id: str) -> None:
-    """Import-Task: läuft im selben asyncio-Event-Loop wie FastAPI."""
+    """
+    Importiert ein pg_dump-Backup via pg_restore.
+
+    Löscht zuerst alle Objekte im public-Schema, dann stellt pg_restore wieder her.
+    Fortschritt: phase 'prepare' während DROP läuft, 'import' während pg_restore läuft.
+    """
     from app.config import get_settings
-
     settings = get_settings()
-
-    def _progress(rows_done: int, total_rows: int, table: str,
-                  table_rows: int, table_total: int, phase: str,
-                  percent: int = 0) -> None:
-        _jobs[job_id] = {
-            "status": "running", "phase": phase,
-            "rows_done": rows_done, "total_rows": total_rows,
-            "table": table, "table_rows": table_rows,
-            "table_total": table_total, "percent": percent,
-        }
 
     upload_path = _job_path(job_id, "upload")
     if not os.path.exists(upload_path):
         _jobs[job_id] = {"status": "error", "error": "Upload-Datei nicht gefunden."}
         return
 
-    with open(upload_path, "rb") as f:
-        backup_bytes = f.read()
-
-    _jobs[job_id] = {"status": "running", "phase": "import",
-                     "rows_done": 0, "total_rows": 0, "percent": 0, "table": ""}
-
-    engine = create_async_engine(
-        settings.database_url, echo=False, pool_size=2, max_overflow=2,
-        pool_recycle=3600,
-        connect_args={"command_timeout": None},
-    )
-    session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    pg, env = _pg_env(settings.database_url)
+    logger.info("backup_import_start", job_id=job_id)
 
     try:
-        async with session_factory() as db:
-            stats = await import_database(
-                db, backup_bytes, replace=True, progress_callback=_progress
-            )
+        # Schritt 1: Schema leeren (DROP + CREATE public)
+        _jobs[job_id] = {"status": "running", "phase": "prepare", "percent": 10}
+        drop_sql = "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+        proc_drop = await asyncio.create_subprocess_exec(
+            "psql",
+            "-h", pg["host"],
+            "-p", pg["port"],
+            "-U", pg["user"],
+            "-d", pg["dbname"],
+            "-c", drop_sql,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr_drop = await proc_drop.communicate()
+        if proc_drop.returncode != 0:
+            err = stderr_drop.decode(errors="replace").strip()
+            logger.error("backup_import_drop_failed", job_id=job_id, stderr=err)
+            _jobs[job_id] = {"status": "error", "error": f"Schema-Reset fehlgeschlagen: {err}"}
+            return
+
+        # Schritt 2: pg_restore
+        _jobs[job_id] = {"status": "running", "phase": "import", "percent": 30}
+        proc = await asyncio.create_subprocess_exec(
+            "pg_restore",
+            "-h", pg["host"],
+            "-p", pg["port"],
+            "-U", pg["user"],
+            "-d", pg["dbname"],
+            "--no-acl",
+            "--no-owner",
+            "--schema=public",
+            upload_path,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+
+        # pg_restore gibt auch bei Erfolg Warnungen auf stderr aus (returncode kann 1 sein)
+        # → nur bei returncode >= 2 als Fehler werten
+        if proc.returncode >= 2:
+            err = stderr.decode(errors="replace").strip()
+            logger.error("backup_import_failed", job_id=job_id, returncode=proc.returncode, stderr=err)
+            _jobs[job_id] = {"status": "error", "error": f"pg_restore fehlgeschlagen (Code {proc.returncode}): {err}"}
+            return
+
+        warnings = stderr.decode(errors="replace").strip()
+        if warnings:
+            logger.warning("backup_import_warnings", job_id=job_id, warnings=warnings[:500])
 
         _jobs[job_id] = {
             "status": "done", "phase": "import", "percent": 100,
-            "imported": stats["imported"],
-            "skipped": stats["skipped"],
-            "errors": stats["errors"],
         }
-        logger.info("backup_import_done", job_id=job_id, imported=stats["imported"])
+        logger.info("backup_import_done", job_id=job_id)
 
+    except FileNotFoundError:
+        msg = "pg_restore nicht gefunden. Ist postgresql-client installiert?"
+        logger.error("backup_import_failed", job_id=job_id, error=msg)
+        _jobs[job_id] = {"status": "error", "error": msg}
     except Exception as e:
         logger.error("backup_import_failed", job_id=job_id, error=str(e))
         _jobs[job_id] = {"status": "error", "error": str(e)}
     finally:
-        await engine.dispose()
         try:
             os.unlink(upload_path)
         except OSError:
@@ -187,33 +235,13 @@ async def _run_import(job_id: str) -> None:
 
 # ── API-Endpunkte ────────────────────────────────────────────────────────────
 
-@router.get("/export")
-async def export_backup(
-    current_user: User = Depends(require_permission("settings", "update")),
-    db: AsyncSession = Depends(get_db),
-):
-    """Exportiert die komplette Datenbank als komprimierte JSON-Datei (synchron)."""
-    compressed = await export_database(db)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = f"energy_backup_{timestamp}.json.gz"
-    return Response(
-        content=compressed,
-        media_type="application/gzip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Length": str(len(compressed)),
-        },
-    )
-
-
 @router.post("/export/start")
 async def start_export(
     current_user: User = Depends(require_permission("settings", "update")),
 ):
     """
-    Startet einen asynchronen Datenbank-Export.
+    Startet einen asynchronen Datenbank-Export via pg_dump.
 
-    Der Export läuft als asyncio.Task im FastAPI-Prozess.
     Fortschritt: GET /backup/progress/{job_id}
     Download:    GET /backup/download/{job_id}
     """
@@ -228,7 +256,7 @@ async def get_backup_progress(
     current_user: User = Depends(get_current_user),
 ):
     """Fortschritt eines laufenden Backup-Jobs abrufen."""
-    if not re.match(r'^[0-9a-f\-]{36}$', job_id):
+    if not re.match(r"^[0-9a-f\-]{36}$", job_id):
         raise HTTPException(status_code=400, detail="Ungültige Job-ID.")
     job = _jobs.get(job_id)
     if job is None:
@@ -242,14 +270,18 @@ async def download_backup_result(
     current_user: User = Depends(require_permission("settings", "update")),
 ):
     """Fertigen asynchronen Export herunterladen."""
-    if not re.match(r'^[0-9a-f\-]{36}$', job_id):
+    if not re.match(r"^[0-9a-f\-]{36}$", job_id):
         raise HTTPException(status_code=400, detail="Ungültige Job-ID.")
     result_path = _job_path(job_id, "result")
     if not os.path.exists(result_path):
         raise HTTPException(status_code=404, detail="Export nicht gefunden oder bereits gelöscht.")
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = f"energy_backup_{timestamp}.json.gz"
-    return FileResponse(path=result_path, media_type="application/gzip", filename=filename)
+    filename = f"energy_backup_{timestamp}.dump"
+    return FileResponse(
+        path=result_path,
+        media_type="application/octet-stream",
+        filename=filename,
+    )
 
 
 @router.post("/import/start")
@@ -258,17 +290,17 @@ async def start_import(
     current_user: User = Depends(require_permission("settings", "update")),
 ):
     """
-    Lädt eine Backup-Datei hoch und startet den asynchronen Import.
+    Lädt eine pg_dump-Backup-Datei (.dump) hoch und startet den asynchronen Import.
 
-    Die Datei wird auf Disk gespeichert (vermeidet RAM-Engpass).
     Fortschritt: GET /backup/progress/{job_id}
     """
-    if not file.filename or not file.filename.endswith(".gz"):
-        raise HTTPException(status_code=400, detail="Bitte eine .json.gz-Backup-Datei hochladen.")
-
+    # pg_dump Custom-Format: Magic Bytes "PGDMP"
     backup_bytes = await file.read()
-    if len(backup_bytes) < 20:
-        raise HTTPException(status_code=400, detail="Datei ist leer oder beschädigt.")
+    if len(backup_bytes) < 5 or not backup_bytes[:5].startswith(b"PGDMP"):
+        raise HTTPException(
+            status_code=400,
+            detail="Ungültige Backup-Datei. Bitte eine .dump-Datei (pg_dump Custom-Format) hochladen.",
+        )
 
     job_id = str(uuid.uuid4())
     upload_path = _job_path(job_id, "upload")
@@ -277,64 +309,6 @@ async def start_import(
 
     asyncio.create_task(_run_import(job_id))
     return {"job_id": job_id}
-
-
-@router.post("/import")
-async def import_backup(
-    file: UploadFile = File(...),
-    replace: bool = True,
-    current_user: User = Depends(require_permission("settings", "update")),
-    db: AsyncSession = Depends(get_db),
-):
-    """Importiert eine Backup-Datei (.json.gz) synchron."""
-    if not file.filename or not file.filename.endswith(".gz"):
-        raise HTTPException(status_code=400, detail="Bitte eine .json.gz-Backup-Datei hochladen.")
-    backup_bytes = await file.read()
-    if len(backup_bytes) < 20:
-        raise HTTPException(status_code=400, detail="Datei ist leer oder beschädigt.")
-    try:
-        stats = await import_database(db, backup_bytes, replace=replace)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Import fehlgeschlagen: {e}") from e
-    return {
-        "message": "Import abgeschlossen",
-        "imported_rows": stats["imported"],
-        "skipped_tables": stats["skipped"],
-        "errors": stats["errors"],
-    }
-
-
-@router.post("/inspect")
-async def inspect_backup(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
-):
-    """Liest Metadaten aus einer Backup-Datei, ohne sie einzuspielen."""
-    if not file.filename or not file.filename.endswith(".gz"):
-        raise HTTPException(status_code=400, detail="Bitte eine .json.gz-Backup-Datei hochladen.")
-    backup_bytes = await file.read()
-    try:
-        json_bytes = gzip.decompress(backup_bytes)
-        data = json.loads(json_bytes.decode("utf-8"))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Datei konnte nicht gelesen werden: {e}") from e
-
-    version = data.get("version", "unbekannt")
-    tables = data.get("tables", {})
-    table_summary = {t: len(rows) for t, rows in tables.items()}
-    total_rows = sum(table_summary.values())
-    compatible = version == BACKUP_FORMAT_VERSION
-    return {
-        "version": version,
-        "compatible": compatible,
-        "exported_at": data.get("exported_at", "unbekannt"),
-        "file_size_kb": round(len(backup_bytes) / 1024, 1),
-        "total_rows": total_rows,
-        "tables": table_summary,
-        "skipped_tables": data.get("skipped_tables", []),
-    }
 
 
 @router.post("/factory-reset")

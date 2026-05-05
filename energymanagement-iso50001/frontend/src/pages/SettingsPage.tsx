@@ -161,50 +161,23 @@ export default function SettingsPage() {
 
 /* ── Backup-Panel (Export / Import) ── */
 
-interface InspectResult {
-  version: string;
-  compatible: boolean;
-  exported_at: string;
-  file_size_kb: number;
-  total_rows: number;
-  tables: Record<string, number>;
-  skipped_tables: string[];
-}
-
 interface BackupProgress {
   status: 'running' | 'done' | 'error';
   phase: string;
-  rows_done?: number;
-  total_rows?: number;
-  table?: string;
-  table_rows?: number;
-  table_total?: number;
   percent?: number;
   size_kb?: number;
-  imported?: number;
-  skipped?: number;
-  errors?: string[];
   error?: string;
 }
 
-function fmt(n: number): string {
-  return n.toLocaleString('de-DE');
-}
-
 function ProgressBar({ progress }: { progress: BackupProgress }) {
-  const pct = progress.percent ?? 0;
   const isError = progress.status === 'error';
   const isDone = progress.status === 'done';
-  const isCount = progress.phase === 'count';
-  const isLoading = progress.phase === 'loading';
 
-  const tableLabel = progress.table ? progress.table : '…';
-  const rowInfo = (progress.rows_done !== undefined && progress.total_rows !== undefined && progress.total_rows > 0)
-    ? `${fmt(progress.rows_done)} / ${fmt(progress.total_rows)} Zeilen`
-    : null;
-  const tableInfo = (progress.table_total !== undefined && progress.table_total > 0 && progress.table_rows !== undefined)
-    ? `${tableLabel}: ${fmt(progress.table_rows)} / ${fmt(progress.table_total)}`
-    : tableLabel;
+  const phaseLabel: Record<string, string> = {
+    export: 'Datenbank wird gesichert…',
+    prepare: 'Datenbank wird vorbereitet…',
+    import: 'Daten werden wiederhergestellt…',
+  };
 
   return (
     <div className="space-y-2">
@@ -212,21 +185,18 @@ function ProgressBar({ progress }: { progress: BackupProgress }) {
         <span>
           {isError ? 'Fehler'
             : isDone ? 'Abgeschlossen'
-            : isCount ? 'Tabellen zählen…'
-            : isLoading ? `${tableLabel}: wird geladen…`
-            : tableInfo}
+            : phaseLabel[progress.phase] ?? `${progress.phase}…`}
         </span>
-        <span>{pct}%</span>
+        <span>{isDone ? '100' : isError ? '' : '…'}%</span>
       </div>
       <div className="w-full bg-gray-100 rounded-full h-2.5">
         <div
-          className={`h-2.5 rounded-full transition-all duration-300 ${isError ? 'bg-red-500' : isDone ? 'bg-green-500' : 'bg-primary-500'}`}
-          style={{ width: `${pct}%` }}
+          className={`h-2.5 rounded-full transition-all duration-300 ${
+            isError ? 'bg-red-500' : isDone ? 'bg-green-500' : 'bg-primary-500 animate-pulse'
+          }`}
+          style={{ width: isDone ? '100%' : isError ? '100%' : '60%' }}
         />
       </div>
-      {!isDone && !isError && !isCount && !isLoading && rowInfo && (
-        <p className="text-xs text-gray-400">{rowInfo}</p>
-      )}
       {isError && <p className="text-xs text-red-600">{progress.error}</p>}
     </div>
   );
@@ -236,8 +206,6 @@ function BackupPanel() {
   const dispatch = useAppDispatch();
   const [exportProgress, setExportProgress] = useState<BackupProgress | null>(null);
   const [importProgress, setImportProgress] = useState<BackupProgress | null>(null);
-  const [inspecting, setInspecting] = useState(false);
-  const [inspectResult, setInspectResult] = useState<InspectResult | null>(null);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -267,7 +235,7 @@ function BackupPanel() {
 
   const handleExport = async () => {
     setError(null);
-    setExportProgress({ status: 'running', phase: 'export', percent: 0, table: '' });
+    setExportProgress({ status: 'running', phase: 'export', percent: 0 });
     lock();
     try {
       const res = await apiClient.post('/api/v1/backup/export/start');
@@ -279,7 +247,7 @@ function BackupPanel() {
         const a = document.createElement('a');
         const now = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
         a.href = url;
-        a.download = `energy_backup_${now}.json.gz`;
+        a.download = `energy_backup_${now}.dump`;
         a.click();
         window.URL.revokeObjectURL(url);
       });
@@ -290,33 +258,18 @@ function BackupPanel() {
     }
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setImportFile(file);
-    setInspectResult(null);
     setImportProgress(null);
     setError(null);
-
-    setInspecting(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const res = await apiClient.post('/api/v1/backup/inspect', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      setInspectResult(res.data);
-    } catch {
-      setError('Backup-Datei konnte nicht gelesen werden.');
-    } finally {
-      setInspecting(false);
-    }
   };
 
   const handleImport = async () => {
     if (!importFile) return;
     setError(null);
-    setImportProgress({ status: 'running', phase: 'import', percent: 0, table: '' });
+    setImportProgress({ status: 'running', phase: 'import', percent: 0 });
     lock();
     try {
       const formData = new FormData();
@@ -343,7 +296,8 @@ function BackupPanel() {
       <div>
         <h2 className="text-lg font-semibold text-gray-800 mb-1">Datensicherung</h2>
         <p className="text-sm text-gray-500">
-          Exportiere alle Daten als komprimierte JSON-Datei und spiele sie auf einem neuen System ein.
+          Vollständige PostgreSQL-Datenbanksicherung via pg_dump. Die Datei kann auf demselben
+          oder einem anderen System wiederhergestellt werden.
         </p>
       </div>
 
@@ -354,8 +308,8 @@ function BackupPanel() {
           <h3 className="font-medium text-gray-800">Datenbank exportieren</h3>
         </div>
         <p className="text-sm text-gray-500">
-          Erstellt eine vollständige Sicherung aller Zähler, Messwerte, Einstellungen,
-          ISO 50001-Daten und Benutzer als <code>.json.gz</code>-Datei.
+          Erstellt eine vollständige Sicherung aller Tabellen (pg_dump Custom-Format, <code>.dump</code>).
+          Enthält alle Zähler, Messwerte, Einstellungen, ISO 50001-Daten und Benutzer.
         </p>
         {exportProgress ? (
           <div className="space-y-3">
@@ -398,7 +352,7 @@ function BackupPanel() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".gz"
+            accept=".dump"
             onChange={handleFileChange}
             className="hidden"
           />
@@ -408,49 +362,14 @@ function BackupPanel() {
             className="btn-secondary flex items-center gap-2"
           >
             <Upload className="w-4 h-4" />
-            {importFile ? importFile.name : 'Backup-Datei auswählen (.json.gz)'}
+            {importFile ? importFile.name : 'Backup-Datei auswählen (.dump)'}
           </button>
         </div>
 
-        {/* Datei-Inspektion */}
-        {inspecting && (
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <RefreshCw className="w-4 h-4 animate-spin" /> Datei wird geprüft…
-          </div>
-        )}
-
-        {inspectResult && (
-          <div className={`rounded-lg border p-4 space-y-3 ${inspectResult.compatible ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
-            <div className="flex items-center gap-2">
-              {inspectResult.compatible
-                ? <CheckCircle className="w-4 h-4 text-green-600" />
-                : <XCircle className="w-4 h-4 text-red-600" />
-              }
-              <span className="text-sm font-medium">
-                {inspectResult.compatible ? 'Kompatible Backup-Datei' : 'Inkompatible Version'}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="text-gray-500">Exportiert am</div>
-              <div className="text-gray-800">{new Date(inspectResult.exported_at).toLocaleString('de-DE')}</div>
-              <div className="text-gray-500">Dateigröße</div>
-              <div className="text-gray-800">{inspectResult.file_size_kb} KB</div>
-              <div className="text-gray-500">Datensätze gesamt</div>
-              <div className="text-gray-800">{inspectResult.total_rows.toLocaleString('de-DE')}</div>
-              <div className="text-gray-500">Tabellen</div>
-              <div className="text-gray-800">{Object.keys(inspectResult.tables).length}</div>
-            </div>
-            <details className="text-xs text-gray-600 cursor-pointer">
-              <summary className="font-medium hover:text-primary-600">Tabellen-Details</summary>
-              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 max-h-40 overflow-y-auto">
-                {Object.entries(inspectResult.tables).map(([t, n]) => (
-                  <div key={t} className="flex justify-between">
-                    <span>{t}</span>
-                    <span className="font-mono">{n}</span>
-                  </div>
-                ))}
-              </div>
-            </details>
+        {importFile && !importProgress && (
+          <div className="flex items-center gap-2 text-sm text-green-700">
+            <CheckCircle className="w-4 h-4" />
+            <span>{importFile.name} ({(importFile.size / 1024 / 1024).toFixed(1)} MB) – bereit zum Importieren</span>
           </div>
         )}
 
@@ -458,7 +377,7 @@ function BackupPanel() {
         {importProgress && <ProgressBar progress={importProgress} />}
 
         {/* Import-Button */}
-        {inspectResult?.compatible && !importProgress && (
+        {importFile && !importProgress && (
           <button
             onClick={handleImport}
             disabled={importRunning}
@@ -469,23 +388,12 @@ function BackupPanel() {
         )}
 
         {/* Import-Ergebnis */}
-        {importDone && importProgress && (
-          <div className="rounded-lg border border-green-200 bg-green-50 p-4 space-y-2">
+        {importDone && (
+          <div className="rounded-lg border border-green-200 bg-green-50 p-4">
             <div className="flex items-center gap-2">
               <CheckCircle className="w-4 h-4 text-green-600" />
               <span className="text-sm font-medium text-green-800">Import erfolgreich abgeschlossen</span>
             </div>
-            <div className="text-sm text-green-700">
-              {importProgress.imported?.toLocaleString('de-DE')} Datensätze importiert
-            </div>
-            {importProgress.errors && importProgress.errors.length > 0 && (
-              <div className="text-xs text-amber-700 mt-1">
-                <strong>Hinweise:</strong>
-                <ul className="list-disc ml-4 mt-1">
-                  {importProgress.errors.map((e, i) => <li key={i}>{e}</li>)}
-                </ul>
-              </div>
-            )}
           </div>
         )}
       </div>
