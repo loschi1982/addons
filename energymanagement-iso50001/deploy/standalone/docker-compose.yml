@@ -88,6 +88,8 @@ services:
     dns:
       - 8.8.8.8
       - 8.8.4.4
+    extra_hosts:
+      - "energy-as-a-service.spie-es.de:81.95.3.70"
     depends_on:
       timescaledb:
         condition: service_healthy
