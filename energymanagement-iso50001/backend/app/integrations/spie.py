@@ -220,14 +220,16 @@ class SpieClient:
             json=payload,
             headers=self._xsrf_headers(),
         )
+        is_json = "application/json" in r.headers.get("content-type", "")
+        body = r.json() if is_json else r.text
         logger.info(
             "spie_raw_probe",
             endpoint=endpoint,
             nav_id=nav_id,
             status=r.status_code,
-            response_preview=r.text[:500],
+            response_preview=str(body)[:1000],
         )
-        return {"status": r.status_code, "body": r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text}
+        return {"status": r.status_code, "body": body}
 
     def _parse_readings_response(self, data: Any) -> list[dict] | None:
         """

@@ -7,6 +7,7 @@ POST /spie/test           → Verbindungstest
 POST /spie/sync           → Manuellen Import auslösen (asyncio.Task)
 GET  /spie/progress/{id}  → Fortschritt eines laufenden Imports
 GET  /spie/status         → Letzter Sync-Zeitpunkt + Ergebnis
+POST /spie/probe          → Diagnose: Rohantwort der SPIE-API für einen Zähler
 """
 
 import asyncio
@@ -142,3 +143,143 @@ async def get_spie_status(
     svc = SpieService(db)
     last = await svc.get_last_sync()
     return last or {"synced_at": None, "imported": 0, "errors": 0, "meters_processed": 0}
+
+
+@router.post("/probe")
+async def probe_spie_readings(
+    nav_id: str = Body(...),
+    date_from: str = Body(...),
+    date_to: str = Body(...),
+    current_user: User = Depends(require_permission("settings", "update")),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Diagnose-Endpunkt: Rohantwort der SPIE-API für einen Zähler.
+
+    Ruft beide bekannten Endpoints auf und gibt die vollständige JSON-Antwort zurück.
+    Hilft beim Ermitteln der genauen Response-Struktur für den Parser.
+
+    Body: { "nav_id": "...", "date_from": "2026-03-01", "date_to": "2026-03-31" }
+    """
+    from datetime import date as _date
+    svc = SpieService(db)
+    cfg = await svc.get_config_raw()
+    if not cfg or not cfg.get("username"):
+        raise HTTPException(status_code=400, detail="SPIE nicht konfiguriert.")
+
+    try:
+        df = _date.fromisoformat(date_from)
+        dt = _date.fromisoformat(date_to)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Ungültiges Datumsformat (YYYY-MM-DD erwartet).")
+
+    async with SpieClient() as client:
+        await client.login(cfg["username"], cfg["password"])
+
+        # Endpoint 1: Freie Auswertung
+        fa_raw = await client.raw_probe(
+            nav_id,
+            "/legacyfreieauswertung/getfreieauswertungdata",
+            {
+                "routeParams": {"elementType": "z", "elementId": nav_id, "task": "freieauswertung"},
+                "targetRouteParams": {"elementType": "z", "elementId": nav_id, "task": "freieauswertung"},
+                "dateFrom": df.isoformat(),
+                "dateTo": dt.isoformat(),
+                "silentErrorHandling": True,
+            },
+        )
+
+        # Endpoint 2: Verbrauchsverlauf
+        vv_raw = await client.raw_probe(
+            nav_id,
+            "/legacyverbrauchsverlauf/getverbrauchsverlaufdata",
+            {
+                "routeParams": {"elementType": "z", "elementId": nav_id, "task": "verbrauchsverlauf"},
+                "targetRouteParams": {"elementType": "z", "elementId": nav_id, "task": "verbrauchsverlauf"},
+                "dateFrom": df.isoformat(),
+                "dateTo": dt.isoformat(),
+                "silentErrorHandling": True,
+            },
+        )
+
+    return {
+        "nav_id": nav_id,
+        "date_from": date_from,
+        "date_to": date_to,
+        "freieauswertung": fa_raw,
+        "verbrauchsverlauf": vv_raw,
+    }
+
+
+@router.post("/probe-auto")
+async def probe_spie_auto(
+    current_user: User = Depends(require_permission("settings", "update")),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Diagnose: Ersten SPIE-Zähler automatisch auswählen und Rohantwort zeigen.
+
+    Wählt den ersten aktiven Zähler mit spie_nav_id und fragt Messwerte
+    für die letzten 30 Tage ab. Gibt die vollständige API-Antwort zurück.
+    """
+    from datetime import date as _date, timedelta
+    svc = SpieService(db)
+    cfg = await svc.get_config_raw()
+    if not cfg or not cfg.get("username"):
+        raise HTTPException(status_code=400, detail="SPIE nicht konfiguriert.")
+
+    meters = await svc._load_spie_meters()
+    if not meters:
+        raise HTTPException(status_code=404, detail="Keine SPIE-Zähler gefunden.")
+
+    # Ersten Zähler mit nav_id nehmen
+    meter = None
+    nav_id = None
+    for m in meters:
+        nid = (m.source_config or {}).get("spie_nav_id") or (m.source_config or {}).get("nav_id")
+        if nid:
+            meter = m
+            nav_id = nid
+            break
+
+    if not nav_id:
+        raise HTTPException(status_code=404, detail="Kein Zähler mit spie_nav_id gefunden.")
+
+    dt = _date.today()
+    df = dt - timedelta(days=30)
+
+    async with SpieClient() as client:
+        await client.login(cfg["username"], cfg["password"])
+
+        fa_raw = await client.raw_probe(
+            nav_id,
+            "/legacyfreieauswertung/getfreieauswertungdata",
+            {
+                "routeParams": {"elementType": "z", "elementId": nav_id, "task": "freieauswertung"},
+                "targetRouteParams": {"elementType": "z", "elementId": nav_id, "task": "freieauswertung"},
+                "dateFrom": df.isoformat(),
+                "dateTo": dt.isoformat(),
+                "silentErrorHandling": True,
+            },
+        )
+
+        vv_raw = await client.raw_probe(
+            nav_id,
+            "/legacyverbrauchsverlauf/getverbrauchsverlaufdata",
+            {
+                "routeParams": {"elementType": "z", "elementId": nav_id, "task": "verbrauchsverlauf"},
+                "targetRouteParams": {"elementType": "z", "elementId": nav_id, "task": "verbrauchsverlauf"},
+                "dateFrom": df.isoformat(),
+                "dateTo": dt.isoformat(),
+                "silentErrorHandling": True,
+            },
+        )
+
+    return {
+        "meter_name": meter.display_name or meter.name,
+        "nav_id": nav_id,
+        "date_from": df.isoformat(),
+        "date_to": dt.isoformat(),
+        "freieauswertung": fa_raw,
+        "verbrauchsverlauf": vv_raw,
+    }
