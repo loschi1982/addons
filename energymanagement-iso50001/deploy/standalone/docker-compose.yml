@@ -85,6 +85,9 @@ services:
       DB_USER: ${DB_USER:-energy}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     depends_on:
       timescaledb:
         condition: service_healthy
