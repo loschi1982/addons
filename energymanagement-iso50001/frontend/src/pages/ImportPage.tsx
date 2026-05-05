@@ -801,6 +801,8 @@ export default function ImportPage() {
       )}
 
       {/* ── History Tab ── */}
+      <SpiePanel />
+
       {activeTab === 'history' && (
         <div className="card mt-4 overflow-hidden p-0">
           {historyLoading ? (
@@ -850,6 +852,256 @@ export default function ImportPage() {
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── SPIE-Automatik-Import ──
+
+const LS_SPIE_JOB = 'spie_sync_job_id';
+
+interface SpieProgress {
+  status: 'running' | 'done' | 'error';
+  phase?: string;
+  current_meter?: number;
+  total_meters?: number;
+  meter_name?: string;
+  imported?: number;
+  errors?: number;
+  percent?: number;
+  error?: string;
+}
+
+function SpiePanel() {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [enabled, setEnabled] = useState(false);
+  const [passwordSet, setPasswordSet] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [lastSync, setLastSync] = useState<{ synced_at: string | null; imported: number; errors: number; meters_processed: number } | null>(null);
+  const [syncProgress, setSyncProgress] = useState<SpieProgress | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const loadConfig = async () => {
+    try {
+      const [cfgRes, statusRes] = await Promise.all([
+        apiClient.get('/api/v1/spie/config'),
+        apiClient.get('/api/v1/spie/status'),
+      ]);
+      const cfg = cfgRes.data;
+      setUsername(cfg.username || '');
+      setEnabled(cfg.enabled || false);
+      setPasswordSet(cfg.password_set || false);
+      setLastSync(statusRes.data);
+    } catch { /* ignorieren */ }
+  };
+
+  const resumePoll = (jobId: string) => {
+    setSyncProgress({ status: 'running', phase: 'import' });
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await apiClient.get(`/api/v1/spie/progress/${jobId}`);
+        const p: SpieProgress = res.data;
+        setSyncProgress(p);
+        if (p.status === 'done' || p.status === 'error') {
+          if (pollRef.current) clearInterval(pollRef.current);
+          localStorage.removeItem(LS_SPIE_JOB);
+          if (p.status === 'done') await loadConfig();
+        }
+      } catch { /* Job noch nicht bereit – weiter pollen */ }
+    }, 2000);
+  };
+
+  useEffect(() => {
+    loadConfig();
+    const jobId = localStorage.getItem(LS_SPIE_JOB);
+    if (jobId) resumePoll(jobId);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSave = async () => {
+    setSaving(true);
+    setTestResult(null);
+    try {
+      await apiClient.post('/api/v1/spie/config', {
+        username,
+        password: password || '',
+        enabled,
+      });
+      setPassword('');
+      setPasswordSet(true);
+    } catch { /* Fehler ignorieren */ }
+    finally { setSaving(false); }
+  };
+
+  const handleTest = async () => {
+    if (!username || !password) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await apiClient.post('/api/v1/spie/test', { username, password });
+      setTestResult({ ok: true, message: res.data.message });
+    } catch {
+      setTestResult({ ok: false, message: 'Login fehlgeschlagen. Zugangsdaten prüfen.' });
+    } finally { setTesting(false); }
+  };
+
+  const handleSync = async () => {
+    setSyncProgress({ status: 'running', phase: 'login' });
+    try {
+      const res = await apiClient.post('/api/v1/spie/sync');
+      const { job_id } = res.data;
+      localStorage.setItem(LS_SPIE_JOB, job_id);
+      resumePoll(job_id);
+    } catch {
+      setSyncProgress({ status: 'error', error: 'Import konnte nicht gestartet werden.' });
+    }
+  };
+
+  const isRunning = syncProgress?.status === 'running';
+  const isDone = syncProgress?.status === 'done';
+  const isError = syncProgress?.status === 'error';
+
+  return (
+    <div className="card mt-6 p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-lg">🔄</span>
+          <h2 className="font-semibold text-gray-800">SPIE-Automatik-Import</h2>
+        </div>
+        {lastSync?.synced_at && (
+          <span className="text-xs text-gray-400">
+            Letzter Import: {new Date(lastSync.synced_at).toLocaleString('de-DE')}
+            {lastSync.meters_processed > 0 && ` · ${lastSync.imported.toLocaleString('de-DE')} Werte`}
+          </span>
+        )}
+      </div>
+
+      {/* Zugangsdaten */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="label">Benutzername</label>
+          <input
+            type="text"
+            value={username}
+            onChange={e => { setUsername(e.target.value); setTestResult(null); }}
+            className="input w-full"
+            placeholder="SPIE-Benutzername"
+            disabled={isRunning}
+          />
+        </div>
+        <div>
+          <label className="label">
+            Passwort{passwordSet && !password && <span className="text-gray-400 font-normal ml-1">(gesetzt)</span>}
+          </label>
+          <input
+            type="password"
+            value={password}
+            onChange={e => { setPassword(e.target.value); setTestResult(null); }}
+            className="input w-full"
+            placeholder={passwordSet ? 'Unverändert lassen' : 'SPIE-Passwort'}
+            disabled={isRunning}
+          />
+        </div>
+      </div>
+
+      {/* Verbindungstest */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleTest}
+          disabled={testing || !username || !password || isRunning}
+          className="btn-secondary text-sm"
+        >
+          {testing ? 'Wird getestet…' : 'Verbindung testen'}
+        </button>
+        {testResult && (
+          <span className={`text-sm ${testResult.ok ? 'text-green-600' : 'text-red-600'}`}>
+            {testResult.ok ? '✓' : '✗'} {testResult.message}
+          </span>
+        )}
+      </div>
+
+      {/* Aktivieren + Speichern */}
+      <div className="flex items-center justify-between border-t pt-3">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={e => setEnabled(e.target.checked)}
+            className="rounded"
+            disabled={isRunning}
+          />
+          <span className="text-sm text-gray-700">Automatischer Import alle 3 Tage</span>
+        </label>
+        <div className="flex gap-2">
+          <button
+            onClick={handleSave}
+            disabled={saving || isRunning || !username}
+            className="btn-primary text-sm"
+          >
+            {saving ? 'Speichern…' : 'Speichern'}
+          </button>
+          <button
+            onClick={handleSync}
+            disabled={isRunning || !username}
+            className="btn-secondary text-sm"
+          >
+            Jetzt importieren
+          </button>
+        </div>
+      </div>
+
+      {/* Fortschrittsanzeige */}
+      {syncProgress && (
+        <div className="border-t pt-3 space-y-2">
+          {isRunning && (
+            <>
+              <div className="flex justify-between text-xs text-gray-500">
+                <span>
+                  {syncProgress.current_meter && syncProgress.total_meters
+                    ? `Zähler ${syncProgress.current_meter} / ${syncProgress.total_meters}${syncProgress.meter_name ? ` – ${syncProgress.meter_name}` : ''}`
+                    : syncProgress.phase === 'login' ? 'SPIE-Login…' : 'Import wird vorbereitet…'}
+                </span>
+                <span>
+                  {syncProgress.current_meter && syncProgress.total_meters
+                    ? `${Math.round(syncProgress.current_meter / syncProgress.total_meters * 100)}%`
+                    : '…'}
+                </span>
+              </div>
+              <div className="w-full bg-gray-100 rounded-full h-2">
+                <div
+                  className="h-2 rounded-full bg-primary-500 transition-all duration-500"
+                  style={{
+                    width: syncProgress.total_meters
+                      ? `${Math.round((syncProgress.current_meter ?? 0) / syncProgress.total_meters * 100)}%`
+                      : '30%',
+                  }}
+                />
+              </div>
+            </>
+          )}
+          {isDone && (
+            <div className="flex items-center gap-2 text-sm text-green-700">
+              <span>✓</span>
+              <span>
+                Import abgeschlossen –{' '}
+                {syncProgress.imported?.toLocaleString('de-DE')} neue Werte importiert
+                {syncProgress.errors ? `, ${syncProgress.errors} Fehler` : ''}
+              </span>
+              <button onClick={() => setSyncProgress(null)} className="ml-auto text-xs text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+          )}
+          {isError && (
+            <div className="flex items-center gap-2 text-sm text-red-600">
+              <span>✗</span>
+              <span>{syncProgress.error}</span>
+              <button onClick={() => setSyncProgress(null)} className="ml-auto text-xs text-gray-400 hover:text-gray-600">✕</button>
+            </div>
           )}
         </div>
       )}
