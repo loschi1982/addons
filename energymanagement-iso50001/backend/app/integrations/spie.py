@@ -1,29 +1,36 @@
 """
-spie.py – HTTP-Client für das SPIE Energy-as-a-Service-Portal.
+spie.py – Playwright-basierter Client für das SPIE Energy-as-a-Service-Portal.
 
-Authentifizierung und Datenabruf für die SPIE-Energiemonitoring-Plattform
-(https://energy-as-a-service.spie-es.de).
+Hintergrund:
+  Der SPIE-Endpoint POST /api/legacyanalysis/postdata validiert serverseitigen
+  Zustand, der durch Browser-Navigation initialisiert wird. Direkter HTTP-Aufruf
+  schlägt mit HTTP 500 fehl. Nur Browser-Requests in derselben Session mit
+  initialisiertem Zustand funktionieren.
 
-Auth-Flow (identisch zu enrich_spie_meters.py):
-  1. POST /api/data mit Zugangsdaten → Session-Cookie + XSRF-Token
-  2. X-XSRF-TOKEN-Header + Cookie in allen Folge-Requests
-
-Zählerstand-Abruf:
-  POST /legacyfreieauswertung/getfreieauswertungdata mit nav_id + Datumsbereich
-  Falls dieser Endpunkt nicht funktioniert: raw_probe() liefert die Rohantwort
-  für manuelle Diagnose.
+Strategie pro Zähler:
+  1. freieAuswertung-Seite öffnen → initialisiert Server-Zustand
+  2. AngularJS-Scope direkt setzen (fromTo UTC + resolution=zi1h)
+  3. "Ansicht aktualisieren" klicken → Browser schickt validen postdata-Request
+  4. Response via page.route() intercepten → diagramData.x/y extrahieren
 """
 
+import asyncio
+import json
 import urllib.parse
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
-import httpx
+
 import structlog
 
 logger = structlog.get_logger()
 
 BASE_URL = "https://energy-as-a-service.spie-es.de"
+
+# Sekunden die nach dem Klick auf "Ansicht aktualisieren" gewartet werden
+# bevor die Response als fehlend gilt.
+POSTDATA_WAIT_SECONDS = 12
 
 
 class SpieAuthError(Exception):
@@ -32,7 +39,7 @@ class SpieAuthError(Exception):
 
 class SpieClient:
     """
-    Asynchroner HTTP-Client für SPIE Energy-as-a-Service.
+    Playwright-basierter SPIE-Client.
 
     Nutzung:
         async with SpieClient() as client:
@@ -41,58 +48,63 @@ class SpieClient:
     """
 
     def __init__(self):
-        self._client: httpx.AsyncClient | None = None
-        self._logged_in = False
+        self._playwright = None
+        self._browser = None
+        self._context = None
+        self._page = None
 
     async def __aenter__(self):
-        self._client = httpx.AsyncClient(
-            base_url=BASE_URL,
-            headers={
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
-                "Referer": f"{BASE_URL}/",
-                "Origin": BASE_URL,
-            },
-            timeout=30.0,
-            follow_redirects=True,
+        from playwright.async_api import async_playwright
+
+        self._playwright = await async_playwright().start()
+        self._browser = await self._playwright.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
+        self._context = await self._browser.new_context(
+            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+        )
+        self._page = await self._context.new_page()
         return self
 
     async def __aexit__(self, *args):
-        if self._client:
-            await self._client.aclose()
-
-    def _xsrf_headers(self) -> dict:
-        """X-XSRF-TOKEN-Header aus Session-Cookie zusammenbauen."""
-        raw = self._client.cookies.get("XSRF-TOKEN", "")
-        decoded = urllib.parse.unquote(raw)
-        return {
-            "X-XSRF-TOKEN": decoded,
-            "Referer": f"{BASE_URL}/",
-            "Content-Type": "application/json",
-        }
+        if self._browser:
+            await self._browser.close()
+        if self._playwright:
+            await self._playwright.stop()
 
     async def login(self, username: str, password: str) -> None:
         """
-        Authentifizierung via POST /api/data (form-encoded).
-        Setzt SessionKeyEnMon2014 + XSRF-TOKEN Cookies.
+        Login bei SPIE via Browser-Formular.
+        Setzt Session-Cookies für alle nachfolgenden Requests.
         """
-        r = await self._client.post(
-            "/api/data",
-            data={"UserName": username, "Password": password, "RememberMe": "false"},
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        r.raise_for_status()
-        if "SessionKeyEnMon2014" not in self._client.cookies:
-            raise SpieAuthError(f"Login fehlgeschlagen: HTTP {r.status_code}, kein Session-Cookie")
-        self._logged_in = True
+        await self._page.goto(BASE_URL + "/", wait_until="domcontentloaded")
+
+        try:
+            await self._page.wait_for_selector('input[type="password"]', timeout=10000)
+        except Exception:
+            # Schon eingeloggt?
+            if "login" not in self._page.url:
+                logger.debug("spie_already_logged_in", url=self._page.url)
+                return
+            raise SpieAuthError("Login-Formular nicht gefunden")
+
+        await self._page.fill('input[name="username"]', username)
+        await self._page.fill('input[name="password"]', password)
+        await self._page.click('input[type="submit"]')
+        await self._page.wait_for_load_state("networkidle", timeout=30000)
+
+        if "/login" in self._page.url:
+            raise SpieAuthError(f"Login fehlgeschlagen (Redirect zurück zu Login)")
+
         logger.info("spie_login_ok", username=username)
 
     async def test_connection(self, username: str, password: str) -> bool:
-        """Login-Test – gibt True zurück wenn erfolgreich, False bei falschen Credentials."""
+        """Login-Test."""
         try:
             await self.login(username, password)
             return True
-        except (SpieAuthError, httpx.HTTPError):
+        except (SpieAuthError, Exception):
             return False
 
     async def get_readings(
@@ -104,229 +116,186 @@ class SpieClient:
         """
         Messwerte für einen Zähler im Zeitraum [date_from, date_to] abrufen.
 
-        Versucht mehrere bekannte SPIE-Endpunkte und gibt die erste
-        erfolgreich geparste Antwort zurück.
+        Strategie:
+          1. freieAuswertung-Seite öffnen (initialisiert Server-Zustand)
+          2. AngularJS-Scope: fromTo (UTC) + resolution=zi1h setzen
+          3. "Ansicht aktualisieren" klicken → postdata-Request
+          4. Response via page.route() intercepten
 
-        Rückgabe: Liste von {"timestamp": datetime, "value": float}
+        Rückgabe: Liste von {"timestamp": datetime (UTC), "value": float}
         """
-        # Versuche 1: Freie Auswertung (primärer Endpunkt)
-        result = await self._try_freie_auswertung(nav_id, date_from, date_to)
-        if result is not None:
-            return result
+        from_utc = _berlin_midnight_utc(date_from)
+        to_utc = _berlin_midnight_utc(date_to + timedelta(days=1))
 
-        # Versuche 2: Legacy Verbrauchsverlauf
-        result = await self._try_verbrauchsverlauf(nav_id, date_from, date_to)
-        if result is not None:
-            return result
+        captured: dict = {}
 
-        # Kein Endpunkt hat funktioniert – leere Liste + Warnung
-        logger.warning(
-            "spie_readings_no_data",
+        async def intercept_postdata(route, request):
+            response = await route.fetch()
+            body = await response.body()
+            try:
+                captured["response"] = json.loads(body)
+            except json.JSONDecodeError:
+                captured["error"] = body[:200].decode(errors="replace")
+            await route.fulfill(response=response, body=body)
+
+        await self._page.route("**/api/legacyanalysis/postdata**", intercept_postdata)
+
+        url = f"{BASE_URL}/element/z/id/{nav_id}/task/freieAuswertung"
+        try:
+            await self._page.goto(url, wait_until="networkidle", timeout=90000)
+        except Exception as e:
+            await self._page.unroute("**/api/legacyanalysis/postdata**")
+            logger.warning("spie_navigation_failed", nav_id=nav_id, error=str(e))
+            return []
+
+        if "/login" in self._page.url:
+            await self._page.unroute("**/api/legacyanalysis/postdata**")
+            logger.warning("spie_session_expired", nav_id=nav_id)
+            return []
+
+        await self._page.unroute("**/api/legacyanalysis/postdata**")
+        captured.clear()
+
+        # Route für den Update-Request
+        async def intercept_update(route, request):
+            response = await route.fetch()
+            body = await response.body()
+            try:
+                captured["response"] = json.loads(body)
+            except json.JSONDecodeError:
+                captured["error"] = body[:200].decode(errors="replace")
+            await route.fulfill(response=response, body=body)
+
+        await self._page.route("**/api/legacyanalysis/postdata**", intercept_update)
+
+        # AngularJS-Scope setzen (Frame 1 = Legacy-Iframe)
+        frame = self._page.frames[1] if len(self._page.frames) > 1 else self._page
+
+        # ZEITRAUM-Tab aktivieren (damit Refresh-Button sichtbar wird)
+        try:
+            zeitraum = frame.locator('li.ribbon-title').filter(has_text="ZEITRAUM")
+            if await zeitraum.count() > 0:
+                await zeitraum.first.click()
+                await asyncio.sleep(0.3)
+        except Exception:
+            pass
+
+        scope_ok = await frame.evaluate(f"""
+            () => {{
+                const ctrl = document.querySelector('[ng-controller="analysis.AuswertungController"]');
+                if (!ctrl) return false;
+                const scope = angular.element(ctrl).scope();
+                if (!scope || !scope.selectedSettings || !scope.selectedSettings.fromTo) return false;
+                scope.selectedSettings.fromTo.from.dateTimeUtc = '{from_utc}';
+                scope.selectedSettings.fromTo.to.dateTimeUtc = '{to_utc}';
+                scope.selectedSettings.resolution = 'zi1h';
+                scope.$apply();
+                return true;
+            }}
+        """)
+
+        if not scope_ok:
+            await self._page.unroute("**/api/legacyanalysis/postdata**")
+            logger.debug("spie_scope_not_found", nav_id=nav_id)
+            return []
+
+        # Ersten sichtbaren "Ansicht aktualisieren"-Button klicken
+        btns = await frame.query_selector_all("button.button--highlight")
+        clicked = False
+        for btn in btns:
+            if await btn.is_visible():
+                await btn.click()
+                clicked = True
+                break
+
+        if not clicked:
+            await self._page.unroute("**/api/legacyanalysis/postdata**")
+            logger.debug("spie_no_refresh_button", nav_id=nav_id)
+            return []
+
+        await asyncio.sleep(POSTDATA_WAIT_SECONDS)
+        await self._page.unroute("**/api/legacyanalysis/postdata**")
+
+        if not captured:
+            logger.debug("spie_postdata_no_response", nav_id=nav_id)
+            return []
+
+        if "error" in captured:
+            logger.warning("spie_postdata_decode_error", nav_id=nav_id, error=captured["error"])
+            return []
+
+        resp = captured["response"]
+        api_err = resp.get("error")
+        if api_err:
+            logger.warning("spie_postdata_api_error", nav_id=nav_id, error=str(api_err))
+            return []
+
+        dd = (resp.get("data") or {}).get("diagramData") or {}
+        x_outer = dd.get("x") or []
+        y_outer = dd.get("y") or []
+
+        if not x_outer or not y_outer:
+            logger.debug("spie_postdata_empty", nav_id=nav_id,
+                         date_from=str(date_from), date_to=str(date_to))
+            return []
+
+        readings = []
+        for ts, val in zip(x_outer[0], y_outer[0]):
+            if val is None or not isinstance(val, (int, float)):
+                continue
+            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+            readings.append({"timestamp": dt, "value": float(val)})
+
+        logger.debug(
+            "spie_readings_fetched",
             nav_id=nav_id,
             date_from=str(date_from),
             date_to=str(date_to),
-            hint="Endpunkt-Payload könnte angepasst werden müssen – raw_probe() für Diagnose",
+            count=len(readings),
         )
-        return []
-
-    async def _try_freie_auswertung(
-        self, nav_id: str, date_from: date, date_to: date
-    ) -> list[dict] | None:
-        """
-        POST /legacyfreieauswertung/getfreieauswertungdata
-
-        Bekanntes Payload-Muster aus SPIE-Stammdaten-Endpoint:
-          routeParams + targetRouteParams mit task='freieauswertung'
-          + Datumsbereich als ISO-8601.
-        """
-        payload = {
-            "routeParams": {
-                "elementType": "z",
-                "elementId": nav_id,
-                "task": "freieauswertung",
-            },
-            "targetRouteParams": {
-                "elementType": "z",
-                "elementId": nav_id,
-                "task": "freieauswertung",
-            },
-            "dateFrom": date_from.isoformat(),
-            "dateTo": date_to.isoformat(),
-            "silentErrorHandling": True,
-        }
-        try:
-            r = await self._client.post(
-                "/legacyfreieauswertung/getfreieauswertungdata",
-                json=payload,
-                headers=self._xsrf_headers(),
-            )
-            if not r.is_success:
-                logger.debug("spie_freieauswertung_failed", status=r.status_code, nav_id=nav_id)
-                return None
-            data = r.json()
-            logger.debug("spie_freieauswertung_raw", nav_id=nav_id, keys=list(data.keys()) if isinstance(data, dict) else type(data).__name__)
-            return self._parse_readings_response(data)
-        except Exception as e:
-            logger.debug("spie_freieauswertung_error", nav_id=nav_id, error=str(e))
-            return None
-
-    async def _try_verbrauchsverlauf(
-        self, nav_id: str, date_from: date, date_to: date
-    ) -> list[dict] | None:
-        """
-        POST /legacyverbrauchsverlauf/getverbrauchsverlaufdata
-
-        Alternative Endpunkt für Verbrauchsdaten.
-        """
-        payload = {
-            "routeParams": {
-                "elementType": "z",
-                "elementId": nav_id,
-                "task": "verbrauchsverlauf",
-            },
-            "targetRouteParams": {
-                "elementType": "z",
-                "elementId": nav_id,
-                "task": "verbrauchsverlauf",
-            },
-            "dateFrom": date_from.isoformat(),
-            "dateTo": date_to.isoformat(),
-            "silentErrorHandling": True,
-        }
-        try:
-            r = await self._client.post(
-                "/legacyverbrauchsverlauf/getverbrauchsverlaufdata",
-                json=payload,
-                headers=self._xsrf_headers(),
-            )
-            if not r.is_success:
-                return None
-            data = r.json()
-            logger.debug("spie_verbrauchsverlauf_raw", nav_id=nav_id, keys=list(data.keys()) if isinstance(data, dict) else type(data).__name__)
-            return self._parse_readings_response(data)
-        except Exception as e:
-            logger.debug("spie_verbrauchsverlauf_error", nav_id=nav_id, error=str(e))
-            return None
+        return sorted(readings, key=lambda r: r["timestamp"])
 
     async def raw_probe(self, nav_id: str, endpoint: str, payload: dict) -> Any:
-        """
-        Rohaufruf eines SPIE-Endpunkts für Diagnose/Debugging.
+        """Rohaufruf eines SPIE-Endpunkts für Diagnose/Debugging."""
+        if not self._page:
+            return {"error": "Kein Browser initialisiert"}
+        result = await self._page.evaluate("""
+            async ([endpoint, payload, xsrfToken]) => {
+                try {
+                    const resp = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json', 'X-XSRF-TOKEN': xsrfToken},
+                        body: JSON.stringify(payload)
+                    });
+                    const isJson = resp.headers.get('content-type')?.includes('application/json');
+                    return {status: resp.status, body: isJson ? await resp.json() : (await resp.text()).substring(0, 1000)};
+                } catch(e) {
+                    return {status: 0, error: String(e)};
+                }
+            }
+        """, [endpoint, payload, await self._get_xsrf_decoded()])
+        logger.info("spie_raw_probe", endpoint=endpoint, nav_id=nav_id,
+                    status=result.get("status"))
+        return result
 
-        Beispiel:
-            data = await client.raw_probe(nav_id, "/legacyfreieauswertung/...", {...})
-        """
-        r = await self._client.post(
-            endpoint,
-            json=payload,
-            headers=self._xsrf_headers(),
-        )
-        is_json = "application/json" in r.headers.get("content-type", "")
-        body = r.json() if is_json else r.text
-        logger.info(
-            "spie_raw_probe",
-            endpoint=endpoint,
-            nav_id=nav_id,
-            status=r.status_code,
-            response_preview=str(body)[:1000],
-        )
-        return {"status": r.status_code, "body": body}
+    async def _get_xsrf_decoded(self) -> str:
+        """URL-decodierten XSRF-TOKEN aus Session-Cookies."""
+        cookies = await self._context.cookies()
+        raw = next((c["value"] for c in cookies if c["name"] == "XSRF-TOKEN"), "")
+        return urllib.parse.unquote(raw)
 
-    def _parse_readings_response(self, data: Any) -> list[dict] | None:
-        """
-        Versucht, Messwerte aus einer SPIE-API-Antwort zu parsen.
 
-        Bekannte Response-Strukturen:
-          {"data": {"values": [{"timestamp": "...", "value": 123.4}, ...]}}
-          {"data": [{"dateTime": "...", "value": 123.4}]}
-          {"values": [...]}
-          Direkte Liste [...] mit Datum+Wert-Einträgen
+def _berlin_midnight_utc(d: date) -> str:
+    """
+    Gibt den UTC-Zeitstempel für Mitternacht (00:00) Berlin-Zeit zurück.
 
-        Gibt None zurück wenn die Struktur nicht erkannt wird.
-        """
-        readings = []
-
-        # Verschiedene bekannte Strukturen durchprobieren
-        candidates = []
-        if isinstance(data, list):
-            candidates = [data]
-        elif isinstance(data, dict):
-            # Häufige Wrapper-Strukturen
-            for key in ("values", "data", "messwerte", "readings", "items"):
-                val = data.get(key)
-                if isinstance(val, list):
-                    candidates.append(val)
-                elif isinstance(val, dict):
-                    for sub_key in ("values", "data", "messwerte", "items"):
-                        sub = val.get(sub_key)
-                        if isinstance(sub, list):
-                            candidates.append(sub)
-
-        if not candidates:
-            return None
-
-        # Erstes nicht-leeres Kandidaten-Array parsen
-        for candidate in candidates:
-            if not candidate:
-                continue
-            parsed = self._parse_reading_list(candidate)
-            if parsed is not None:
-                return parsed
-
-        return None
-
-    def _parse_reading_list(self, items: list) -> list[dict] | None:
-        """Parst eine Liste von Messwert-Einträgen in einheitliches Format."""
-        result = []
-        timestamp_keys = ("timestamp", "dateTime", "date", "datum", "zeit", "ts")
-        value_keys = ("value", "wert", "reading", "messwert", "stand", "zaehlerstand")
-
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-
-            # Timestamp suchen
-            ts = None
-            for k in timestamp_keys:
-                if k in item:
-                    ts = self._parse_datetime(str(item[k]))
-                    if ts:
-                        break
-
-            # Wert suchen
-            val = None
-            for k in value_keys:
-                if k in item and item[k] is not None:
-                    try:
-                        val = float(item[k])
-                        break
-                    except (TypeError, ValueError):
-                        pass
-
-            if ts and val is not None:
-                result.append({"timestamp": ts, "value": val})
-
-        if not result:
-            return None
-
-        return sorted(result, key=lambda x: x["timestamp"])
-
-    @staticmethod
-    def _parse_datetime(s: str) -> datetime | None:
-        """Parst ISO-8601 oder deutsches Datum → datetime (UTC-aware)."""
-        if not s:
-            return None
-        try:
-            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
-        except (ValueError, AttributeError):
-            pass
-        # Deutsches Format: DD.MM.YYYY HH:MM
-        for fmt in ("%d.%m.%Y %H:%M", "%d.%m.%Y", "%Y-%m-%d %H:%M:%S"):
-            try:
-                dt = datetime.strptime(s, fmt)
-                return dt.replace(tzinfo=timezone.utc)
-            except ValueError:
-                pass
-        return None
+    Berücksichtigt Sommer- (CEST, UTC+2) und Winterzeit (CET, UTC+1).
+    """
+    try:
+        berlin = ZoneInfo("Europe/Berlin")
+        midnight_berlin = datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=berlin)
+        return midnight_berlin.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        offset_h = 2 if 3 < d.month < 11 else 1
+        utc_dt = datetime(d.year, d.month, d.day, 0, 0, 0) - timedelta(hours=offset_h)
+        return utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
