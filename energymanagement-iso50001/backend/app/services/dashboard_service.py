@@ -27,6 +27,18 @@ CONVERSION_FACTORS: dict[str, Decimal] = {
     "kWh": Decimal("1"),
 }
 
+ENERGY_TYPE_LABELS: dict[str, str] = {
+    "electricity": "Strom",
+    "natural_gas": "Gas",
+    "gas": "Gas",
+    "district_heating": "Fernwärme",
+    "district_cooling": "Kälte",
+    "water": "Wasser",
+    "oil": "Öl",
+    "pellets": "Pellets",
+    "solar": "Solar",
+}
+
 
 class DashboardService:
     """Service für Dashboard-Daten."""
@@ -114,27 +126,84 @@ class DashboardService:
             "enpi_overview": enpi,
         }
 
+    async def _consumption_by_energy_type(
+        self, start: date, end: date, meter_ids: list | None = None
+    ) -> list[dict]:
+        """Verbrauch je Energietyp in nativer Einheit."""
+        query = (
+            select(
+                Meter.energy_type,
+                Meter.unit,
+                func.sum(MeterReading.consumption).label("total"),
+            )
+            .join(MeterReading, MeterReading.meter_id == Meter.id)
+            .where(
+                Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,
+                Meter.parent_meter_id.is_(None),
+                MeterReading.timestamp >= datetime.combine(
+                    start, datetime.min.time(), tzinfo=timezone.utc
+                ),
+                MeterReading.timestamp < datetime.combine(
+                    end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+                ),
+            )
+            .group_by(Meter.energy_type, Meter.unit)
+        )
+        if meter_ids is not None:
+            query = query.where(Meter.id.in_(meter_ids))
+        result = await self.db.execute(query)
+
+        # Pro Energietyp: native Einheit beibehalten
+        groups: dict[str, dict] = {}
+        for row in result.all():
+            et = row.energy_type
+            val = row.total or Decimal("0")
+            if et not in groups:
+                groups[et] = {"value": Decimal("0"), "unit": row.unit}
+            # Wenn gleiche Einheit → addieren; sonst in kWh umrechnen
+            if groups[et]["unit"] == row.unit:
+                groups[et]["value"] += val
+            else:
+                conv = CONVERSION_FACTORS.get(row.unit, Decimal("1"))
+                groups[et]["value"] += val * conv
+                groups[et]["unit"] = "kWh"
+
+        return [
+            {
+                "energy_type": et,
+                "label": ENERGY_TYPE_LABELS.get(et, et),
+                "value": Decimal(str(round(float(info["value"]), 1))),
+                "unit": info["unit"],
+            }
+            for et, info in sorted(groups.items(), key=lambda x: -float(x[1]["value"]))
+        ]
+
     async def _build_kpi_cards(
         self, start: date, end: date, prev_start: date, prev_end: date,
         meter_ids: list | None = None,
     ) -> list[dict]:
-        """KPI-Karten berechnen."""
+        """KPI-Karten berechnen – pro Energietyp statt Gesamtverbrauch."""
         cards = []
 
-        # 1. Gesamtverbrauch
-        consumption = await self._total_consumption(start, end, meter_ids)
-        prev_consumption = await self._total_consumption(prev_start, prev_end, meter_ids)
-        trend = self._calc_trend(consumption, prev_consumption)
+        # 1. Verbrauch je Energietyp (statt einer Gesamtsumme)
+        current_by_type = await self._consumption_by_energy_type(start, end, meter_ids)
+        prev_by_type = await self._consumption_by_energy_type(prev_start, prev_end, meter_ids)
+        prev_lookup = {item["energy_type"]: item["value"] for item in prev_by_type}
 
-        cards.append({
-            "label": "Gesamtverbrauch",
-            "value": consumption,
-            "unit": "kWh",
-            "trend_percent": trend,
-            "trend_direction": self._trend_dir(trend),
-            "comparison_value": prev_consumption,
-            "comparison_label": "Vorjahr",
-        })
+        for item in current_by_type:
+            prev_val = prev_lookup.get(item["energy_type"], Decimal("0"))
+            trend = self._calc_trend(item["value"], prev_val)
+            cards.append({
+                "label": item["label"],
+                "value": item["value"],
+                "unit": item["unit"],
+                "energy_type": item["energy_type"],
+                "trend_percent": trend,
+                "trend_direction": self._trend_dir(trend),
+                "comparison_value": prev_val,
+                "comparison_label": "Vorjahr",
+            })
 
         # 2. CO₂-Emissionen
         co2 = await self._total_co2(start, end, meter_ids)
@@ -526,7 +595,10 @@ class DashboardService:
         return list(charts.values())
 
     async def _get_top_consumers(self, start: date, end: date, meter_ids: list | None = None) -> list[dict]:
-        """Top-5 Verbraucher nach Verbrauch."""
+        """Top-3 Verbraucher je Energietyp (native Einheiten)."""
+        ts_start = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
+        ts_end = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+
         query = (
             select(
                 Meter.id,
@@ -538,32 +610,44 @@ class DashboardService:
             .join(MeterReading, MeterReading.meter_id == Meter.id)
             .where(
                 Meter.is_active == True,  # noqa: E712
-                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
-                Meter.parent_meter_id.is_(None),  # Keine Unterzähler-Doppelzählung
-                MeterReading.timestamp >= datetime.combine(
-                    start, datetime.min.time(), tzinfo=timezone.utc
-                ),
-                MeterReading.timestamp < datetime.combine(
-                    end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
-                ),
+                Meter.is_feed_in != True,
+                Meter.parent_meter_id.is_(None),
+                MeterReading.timestamp >= ts_start,
+                MeterReading.timestamp < ts_end,
             )
             .group_by(Meter.id, Meter.name, Meter.energy_type, Meter.unit)
             .order_by(func.sum(MeterReading.consumption).desc())
-            .limit(5)
         )
         if meter_ids is not None:
             query = query.where(Meter.id.in_(meter_ids))
         result = await self.db.execute(query)
+
+        # Nach Energietyp gruppieren, Top-3 je Typ
+        groups: dict[str, list[dict]] = {}
+        for row in result.all():
+            et = row.energy_type
+            if et not in groups:
+                groups[et] = []
+            if len(groups[et]) < 3:
+                groups[et].append({
+                    "meter_id": str(row.id),
+                    "name": row.name,
+                    "energy_type": et,
+                    "consumption": float(row.consumption or Decimal("0")),
+                    "unit": row.unit,
+                    # Abwärtskompatibilität: consumption_kwh weiterhin mitliefern
+                    "consumption_kwh": float(
+                        (row.consumption or Decimal("0")) * CONVERSION_FACTORS.get(row.unit, Decimal("1"))
+                    ),
+                })
+
         return [
             {
-                "meter_id": str(row.id),
-                "name": row.name,
-                "energy_type": row.energy_type,
-                "consumption_kwh": float(
-                    (row.consumption or Decimal("0")) * CONVERSION_FACTORS.get(row.unit, Decimal("1"))
-                ),
+                "energy_type": et,
+                "energy_type_label": ENERGY_TYPE_LABELS.get(et, et),
+                "meters": meters,
             }
-            for row in result.all()
+            for et, meters in sorted(groups.items(), key=lambda x: x[0])
         ]
 
     async def _get_alerts(self) -> list[dict]:
