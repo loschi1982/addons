@@ -6,6 +6,7 @@ import {
 import {
   TrendingUp, TrendingDown, Minus, AlertTriangle, Activity,
   Zap, Leaf, Euro, Gauge, Sun, BatteryCharging,
+  Flame, Thermometer, Droplets, Snowflake, Fuel,
 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import InfoTip from '@/components/ui/InfoTip';
@@ -44,11 +45,19 @@ interface ConsumptionChart {
   data: TimeSeriesPoint[];
 }
 
-interface TopConsumer {
+interface TopConsumerMeter {
   meter_id: string;
   name: string;
   energy_type: string;
+  consumption: number;
+  unit: string;
   consumption_kwh: number;
+}
+
+interface TopConsumerGroup {
+  energy_type: string;
+  energy_type_label: string;
+  meters: TopConsumerMeter[];
 }
 
 interface Alert {
@@ -64,7 +73,7 @@ interface DashboardData {
   kpi_cards: KPICard[];
   energy_breakdown: EnergyBreakdown[];
   consumption_chart: ConsumptionChart[];
-  top_consumers: TopConsumer[];
+  top_consumers: TopConsumerGroup[];
   enpi_overview: Record<string, unknown>[];
   alerts: Alert[];
 }
@@ -79,7 +88,14 @@ function formatNumber(value: unknown, decimals = 1): string {
 }
 
 const KPI_ICONS: Record<string, React.ElementType> = {
-  'Gesamtverbrauch': Zap,
+  'Strom': Zap,
+  'Gas': Flame,
+  'Fernwärme': Thermometer,
+  'Wasser': Droplets,
+  'Kälte': Snowflake,
+  'Öl': Fuel,
+  'Pellets': Flame,
+  'Solar': Sun,
   'CO₂-Emissionen': Leaf,
   'Energiekosten': Euro,
   'Aktive Zähler': Gauge,
@@ -88,9 +104,25 @@ const KPI_ICONS: Record<string, React.ElementType> = {
 };
 
 const KPI_INFO: Record<string, { formula: string; text: string }> = {
-  'Gesamtverbrauch': {
-    formula: 'Σ Zählerstand × Umrechnungsfaktor',
-    text: 'Summe aller aktiven Hauptzähler, umgerechnet in kWh (m³×10.3, l×9.8, kg×4.8, MWh×1000).',
+  'Strom': {
+    formula: 'Σ Zählerstand (kWh)',
+    text: 'Summe aller aktiven Stromzähler im gewählten Zeitraum.',
+  },
+  'Gas': {
+    formula: 'Σ Zählerstand (m³)',
+    text: 'Summe aller aktiven Gaszähler in Kubikmeter.',
+  },
+  'Fernwärme': {
+    formula: 'Σ Zählerstand (kWh)',
+    text: 'Summe aller aktiven Fernwärmezähler im gewählten Zeitraum.',
+  },
+  'Wasser': {
+    formula: 'Σ Zählerstand (m³)',
+    text: 'Summe aller aktiven Wasserzähler in Kubikmeter.',
+  },
+  'Kälte': {
+    formula: 'Σ Zählerstand (kWh)',
+    text: 'Summe aller aktiven Kältezähler im gewählten Zeitraum.',
   },
   'CO₂-Emissionen': {
     formula: 'Σ (Verbrauch_kWh × Faktor_g/kWh) ÷ 1000',
@@ -271,16 +303,17 @@ function YearComparisonCard({ energyType, siteId }: { energyType: string; siteId
 function InsightsSummary({ data }: { data: DashboardData }) {
   const insights: { text: string; type: 'positive' | 'negative' | 'neutral' }[] = [];
 
-  // Verbrauchstrend analysieren
-  const consumption = data.kpi_cards.find((c) => c.label === 'Gesamtverbrauch');
-  if (consumption?.trend_percent != null) {
-    const pct = Math.abs(Number(consumption.trend_percent)).toFixed(1);
-    if (Number(consumption.trend_percent) < -3) {
-      insights.push({ text: `Ihr Energieverbrauch ist ${pct}% niedriger als im Vorjahr – gute Entwicklung.`, type: 'positive' });
-    } else if (Number(consumption.trend_percent) > 3) {
-      insights.push({ text: `Ihr Energieverbrauch ist ${pct}% höher als im Vorjahr – prüfen Sie die Ursachen.`, type: 'negative' });
-    } else {
-      insights.push({ text: `Ihr Energieverbrauch ist stabil (${pct}% Abweichung zum Vorjahr).`, type: 'neutral' });
+  // Verbrauchstrend je Energietyp analysieren
+  const knownAggregates = ['CO₂-Emissionen', 'Energiekosten', 'Aktive Zähler', 'Eigenproduktion', 'Autarkiegrad'];
+  const energyCards = data.kpi_cards.filter((c) => !knownAggregates.includes(c.label));
+  for (const card of energyCards) {
+    if (card.trend_percent != null) {
+      const pct = Math.abs(Number(card.trend_percent)).toFixed(1);
+      if (Number(card.trend_percent) < -3) {
+        insights.push({ text: `${card.label}-Verbrauch ist ${pct}% niedriger als im Vorjahr.`, type: 'positive' });
+      } else if (Number(card.trend_percent) > 5) {
+        insights.push({ text: `${card.label}-Verbrauch ist ${pct}% höher als im Vorjahr – prüfen Sie die Ursachen.`, type: 'negative' });
+      }
     }
   }
 
@@ -298,13 +331,15 @@ function InsightsSummary({ data }: { data: DashboardData }) {
     insights.push({ text: `Energiekosten sind ${Math.abs(Number(cost.trend_percent)).toFixed(1)}% höher als im Vorjahr.`, type: 'negative' });
   }
 
-  // Top-Verbraucher Hinweis
-  if (data.top_consumers.length >= 2) {
-    const top = data.top_consumers[0];
-    const totalTop = data.top_consumers.reduce((s, c) => s + c.consumption_kwh, 0);
-    const topShare = totalTop > 0 ? ((top.consumption_kwh / totalTop) * 100).toFixed(0) : 0;
-    if (Number(topShare) > 40) {
-      insights.push({ text: `"${top.name}" macht ${topShare}% der Top-5 Verbraucher aus – Optimierungspotenzial prüfen.`, type: 'neutral' });
+  // Top-Verbraucher Hinweis (je Energietyp)
+  for (const group of data.top_consumers) {
+    if (group.meters.length >= 2) {
+      const top = group.meters[0];
+      const totalTop = group.meters.reduce((s, m) => s + m.consumption, 0);
+      const topShare = totalTop > 0 ? ((top.consumption / totalTop) * 100).toFixed(0) : 0;
+      if (Number(topShare) > 50) {
+        insights.push({ text: `"${top.name}" macht ${topShare}% des ${group.energy_type_label}-Verbrauchs aus – Optimierungspotenzial prüfen.`, type: 'neutral' });
+      }
     }
   }
 
@@ -615,10 +650,12 @@ export default function DashboardPage() {
                     </div>
                     <span className="font-medium text-gray-900">
                       {b.original_unit && b.original_unit !== 'kWh'
-                        ? `${formatNumber(b.original_value)} ${b.original_unit} · `
-                        : ''
+                        ? `${formatNumber(b.original_value)} ${b.original_unit}`
+                        : `${formatNumber(b.consumption_kwh)} kWh`
                       }
-                      {(Number(b.share_percent) || 0).toFixed(1)}%
+                      <span className="ml-1 text-gray-400 font-normal">
+                        {(Number(b.share_percent) || 0).toFixed(1)}%
+                      </span>
                     </span>
                   </div>
                 ))}
@@ -643,25 +680,39 @@ export default function DashboardPage() {
 
       {/* Untere Reihe: Top-Verbraucher + EnPI */}
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Top-5 Verbraucher */}
+        {/* Top-Verbraucher je Energietyp */}
         <div className="card">
-          <h2 className="mb-4 text-lg font-semibold text-gray-900">Top-5 Verbraucher</h2>
+          <h2 className="mb-4 text-lg font-semibold text-gray-900">Top-Verbraucher</h2>
           {data.top_consumers.length > 0 ? (
-            <div className="space-y-3">
-              {data.top_consumers.map((tc) => {
-                const maxConsumption = data.top_consumers[0]?.consumption_kwh || 1;
-                const pct = (tc.consumption_kwh / maxConsumption) * 100;
+            <div className="space-y-5">
+              {data.top_consumers.map((group) => {
+                const maxConsumption = group.meters[0]?.consumption || 1;
+                const color = ENERGY_TYPE_COLORS[group.energy_type as keyof typeof ENERGY_TYPE_COLORS] || '#1B5E7B';
                 return (
-                  <div key={tc.meter_id}>
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium text-gray-700">{tc.name}</span>
-                      <span className="text-gray-500">{formatNumber(tc.consumption_kwh)} kWh</span>
-                    </div>
-                    <div className="mt-1 h-2 w-full rounded-full bg-gray-100">
-                      <div
-                        className="h-2 rounded-full bg-primary-500"
-                        style={{ width: `${pct}%` }}
-                      />
+                  <div key={group.energy_type}>
+                    <h3 className="mb-2 text-sm font-semibold text-gray-600">
+                      {group.energy_type_label}
+                    </h3>
+                    <div className="space-y-2">
+                      {group.meters.map((m) => {
+                        const pct = (m.consumption / maxConsumption) * 100;
+                        return (
+                          <div key={m.meter_id}>
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="font-medium text-gray-700">{m.name}</span>
+                              <span className="text-gray-500">
+                                {formatNumber(m.consumption)} {m.unit}
+                              </span>
+                            </div>
+                            <div className="mt-1 h-2 w-full rounded-full bg-gray-100">
+                              <div
+                                className="h-2 rounded-full"
+                                style={{ width: `${pct}%`, backgroundColor: color }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 );
