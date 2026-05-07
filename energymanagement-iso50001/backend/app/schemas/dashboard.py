@@ -8,7 +8,6 @@ für verschiedene Zeiträume und Gruppierungen bereitgestellt.
 
 import uuid
 from datetime import date
-from decimal import Decimal
 
 from pydantic import BaseModel
 
@@ -20,31 +19,32 @@ from pydantic import BaseModel
 class KPICard(BaseModel):
     """Einzelne Kennzahl für KPI-Karten im Dashboard."""
     label: str
-    value: Decimal
+    value: float
     unit: str
-    trend_percent: Decimal | None = None
+    energy_type: str | None = None
+    trend_percent: float | None = None
     trend_direction: str | None = None  # "up", "down", "stable"
-    comparison_value: Decimal | None = None
+    comparison_value: float | None = None
     comparison_label: str | None = None
 
 
 class EnergyBreakdown(BaseModel):
     """Verbrauchsaufteilung nach Energieart."""
     energy_type: str
-    consumption_kwh: Decimal
-    original_value: Decimal | None = None
+    consumption_kwh: float
+    original_value: float | None = None
     original_unit: str | None = None
-    cost_eur: Decimal | None = None
-    co2_kg: Decimal | None = None
-    share_percent: Decimal
+    cost_eur: float | None = None
+    co2_kg: float | None = None
+    share_percent: float
     color: str | None = None
 
 
 class TimeSeriesPoint(BaseModel):
     """Datenpunkt in einer Zeitreihe."""
     label: str
-    value: Decimal
-    comparison_value: Decimal | None = None
+    value: float
+    comparison_value: float | None = None
 
 
 class ConsumptionChart(BaseModel):
@@ -77,9 +77,9 @@ class EnPIResponse(BaseModel):
     meter_id: uuid.UUID
     meter_name: str
     energy_type: str
-    enpi_value: Decimal
+    enpi_value: float
     enpi_unit: str
-    target_value: Decimal | None = None
-    baseline_value: Decimal | None = None
+    target_value: float | None = None
+    baseline_value: float | None = None
     period: str
     status: str  # "on_track", "at_risk", "off_track"

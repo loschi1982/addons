@@ -129,7 +129,12 @@ class DashboardService:
     async def _consumption_by_energy_type(
         self, start: date, end: date, meter_ids: list | None = None
     ) -> list[dict]:
-        """Verbrauch je Energietyp in nativer Einheit."""
+        """Verbrauch je Energietyp in nativer Einheit.
+
+        Konsistent mit _get_consumption_chart: KEIN parent_meter_id-Filter,
+        da bei einigen Energieträgern (z.B. Fernwärme) nur Unterzähler
+        Messwerte haben.
+        """
         query = (
             select(
                 Meter.energy_type,
@@ -140,7 +145,7 @@ class DashboardService:
             .where(
                 Meter.is_active == True,  # noqa: E712
                 Meter.is_feed_in != True,
-                Meter.parent_meter_id.is_(None),
+                MeterReading.consumption.isnot(None),
                 MeterReading.timestamp >= datetime.combine(
                     start, datetime.min.time(), tzinfo=timezone.utc
                 ),
@@ -173,7 +178,7 @@ class DashboardService:
             {
                 "energy_type": et,
                 "label": ENERGY_TYPE_LABELS.get(et, et),
-                "value": Decimal(str(round(float(info["value"]), 1))),
+                "value": round(float(info["value"]), 1),
                 "unit": info["unit"],
             }
             for et, info in sorted(groups.items(), key=lambda x: -float(x[1]["value"]))
@@ -192,8 +197,8 @@ class DashboardService:
         prev_lookup = {item["energy_type"]: item["value"] for item in prev_by_type}
 
         for item in current_by_type:
-            prev_val = prev_lookup.get(item["energy_type"], Decimal("0"))
-            trend = self._calc_trend(item["value"], prev_val)
+            prev_val = prev_lookup.get(item["energy_type"], 0)
+            trend = self._calc_trend(Decimal(str(item["value"])), Decimal(str(prev_val)))
             cards.append({
                 "label": item["label"],
                 "value": item["value"],
@@ -212,11 +217,11 @@ class DashboardService:
 
         cards.append({
             "label": "CO₂-Emissionen",
-            "value": co2,
+            "value": float(co2),
             "unit": "kg CO₂",
             "trend_percent": co2_trend,
             "trend_direction": self._trend_dir(co2_trend),
-            "comparison_value": prev_co2,
+            "comparison_value": float(prev_co2),
             "comparison_label": "Vorjahr",
         })
 
@@ -227,11 +232,11 @@ class DashboardService:
 
         cards.append({
             "label": "Energiekosten",
-            "value": cost,
+            "value": float(cost),
             "unit": "€",
             "trend_percent": cost_trend,
             "trend_direction": self._trend_dir(cost_trend),
-            "comparison_value": prev_cost,
+            "comparison_value": float(prev_cost),
             "comparison_label": "Vorjahr",
         })
 
@@ -239,7 +244,7 @@ class DashboardService:
         meter_count = await self._active_meter_count()
         cards.append({
             "label": "Aktive Zähler",
-            "value": Decimal(str(meter_count)),
+            "value": float(meter_count),
             "unit": "Stk.",
             "trend_percent": None,
             "trend_direction": None,
@@ -274,7 +279,7 @@ class DashboardService:
         return cards
 
     async def _total_consumption(self, start: date, end: date, meter_ids: list | None = None) -> Decimal:
-        """Gesamtverbrauch in kWh (nur Hauptzähler)."""
+        """Gesamtverbrauch in kWh."""
         query = (
             select(
                 Meter.unit,
@@ -283,8 +288,7 @@ class DashboardService:
             .join(MeterReading, MeterReading.meter_id == Meter.id)
             .where(
                 Meter.is_active == True,  # noqa: E712
-                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
-                Meter.parent_meter_id.is_(None),
+                Meter.is_feed_in != True,
                 MeterReading.timestamp >= datetime.combine(
                     start, datetime.min.time(), tzinfo=timezone.utc
                 ),
@@ -327,7 +331,6 @@ class DashboardService:
                 .where(
                     Meter.is_active == True,  # noqa: E712
                     Meter.is_feed_in != True,
-                    Meter.parent_meter_id.is_(None),
                     MeterReading.consumption.isnot(None),
                     MeterReading.timestamp >= datetime.combine(start, time.min, tzinfo=timezone.utc),
                     MeterReading.timestamp < datetime.combine(end + timedelta(days=1), time.min, tzinfo=timezone.utc),
@@ -442,8 +445,8 @@ class DashboardService:
             .join(MeterReading, MeterReading.meter_id == Meter.id)
             .where(
                 Meter.is_active == True,  # noqa: E712
-                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
-                Meter.parent_meter_id.is_(None),  # Keine Unterzähler-Doppelzählung
+                Meter.is_feed_in != True,
+                MeterReading.consumption.isnot(None),
                 MeterReading.timestamp >= datetime.combine(
                     start, datetime.min.time(), tzinfo=timezone.utc
                 ),
@@ -522,12 +525,12 @@ class DashboardService:
         return [
             {
                 "energy_type": et,
-                "consumption_kwh": info["kwh"],
-                "original_value": info["original_value"],
+                "consumption_kwh": round(float(info["kwh"]), 1),
+                "original_value": round(float(info["original_value"]), 1),
                 "original_unit": info["original_unit"],
-                "cost_eur": info["cost_eur"] if info["cost_eur"] > 0 else None,
-                "co2_kg": round(info["co2_kg"], 1) if info["co2_kg"] > 0 else None,
-                "share_percent": Decimal(str(round(float(info["kwh"] / total * 100), 1))) if total > 0 else Decimal("0"),
+                "cost_eur": round(float(info["cost_eur"]), 2) if info["cost_eur"] > 0 else None,
+                "co2_kg": round(float(info["co2_kg"]), 1) if info["co2_kg"] > 0 else None,
+                "share_percent": round(float(info["kwh"] / total * 100), 1) if total > 0 else 0,
             }
             for et, info in sorted(groups.items(), key=lambda x: -x[1]["kwh"])
         ]
@@ -589,7 +592,7 @@ class DashboardService:
             conv = CONVERSION_FACTORS.get(row.unit, Decimal("1"))
             charts[et]["data"].append({
                 "label": row.period.strftime("%b %Y") if row.period else "",
-                "value": float((row.consumption or Decimal("0")) * conv),
+                "value": round(float((row.consumption or Decimal("0")) * conv), 1),
             })
 
         return list(charts.values())
@@ -611,12 +614,14 @@ class DashboardService:
             .where(
                 Meter.is_active == True,  # noqa: E712
                 Meter.is_feed_in != True,
-                Meter.parent_meter_id.is_(None),
+                MeterReading.consumption.isnot(None),
+                MeterReading.consumption > 0,
                 MeterReading.timestamp >= ts_start,
                 MeterReading.timestamp < ts_end,
             )
             .group_by(Meter.id, Meter.name, Meter.energy_type, Meter.unit)
-            .order_by(func.sum(MeterReading.consumption).desc())
+            .having(func.sum(MeterReading.consumption) > 0)
+            .order_by(func.sum(MeterReading.consumption).desc().nullslast())
         )
         if meter_ids is not None:
             query = query.where(Meter.id.in_(meter_ids))
@@ -633,12 +638,11 @@ class DashboardService:
                     "meter_id": str(row.id),
                     "name": row.name,
                     "energy_type": et,
-                    "consumption": float(row.consumption or Decimal("0")),
+                    "consumption": round(float(row.consumption or 0), 1),
                     "unit": row.unit,
-                    # Abwärtskompatibilität: consumption_kwh weiterhin mitliefern
-                    "consumption_kwh": float(
+                    "consumption_kwh": round(float(
                         (row.consumption or Decimal("0")) * CONVERSION_FACTORS.get(row.unit, Decimal("1"))
-                    ),
+                    ), 1),
                 })
 
         return [
@@ -792,13 +796,13 @@ class DashboardService:
         }
 
     @staticmethod
-    def _calc_trend(current: Decimal, previous: Decimal) -> Decimal | None:
+    def _calc_trend(current: Decimal, previous: Decimal) -> float | None:
         if previous > 0:
-            return Decimal(str(round(float((current - previous) / previous * 100), 1)))
+            return round(float((current - previous) / previous * 100), 1)
         return None
 
     @staticmethod
-    def _trend_dir(trend: Decimal | None) -> str | None:
+    def _trend_dir(trend: float | None) -> str | None:
         if trend is None:
             return None
         if trend > 0:
