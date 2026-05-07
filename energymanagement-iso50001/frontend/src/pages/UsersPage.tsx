@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '@/utils/api';
 import type { PaginatedResponse } from '@/types';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
 // ── Typen ──
 
@@ -197,7 +198,7 @@ function UsersList() {
 
       <div className="card mt-4 overflow-hidden p-0">
         {loading ? (
-          <div className="p-8 text-center text-gray-400">Laden...</div>
+          <LoadingSpinner />
         ) : users.length === 0 ? (
           <div className="p-8 text-center text-gray-400">Keine Benutzer gefunden.</div>
         ) : (
@@ -427,7 +428,7 @@ function AuditLogList() {
     <>
       <div className="card mt-4 overflow-hidden p-0">
         {loading ? (
-          <div className="p-8 text-center text-gray-400">Laden...</div>
+          <LoadingSpinner />
         ) : logs.length === 0 ? (
           <div className="p-8 text-center text-gray-400">Keine Einträge.</div>
         ) : (

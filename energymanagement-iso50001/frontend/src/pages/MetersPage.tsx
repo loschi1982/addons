@@ -5,6 +5,7 @@ import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
 import { useSiteHierarchy } from '@/hooks/useSiteHierarchy';
 import DiscoveryModal from '@/components/DiscoveryModal';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
 // ── Typen ──
 
@@ -606,7 +607,7 @@ function MeterNetworkView({
     );
   }
 
-  if (loading) return <div className="mt-4 p-8 text-center text-gray-400">Laden...</div>;
+  if (loading) return <LoadingSpinner variant="page" text="Zähler werden geladen" />;
 
   return (
     <div className="mt-4">

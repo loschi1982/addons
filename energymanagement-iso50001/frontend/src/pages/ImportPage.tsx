@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
 import { Info } from 'lucide-react';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
 // ── Typen ──
 
@@ -806,7 +807,7 @@ export default function ImportPage() {
       {activeTab === 'history' && (
         <div className="card mt-4 overflow-hidden p-0">
           {historyLoading ? (
-            <div className="p-8 text-center text-gray-400">Laden...</div>
+            <LoadingSpinner />
           ) : history.length === 0 ? (
             <div className="p-8 text-center text-gray-400">
               Noch keine Imports durchgeführt.

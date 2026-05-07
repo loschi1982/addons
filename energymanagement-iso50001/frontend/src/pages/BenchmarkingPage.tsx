@@ -17,6 +17,7 @@ import {
 } from 'recharts';
 import { BookOpen, Search, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { apiClient } from '@/utils/api';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
 interface BenchmarkRef {
   id: string;
@@ -331,7 +332,7 @@ export default function BenchmarkingPage() {
         </div>
 
         {loading ? (
-          <div className="py-12 text-center text-gray-500">Laden...</div>
+          <LoadingSpinner />
         ) : refs.length === 0 ? (
           <div className="py-12 text-center text-gray-500">Keine Referenzwerte gefunden.</div>
         ) : (

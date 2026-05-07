@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { GraduationCap, Plus, X, AlertCircle, CheckCircle, Clock } from 'lucide-react';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { apiClient } from '@/utils/api';
 
 interface Training {
@@ -280,7 +281,7 @@ export default function TrainingsPage() {
       {/* Tabelle */}
       <div className="card">
         {loading ? (
-          <div className="py-12 text-center text-gray-500">Laden...</div>
+          <LoadingSpinner />
         ) : trainings.length === 0 ? (
           <div className="py-12 text-center text-gray-500">Keine Schulungen gefunden.</div>
         ) : (

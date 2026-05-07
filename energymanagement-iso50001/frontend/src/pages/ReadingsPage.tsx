@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
 // ── Typen ──
 
@@ -376,7 +377,7 @@ export default function ReadingsPage() {
       {selectedMeterId && (
         <div className="card mt-4 overflow-hidden p-0">
           {loading ? (
-            <div className="p-8 text-center text-gray-400">Laden...</div>
+            <LoadingSpinner />
           ) : readings.length === 0 ? (
             <div className="p-8 text-center text-gray-400">
               Keine Zählerstände vorhanden. Erfassen Sie den ersten Stand.

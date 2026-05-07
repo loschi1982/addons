@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '@/utils/api';
 import type { PaginatedResponse } from '@/types';
 import { useSiteHierarchy } from '@/hooks/useSiteHierarchy';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
 // ── Typen ──
 
@@ -328,7 +329,7 @@ export default function ConsumersPage() {
       {/* Tabelle */}
       <div className="card mt-4 overflow-hidden p-0">
         {loading ? (
-          <div className="p-8 text-center text-gray-400">Laden...</div>
+          <LoadingSpinner />
         ) : consumers.length === 0 ? (
           <div className="p-8 text-center text-gray-400">
             Keine Verbraucher gefunden. Legen Sie den ersten Verbraucher an.

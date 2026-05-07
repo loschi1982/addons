@@ -12,6 +12,7 @@ import InfoTip from '@/components/ui/InfoTip';
 import SankeyDiagram from '@/components/charts/SankeyDiagram';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
 const MonthlyComparisonPage = lazy(() => import('./MonthlyComparisonPage'));
 const EnergyBalancePage = lazy(() => import('./EnergyBalancePage'));
@@ -286,12 +287,12 @@ export default function AnalyticsPage() {
         {tab === 'timeseries' && <TimeSeriesTab meters={filteredMeters} siteId={siteId} />}
         {tab === 'comparison' && <ComparisonTab meters={filteredMeters} siteId={siteId} />}
         {tab === 'monthly_comparison' && (
-          <Suspense fallback={<div className="py-8 text-center text-gray-400">Laden...</div>}>
+          <Suspense fallback={<LoadingSpinner />}>
             <MonthlyComparisonPage siteId={siteId} />
           </Suspense>
         )}
         {tab === 'energy_balance' && (
-          <Suspense fallback={<div className="py-8 text-center text-gray-400">Laden...</div>}>
+          <Suspense fallback={<LoadingSpinner />}>
             <EnergyBalancePage siteId={siteId} />
           </Suspense>
         )}
