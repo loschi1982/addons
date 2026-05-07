@@ -434,7 +434,6 @@ class AnalyticsService:
             et_query = select(Meter.id).where(
                 Meter.is_active == True,  # noqa: E712
                 Meter.is_feed_in != True,
-                Meter.parent_meter_id.is_(None),
                 Meter.energy_type == energy_type,
             )
             if meter_ids:
@@ -442,11 +441,10 @@ class AnalyticsService:
             result = await self.db.execute(et_query)
             meter_ids = [row[0] for row in result.all()]
         elif not meter_ids:
-            # Weder site_id noch energy_type → alle aktiven Hauptzähler
+            # Weder site_id noch energy_type → alle aktiven Zähler
             all_query = select(Meter.id).where(
                 Meter.is_active == True,  # noqa: E712
                 Meter.is_feed_in != True,
-                Meter.parent_meter_id.is_(None),
             )
             result = await self.db.execute(all_query)
             meter_ids = [row[0] for row in result.all()]
