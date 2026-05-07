@@ -19,9 +19,11 @@ from sqlalchemy.orm import selectinload
 
 from app.core.cache import cached
 
+from app.models.district_heating_provider import DistrictHeatingProvider
 from app.models.emission import CO2Calculation, EmissionFactor, EmissionFactorSource
 from app.models.meter import Meter
 from app.models.reading import MeterReading
+from app.models.settings import AppSetting
 from app.models.site import Building, Site, UsageUnit
 
 logger = structlog.get_logger()
@@ -79,17 +81,38 @@ class CO2Service:
         await self.db.refresh(factor)
         return factor
 
+    async def _get_district_heating_provider_factor(self) -> Decimal | None:
+        """CO₂-Faktor des konfigurierten Fernwärmeversorgers (g CO₂/kWh)."""
+        result = await self.db.execute(
+            select(AppSetting.value).where(AppSetting.key == "district_heating_provider")
+        )
+        setting = result.scalar_one_or_none()
+        if not setting or not setting.get("provider_id"):
+            return None
+        provider = await self.db.get(DistrictHeatingProvider, setting["provider_id"])
+        if provider:
+            return provider.co2_g_per_kwh
+        return None
+
     async def resolve_factor(
         self, energy_type: str, period_start: date, region: str = "DE"
     ) -> EmissionFactor | None:
         """
         Passenden Emissionsfaktor auflösen.
 
-        Priorität:
+        Sonderfälle:
+        - district_cooling: Kein CO₂-Faktor berechenbar → None
+        - district_heating: Versorger-Faktor (FW 309) hat Vorrang
+
+        Priorität (Standard):
         1. Monatlicher Faktor für das genaue Jahr/Monat
         2. Jährlicher Faktor für das Jahr
         3. Default-Faktor (neuester verfügbarer)
         """
+        # Kälte: kein CO₂-Faktor berechenbar
+        if energy_type == "district_cooling":
+            return None
+
         year = period_start.year
         month = period_start.month
 
@@ -178,8 +201,15 @@ class CO2Service:
             )
             return None
 
+        # Fernwärme: Versorger-spezifischen Faktor verwenden (FW 309)
+        effective_co2 = factor.co2_g_per_kwh
+        if meter.energy_type == "district_heating":
+            provider_factor = await self._get_district_heating_provider_factor()
+            if provider_factor is not None:
+                effective_co2 = provider_factor
+
         # CO₂ berechnen
-        co2_kg = consumption_kwh * factor.co2_g_per_kwh / Decimal("1000")
+        co2_kg = consumption_kwh * effective_co2 / Decimal("1000")
         co2eq_kg = (
             consumption_kwh * factor.co2eq_g_per_kwh / Decimal("1000")
             if factor.co2eq_g_per_kwh

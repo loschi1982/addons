@@ -81,20 +81,6 @@
     },
     {
       "source": "BAFA",
-      "energy_type": "district_cooling",
-      "year": 2023,
-      "co2_g_per_kwh": 183,
-      "scope": "scope_2"
-    },
-    {
-      "source": "BAFA",
-      "energy_type": "district_cooling",
-      "year": 2024,
-      "co2_g_per_kwh": 175,
-      "scope": "scope_2"
-    },
-    {
-      "source": "BAFA",
       "energy_type": "lpg",
       "year": 2024,
       "co2_g_per_kwh": 227,
