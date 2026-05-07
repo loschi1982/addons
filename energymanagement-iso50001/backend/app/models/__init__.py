@@ -30,6 +30,7 @@ from app.models.iso import (  # noqa: F401
     InternalAudit, AuditFinding, ManagementReview, Nonconformity,
 )
 from app.models.invoice import EnergyInvoice  # noqa: F401
+from app.models.district_heating_provider import DistrictHeatingProvider  # noqa: F401
 from app.models.energy_review import (  # noqa: F401
     RelevantVariable, RelevantVariableValue,
     SignificantEnergyUse, seu_relevant_variables,

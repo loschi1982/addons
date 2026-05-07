@@ -41,6 +41,11 @@ async def run_all_seeds():
         logger.warning("seed_emission_factors_failed", error=str(e))
 
     try:
+        await load_district_heating_providers()
+    except Exception as e:
+        logger.warning("seed_district_heating_providers_failed", error=str(e))
+
+    try:
         await load_dwd_stations()
     except Exception as e:
         logger.warning("seed_dwd_stations_failed", error=str(e))
@@ -225,6 +230,44 @@ async def load_emission_factors():
 
         await session.commit()
         logger.info("seed_emission_factors_loaded", new_factors=new_count)
+
+
+async def load_district_heating_providers():
+    """
+    Lädt die deutschen Fernwärmeversorger mit FW-309-Kennzahlen.
+    """
+    from app.models.district_heating_provider import DistrictHeatingProvider
+
+    seed_file = SEED_DATA_DIR / "district_heating_providers.json"
+    if not seed_file.exists():
+        logger.warning("seed_file_missing", file="district_heating_providers.json")
+        return
+
+    data = json.loads(seed_file.read_text(encoding="utf-8"))
+
+    async with _async_session_factory() as session:
+        existing = (await session.execute(select(DistrictHeatingProvider))).scalars().all()
+        existing_names = {p.name for p in existing}
+
+        new_count = 0
+        for p_data in data:
+            if p_data["name"] not in existing_names:
+                provider = DistrictHeatingProvider(
+                    name=p_data["name"],
+                    city=p_data["city"],
+                    state=p_data.get("state"),
+                    co2_g_per_kwh=p_data["co2_g_per_kwh"],
+                    primary_energy_factor=p_data.get("primary_energy_factor"),
+                    certification_year=p_data["certification_year"],
+                    renewable_share_pct=p_data.get("renewable_share_pct"),
+                    source_url=p_data.get("source_url"),
+                    notes=p_data.get("notes"),
+                )
+                session.add(provider)
+                new_count += 1
+
+        await session.commit()
+        logger.info("seed_district_heating_providers_loaded", new_providers=new_count)
 
 
 async def load_dwd_stations():

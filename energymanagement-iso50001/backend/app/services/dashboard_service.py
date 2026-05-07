@@ -13,9 +13,11 @@ import structlog
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.district_heating_provider import DistrictHeatingProvider
 from app.models.emission import CO2Calculation, EmissionFactor
 from app.models.meter import Meter
 from app.models.reading import MeterReading
+from app.models.settings import AppSetting
 
 logger = structlog.get_logger()
 
@@ -45,6 +47,42 @@ class DashboardService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def _get_district_heating_co2_factor(self) -> Decimal | None:
+        """
+        CO₂-Faktor des konfigurierten Fernwärmeversorgers laden.
+
+        Gibt den versorger-spezifischen Faktor zurück (g CO₂/kWh),
+        oder None wenn kein Versorger konfiguriert ist.
+        """
+        result = await self.db.execute(
+            select(AppSetting.value).where(AppSetting.key == "district_heating_provider")
+        )
+        setting = result.scalar_one_or_none()
+        if not setting or not setting.get("provider_id"):
+            return None
+        provider_id = setting["provider_id"]
+        provider = await self.db.get(DistrictHeatingProvider, provider_id)
+        if provider:
+            return provider.co2_g_per_kwh
+        return None
+
+    async def _apply_provider_overrides(self, factors: dict[str, Decimal]) -> dict[str, Decimal]:
+        """
+        Emissionsfaktoren mit versorger-spezifischen Werten überschreiben.
+
+        - district_heating: Faktor des konfigurierten Versorgers (FW 309)
+        - district_cooling: Kein CO₂-Faktor berechenbar → 0
+        """
+        # Kälte: kein CO₂ berechenbar
+        factors.pop("district_cooling", None)
+
+        # Fernwärme: Versorger-Faktor hat Vorrang
+        dh_factor = await self._get_district_heating_co2_factor()
+        if dh_factor is not None:
+            factors["district_heating"] = dh_factor
+
+        return factors
 
     async def _meter_ids_for_site(self, site_id: uuid.UUID) -> list[uuid.UUID]:
         """Alle aktiven Zähler-IDs für einen Standort."""
@@ -362,6 +400,8 @@ class DashboardService:
                 for row in factors_result.all()
                 if row.co2_factor
             }
+            # Versorger-spezifische Faktoren anwenden
+            factors = await self._apply_provider_overrides(factors)
             total = Decimal("0")
             for row in cons_result.all():
                 consumption = row.consumption or Decimal("0")
@@ -493,6 +533,8 @@ class DashboardService:
             for row in factors_result.all()
             if row.co2_factor
         }
+        # Versorger-spezifische Faktoren anwenden
+        factors = await self._apply_provider_overrides(factors)
 
         # Schritt 4: Pro Energietyp aggregieren
         groups: dict[str, dict] = {}

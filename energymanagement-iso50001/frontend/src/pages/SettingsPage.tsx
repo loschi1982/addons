@@ -1464,6 +1464,9 @@ function IntegrationsPanel() {
   const [haConfig, setHaConfig] = useState({ base_url: '', access_token: '', auth_enabled: false, default_role: 'viewer' });
   const [weatherConfig, setWeatherConfig] = useState({ enabled: true, station_id: '', latitude: '', longitude: '' });
   const [co2Config, setCo2Config] = useState({ enabled: false, api_key: '', zone: 'DE' });
+  const [dhProviders, setDhProviders] = useState<{ id: string; name: string; city: string; co2_g_per_kwh: number; primary_energy_factor: number | null; certification_year: number }[]>([]);
+  const [dhConfig, setDhConfig] = useState<{ provider_id: string; provider_name: string }>({ provider_id: '', provider_name: '' });
+  const [dhSearch, setDhSearch] = useState('');
   const [mqttConfig, setMqttConfig] = useState({ enabled: false, broker_host: '', port: 1883, username: '', password: '' });
   const [bacnetConfig, setBacnetConfig] = useState({ enabled: false, interface: '', port: 47808 });
   const [saving, setSaving] = useState(false);
@@ -1516,6 +1519,13 @@ function IntegrationsPanel() {
       if (bacnet.data.value) setBacnetConfig({ ...bacnetConfig, ...bacnet.data.value });
       setStations(Array.isArray(stationsRes.data) ? stationsRes.data : []);
     });
+    // Fernwärmeversorger laden
+    apiClient.get('/api/v1/emissions/district-heating-providers').then((res) => {
+      setDhProviders(Array.isArray(res.data) ? res.data : []);
+    }).catch(() => {});
+    apiClient.get('/api/v1/settings/district_heating_provider').then((res) => {
+      if (res.data.value) setDhConfig({ ...dhConfig, ...res.data.value });
+    }).catch(() => {});
   }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveSection = async (key: string, value: Record<string, unknown>) => {
@@ -1860,6 +1870,90 @@ function IntegrationsPanel() {
           >
             <Save className="w-3.5 h-3.5" />
             {saved === 'integrations_co2' ? 'Gespeichert!' : 'Speichern'}
+          </button>
+        </div>
+      </div>
+
+      {/* Fernwärmeversorger */}
+      <div className="border rounded-lg p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-semibold text-gray-900">Fernwärmeversorger (CO₂-Faktor)</h3>
+          {dhConfig.provider_name && (
+            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+              <CheckCircle className="w-3 h-3" />
+              {dhConfig.provider_name}
+            </span>
+          )}
+        </div>
+        <p className="text-sm text-gray-500 mb-4">
+          Fernwärmeversorger auswählen, um den standortspezifischen CO₂-Emissionsfaktor (FW 309) zu verwenden.
+          Ohne Auswahl wird der BAFA-Pauschalwert verwendet.
+        </p>
+        <div className="space-y-3">
+          <FormField label="Versorger suchen">
+            <input
+              className="input"
+              placeholder="Name oder Stadt eingeben…"
+              value={dhSearch}
+              onChange={(e) => setDhSearch(e.target.value)}
+            />
+          </FormField>
+          <div className="max-h-64 overflow-y-auto border rounded-lg divide-y">
+            {dhProviders
+              .filter((p) => {
+                if (!dhSearch) return true;
+                const s = dhSearch.toLowerCase();
+                return p.name.toLowerCase().includes(s) || p.city.toLowerCase().includes(s);
+              })
+              .map((provider) => (
+                <label
+                  key={provider.id}
+                  className={`flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50 ${
+                    dhConfig.provider_id === provider.id ? 'bg-primary-50 border-l-2 border-primary-500' : ''
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="radio"
+                      name="dh_provider"
+                      checked={dhConfig.provider_id === provider.id}
+                      onChange={() => setDhConfig({ provider_id: provider.id, provider_name: provider.name })}
+                      className="text-primary-500"
+                    />
+                    <div>
+                      <div className="text-sm font-medium text-gray-900">{provider.name}</div>
+                      <div className="text-xs text-gray-500">{provider.city}</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-semibold text-primary-700">{provider.co2_g_per_kwh} g CO₂/kWh</div>
+                    {provider.primary_energy_factor && (
+                      <div className="text-xs text-gray-500">PEF {provider.primary_energy_factor} · {provider.certification_year}</div>
+                    )}
+                  </div>
+                </label>
+              ))}
+            {dhProviders.length === 0 && (
+              <div className="p-4 text-center text-sm text-gray-400">Keine Versorger geladen</div>
+            )}
+          </div>
+          {dhConfig.provider_id && (
+            <button
+              onClick={() => setDhConfig({ provider_id: '', provider_name: '' })}
+              className="text-xs text-gray-500 hover:text-red-600"
+            >
+              Auswahl aufheben (BAFA-Pauschalwert verwenden)
+            </button>
+          )}
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button
+            onClick={() => saveSection('district_heating_provider', dhConfig as unknown as Record<string, unknown>)}
+            disabled={saving}
+            className="btn-primary text-sm flex items-center gap-1.5"
+          >
+            <Save className="w-3.5 h-3.5" />
+            {saved === 'district_heating_provider' ? 'Gespeichert!' : 'Speichern'}
           </button>
         </div>
       </div>

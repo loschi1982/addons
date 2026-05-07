@@ -1,0 +1,167 @@
+[
+  {
+    "name": "Hamburger Energiewerke",
+    "city": "Hamburg",
+    "state": "Hamburg",
+    "co2_g_per_kwh": 64,
+    "primary_energy_factor": 0.33,
+    "certification_year": 2024,
+    "renewable_share_pct": 20.2,
+    "source_url": "https://www.hamburger-energiewerke.de/waerme/fernwaerme-stadtnetz/netz-primaerenergiefaktor",
+    "notes": "Ehem. Wärme Hamburg / Hamburg Wärme. FW 309-1 zertifiziert."
+  },
+  {
+    "name": "BEW Berliner Energie und Wärme",
+    "city": "Berlin",
+    "state": "Berlin",
+    "co2_g_per_kwh": 34,
+    "primary_energy_factor": 0.42,
+    "certification_year": 2024,
+    "renewable_share_pct": null,
+    "source_url": "https://www.bew.berlin/waerme/fernwaerme/pflichtveroeffentlichungen/",
+    "notes": "Ehem. Vattenfall Wärme Berlin. Verbundnetz. FW 309-1 zertifiziert."
+  },
+  {
+    "name": "SWM Stadtwerke München",
+    "city": "München",
+    "state": "Bayern",
+    "co2_g_per_kwh": 156,
+    "primary_energy_factor": 0.60,
+    "certification_year": 2023,
+    "renewable_share_pct": null,
+    "source_url": "https://www.swm.de/geschaeftskunden/fernwaerme",
+    "notes": "M-Fernwärme. Geothermie-Ausbau geplant."
+  },
+  {
+    "name": "EnBW Stuttgart",
+    "city": "Stuttgart",
+    "state": "Baden-Württemberg",
+    "co2_g_per_kwh": 144,
+    "primary_energy_factor": 0.53,
+    "certification_year": 2023,
+    "renewable_share_pct": null,
+    "source_url": "https://www.enbw.com/fernwaerme/region-stuttgart",
+    "notes": "Fernwärmenetz Stuttgart und Region."
+  },
+  {
+    "name": "Mainova Frankfurt",
+    "city": "Frankfurt am Main",
+    "state": "Hessen",
+    "co2_g_per_kwh": 130,
+    "primary_energy_factor": 0.47,
+    "certification_year": 2023,
+    "renewable_share_pct": null,
+    "source_url": "https://www.mainova.de",
+    "notes": "Fernwärme Frankfurt."
+  },
+  {
+    "name": "RheinEnergie Köln",
+    "city": "Köln",
+    "state": "Nordrhein-Westfalen",
+    "co2_g_per_kwh": 108,
+    "primary_energy_factor": 0.42,
+    "certification_year": 2023,
+    "renewable_share_pct": null,
+    "source_url": "https://www.rheinenergie.com",
+    "notes": "Fernwärmenetz Köln."
+  },
+  {
+    "name": "Stadtwerke Hannover (enercity)",
+    "city": "Hannover",
+    "state": "Niedersachsen",
+    "co2_g_per_kwh": 120,
+    "primary_energy_factor": 0.48,
+    "certification_year": 2023,
+    "renewable_share_pct": null,
+    "source_url": "https://www.enercity.de",
+    "notes": "enercity Fernwärme Hannover."
+  },
+  {
+    "name": "Stadtwerke Düsseldorf",
+    "city": "Düsseldorf",
+    "state": "Nordrhein-Westfalen",
+    "co2_g_per_kwh": 125,
+    "primary_energy_factor": 0.46,
+    "certification_year": 2023,
+    "renewable_share_pct": null,
+    "source_url": "https://www.swd-ag.de",
+    "notes": "Fernwärmenetz Düsseldorf."
+  },
+  {
+    "name": "N-ERGIE Nürnberg",
+    "city": "Nürnberg",
+    "state": "Bayern",
+    "co2_g_per_kwh": 149,
+    "primary_energy_factor": 0.56,
+    "certification_year": 2023,
+    "renewable_share_pct": null,
+    "source_url": "https://fernwaerme.n-ergie.de/primaerenergiefaktor/",
+    "notes": "N-ERGIE Fernwärme Nürnberg."
+  },
+  {
+    "name": "Fernwärme-Verbund Saar",
+    "city": "Saarbrücken",
+    "state": "Saarland",
+    "co2_g_per_kwh": 140,
+    "primary_energy_factor": 0.50,
+    "certification_year": 2023,
+    "renewable_share_pct": null,
+    "source_url": "https://www.district-energy-systems.info/operators/OP10204",
+    "notes": "Fernwärme-Verbund Saar GmbH."
+  },
+  {
+    "name": "Stadtwerke Leipzig",
+    "city": "Leipzig",
+    "state": "Sachsen",
+    "co2_g_per_kwh": 168,
+    "primary_energy_factor": 0.62,
+    "certification_year": 2023,
+    "renewable_share_pct": null,
+    "source_url": "https://www.swl.de",
+    "notes": "Fernwärme Leipzig."
+  },
+  {
+    "name": "DREWAG / SachsenEnergie Dresden",
+    "city": "Dresden",
+    "state": "Sachsen",
+    "co2_g_per_kwh": 155,
+    "primary_energy_factor": 0.55,
+    "certification_year": 2023,
+    "renewable_share_pct": null,
+    "source_url": "https://www.sachsenenergie.de",
+    "notes": "SachsenEnergie Fernwärme Dresden."
+  },
+  {
+    "name": "Stadtwerke Flensburg",
+    "city": "Flensburg",
+    "state": "Schleswig-Holstein",
+    "co2_g_per_kwh": 89,
+    "primary_energy_factor": 0.37,
+    "certification_year": 2023,
+    "renewable_share_pct": null,
+    "source_url": "https://www.stadtwerke-flensburg.de",
+    "notes": "Hoher KWK-Anteil, Fernwärme Flensburg."
+  },
+  {
+    "name": "Stadtwerke Kiel",
+    "city": "Kiel",
+    "state": "Schleswig-Holstein",
+    "co2_g_per_kwh": 105,
+    "primary_energy_factor": 0.44,
+    "certification_year": 2023,
+    "renewable_share_pct": null,
+    "source_url": "https://www.stadtwerke-kiel.de",
+    "notes": "Küstenkraftwerk Kiel, Gasmotoren-KWK."
+  },
+  {
+    "name": "Stadtwerke Rostock",
+    "city": "Rostock",
+    "state": "Mecklenburg-Vorpommern",
+    "co2_g_per_kwh": 145,
+    "primary_energy_factor": 0.52,
+    "certification_year": 2023,
+    "renewable_share_pct": null,
+    "source_url": "https://www.swrag.de",
+    "notes": "Fernwärme Rostock."
+  }
+]

@@ -3,6 +3,7 @@ emissions.py – Endpunkte für CO₂-Emissionen.
 
 CO₂-Berechnung auf Basis von Emissionsfaktoren (BAFA, UBA,
 Electricity Maps) und Verbrauchsdaten der Zähler.
+Fernwärmeversorger-Verwaltung für standortspezifische CO₂-Faktoren.
 """
 
 import uuid
@@ -10,11 +11,17 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_permission
+from app.models.district_heating_provider import DistrictHeatingProvider
 from app.models.user import User
+from app.schemas.district_heating_provider import (
+    DistrictHeatingProviderCreate,
+    DistrictHeatingProviderResponse,
+)
 from app.schemas.emission import (
     CO2DashboardData,
     CO2Summary,
@@ -170,3 +177,61 @@ async def trigger_calculation(
             "message": f"{result['calculated']} Berechnungen, {result['errors']} Fehler",
             **result,
         }
+
+
+# ── Fernwärmeversorger ──
+
+@router.get(
+    "/district-heating-providers",
+    response_model=list[DistrictHeatingProviderResponse],
+)
+async def list_district_heating_providers(
+    search: str | None = Query(None, description="Suchbegriff (Name oder Stadt)"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Deutsche Fernwärmeversorger mit FW-309-Kennzahlen auflisten."""
+    query = select(DistrictHeatingProvider).order_by(DistrictHeatingProvider.name)
+    if search:
+        pattern = f"%{search}%"
+        query = query.where(
+            DistrictHeatingProvider.name.ilike(pattern)
+            | DistrictHeatingProvider.city.ilike(pattern)
+        )
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+@router.get(
+    "/district-heating-providers/{provider_id}",
+    response_model=DistrictHeatingProviderResponse,
+)
+async def get_district_heating_provider(
+    provider_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Einzelnen Fernwärmeversorger abrufen."""
+    provider = await db.get(DistrictHeatingProvider, provider_id)
+    if not provider:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Versorger nicht gefunden")
+    return provider
+
+
+@router.post(
+    "/district-heating-providers",
+    response_model=DistrictHeatingProviderResponse,
+    status_code=201,
+)
+async def create_district_heating_provider(
+    data: DistrictHeatingProviderCreate,
+    current_user: User = Depends(require_permission("emissions", "create")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Eigenen Fernwärmeversorger anlegen (falls nicht in der Liste)."""
+    provider = DistrictHeatingProvider(**data.model_dump())
+    db.add(provider)
+    await db.commit()
+    await db.refresh(provider)
+    return provider
