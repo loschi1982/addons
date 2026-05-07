@@ -8,6 +8,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
 import InfoTip from '@/components/ui/InfoTip';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine,
@@ -378,7 +379,7 @@ function SEUTab() {
 
       <div className="card overflow-hidden p-0">
         {loading ? (
-          <div className="p-8 text-center text-gray-400">Laden...</div>
+          <LoadingSpinner />
         ) : seus.length === 0 ? (
           <div className="p-8 text-center text-gray-400">
             Keine SEUs definiert. Nutzen Sie &quot;Vorschläge generieren&quot; für automatische Erkennung.
@@ -638,7 +639,7 @@ function EnPITab() {
       </div>
 
       {loading ? (
-        <div className="card text-gray-400 text-center py-8">Laden...</div>
+        <div className="card"><LoadingSpinner /></div>
       ) : enpis.length === 0 ? (
         <div className="card text-gray-400 text-center py-8">Keine EnPIs definiert.</div>
       ) : (
@@ -876,7 +877,7 @@ function BaselineTab() {
       </div>
 
       {loading ? (
-        <div className="card text-gray-400 text-center py-8">Laden...</div>
+        <div className="card"><LoadingSpinner /></div>
       ) : (
         <>
           {/* Vergleichs-Chart */}
@@ -1124,7 +1125,7 @@ function VariablesTab() {
 
       <div className="card overflow-hidden p-0">
         {loading ? (
-          <div className="p-8 text-center text-gray-400">Laden...</div>
+          <LoadingSpinner />
         ) : variables.length === 0 ? (
           <div className="p-8 text-center text-gray-400">Keine Variablen definiert.</div>
         ) : (

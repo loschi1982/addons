@@ -1553,30 +1553,35 @@ class AnalyticsService:
             if m.energy_type not in et_set:
                 et_set[m.energy_type] = m.unit or "kWh"
 
-        # Monatliche Verbräuche für beide Jahre je Energieart abfragen
+        # Monatliche Verbräuche für beide Jahre je Energieart – EINE Query pro Jahr
+        meter_id_list = [m.id for m in meters]
+
         async def _monthly_by_et(year: int) -> dict[str, dict[int, float]]:
             """Ergibt {energy_type: {month: native_consumption}}"""
-            result: dict[str, dict[int, float]] = {et: {} for et in et_set}
-            for energy_type, primary_unit in et_set.items():
-                et_meters = [m for m in meters if m.energy_type == energy_type]
-                for month_num in range(1, 13):
-                    m_start = datetime(year, month_num, 1, tzinfo=timezone.utc)
-                    if month_num == 12:
-                        m_end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
-                    else:
-                        m_end = datetime(year, month_num + 1, 1, tzinfo=timezone.utc)
+            year_start = datetime(year, 1, 1, tzinfo=timezone.utc)
+            year_end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
 
-                    total = Decimal("0")
-                    for meter in et_meters:
-                        q = select(func.sum(MeterReading.consumption)).where(
-                            MeterReading.meter_id == meter.id,
-                            MeterReading.timestamp >= m_start,
-                            MeterReading.timestamp < m_end,
-                            MeterReading.consumption.isnot(None),
-                        )
-                        val = (await self.db.execute(q)).scalar() or Decimal("0")
-                        total += val
-                    result[energy_type][month_num] = float(total)
+            rows = (await self.db.execute(
+                select(
+                    Meter.energy_type,
+                    func.extract("month", MeterReading.timestamp).label("month_num"),
+                    func.sum(MeterReading.consumption).label("total"),
+                )
+                .join(MeterReading, MeterReading.meter_id == Meter.id)
+                .where(
+                    Meter.id.in_(meter_id_list),
+                    MeterReading.consumption.isnot(None),
+                    MeterReading.timestamp >= year_start,
+                    MeterReading.timestamp < year_end,
+                )
+                .group_by(Meter.energy_type, text("month_num"))
+            )).all()
+
+            result: dict[str, dict[int, float]] = {et: {} for et in et_set}
+            for row in rows:
+                et = row.energy_type
+                if et in result:
+                    result[et][int(row.month_num)] = float(row.total or 0)
             return result
 
         data_a = await _monthly_by_et(year_a)
@@ -1710,35 +1715,43 @@ class AnalyticsService:
         grand_total_kwh = 0.0
         grand_total_cost_net = 0.0
 
-        for year, month_num in months:
-            m_start = datetime(year, month_num, 1, tzinfo=timezone.utc)
-            if month_num == 12:
-                m_end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
-            else:
-                m_end = datetime(year, month_num + 1, 1, tzinfo=timezone.utc)
+        # EINE Query für den gesamten Zeitraum statt pro Meter × Monat × Energietyp
+        meter_id_list = [m.id for m in meters]
+        period_start_ts = datetime(months[0][0], months[0][1], 1, tzinfo=timezone.utc)
+        last_y, last_m = months[-1]
+        period_end_ts = datetime(last_y + (1 if last_m == 12 else 0), (last_m % 12) + 1, 1, tzinfo=timezone.utc)
 
+        agg_rows = (await self.db.execute(
+            select(
+                Meter.energy_type,
+                func.extract("year", MeterReading.timestamp).label("yr"),
+                func.extract("month", MeterReading.timestamp).label("mo"),
+                func.sum(MeterReading.consumption).label("consumption"),
+                func.sum(MeterReading.cost_net).label("cost_net"),
+            )
+            .join(MeterReading, MeterReading.meter_id == Meter.id)
+            .where(
+                Meter.id.in_(meter_id_list),
+                MeterReading.consumption.isnot(None),
+                MeterReading.timestamp >= period_start_ts,
+                MeterReading.timestamp < period_end_ts,
+            )
+            .group_by(Meter.energy_type, text("yr"), text("mo"))
+        )).all()
+
+        # In Lookup umwandeln: (energy_type, year, month) → (consumption, cost)
+        agg_lookup: dict[tuple, tuple[Decimal, Decimal]] = {}
+        for agg_row in agg_rows:
+            key = (agg_row.energy_type, int(agg_row.yr), int(agg_row.mo))
+            agg_lookup[key] = (agg_row.consumption or Decimal("0"), agg_row.cost_net or Decimal("0"))
+
+        for year, month_num in months:
             values: dict[str, dict] = {}
             row_total_kwh = 0.0
             row_total_cost = 0.0
 
             for et, primary_unit in et_set.items():
-                et_meters = [m for m in meters if m.energy_type == et]
-                native_total = Decimal("0")
-                cost_total = Decimal("0")
-
-                for meter in et_meters:
-                    q = select(
-                        func.sum(MeterReading.consumption),
-                        func.sum(MeterReading.cost_net),
-                    ).where(
-                        MeterReading.meter_id == meter.id,
-                        MeterReading.timestamp >= m_start,
-                        MeterReading.timestamp < m_end,
-                        MeterReading.consumption.isnot(None),
-                    )
-                    row = (await self.db.execute(q)).one()
-                    native_total += row[0] or Decimal("0")
-                    cost_total += row[1] or Decimal("0")
+                native_total, cost_total = agg_lookup.get((et, year, month_num), (Decimal("0"), Decimal("0")))
 
                 conv = CONVERSION_FACTORS.get(primary_unit, Decimal("1"))
                 kwh_val = float(native_total * conv)

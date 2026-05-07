@@ -715,46 +715,51 @@ class DashboardService:
         return await self._get_enpi_overview(start, end)
 
     async def _get_enpi_overview(self, start: date, end: date) -> list[dict]:
-        """EnPI-Berechnung für alle Hauptzähler."""
-        meters_result = await self.db.execute(
-            select(Meter).where(
+        """EnPI-Berechnung für alle aktiven Zähler (eine Batch-Abfrage)."""
+        ts_start = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
+        ts_end = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+
+        # Eine einzige Query: Verbrauch je Zähler aggregiert
+        query = (
+            select(
+                Meter.id,
+                Meter.name,
+                Meter.energy_type,
+                Meter.unit,
+                func.sum(MeterReading.consumption).label("consumption"),
+            )
+            .join(MeterReading, MeterReading.meter_id == Meter.id)
+            .where(
                 Meter.is_active == True,  # noqa: E712
-                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
-                Meter.parent_meter_id.is_(None),
+                Meter.is_feed_in != True,
+                MeterReading.consumption.isnot(None),
+                MeterReading.consumption > 0,
+                MeterReading.timestamp >= ts_start,
+                MeterReading.timestamp < ts_end,
             )
+            .group_by(Meter.id, Meter.name, Meter.energy_type, Meter.unit)
+            .having(func.sum(MeterReading.consumption) > 0)
+            .order_by(func.sum(MeterReading.consumption).desc())
+            .limit(20)
         )
-        meters = list(meters_result.scalars().all())
+        rows = (await self.db.execute(query)).all()
 
-        result = []
-        for meter in meters:
-            consumption_result = await self.db.execute(
-                select(func.sum(MeterReading.consumption)).where(
-                    MeterReading.meter_id == meter.id,
-                    MeterReading.timestamp >= datetime.combine(
-                        start, datetime.min.time(), tzinfo=timezone.utc
-                    ),
-                    MeterReading.timestamp < datetime.combine(
-                        end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
-                    ),
-                )
-            )
-            raw_consumption = consumption_result.scalar() or Decimal("0")
-            conv = CONVERSION_FACTORS.get(meter.unit, Decimal("1"))
-            kwh = raw_consumption * conv
-
-            result.append({
-                "meter_id": meter.id,
-                "meter_name": meter.name,
-                "energy_type": meter.energy_type,
-                "enpi_value": kwh,
+        return [
+            {
+                "meter_id": row.id,
+                "meter_name": row.name,
+                "energy_type": row.energy_type,
+                "enpi_value": round(float(
+                    (row.consumption or Decimal("0")) * CONVERSION_FACTORS.get(row.unit, Decimal("1"))
+                ), 1),
                 "enpi_unit": "kWh",
                 "target_value": None,
                 "baseline_value": None,
                 "period": f"{start.isoformat()} – {end.isoformat()}",
                 "status": "on_track",
-            })
-
-        return result
+            }
+            for row in rows
+        ]
 
     async def _calc_pv_metrics(self, start: date, end: date) -> dict:
         """PV-Kennzahlen: Eigenproduktion und Autarkiegrad."""

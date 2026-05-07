@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { ChevronRight, Zap, Building2, Home, Settings, Trash2, Activity, Wifi, Plus } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type PaginatedResponse } from '@/types';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
 // ── Typen ──
 
@@ -420,7 +421,7 @@ function MeterTreeTable({
       onMouseDown={e => startResize(i, e)} onClick={e => e.stopPropagation()} />
   );
 
-  if (loading) return <div className="p-8 text-center text-gray-400">Zähler werden geladen...</div>;
+  if (loading) return <LoadingSpinner text="Zähler werden geladen" />;
   if (nodes.length === 0) return <div className="p-8 text-center text-gray-400">{emptyMessage || 'Keine Zähler.'}</div>;
 
   return (
@@ -1079,7 +1080,7 @@ export default function SitesPage() {
 
         <div className="card mt-4 overflow-hidden p-0">
           {loading ? (
-            <div className="p-8 text-center text-gray-400">Laden...</div>
+            <LoadingSpinner />
           ) : sites.length === 0 ? (
             <div className="p-8 text-center text-gray-400">Keine Standorte gefunden.</div>
           ) : (
@@ -1358,7 +1359,7 @@ export default function SitesPage() {
                 className="btn-primary">+ Neues Gebäude</button>
             </div>
             {detailLoading ? (
-              <div className="p-8 text-center text-gray-400">Laden...</div>
+              <LoadingSpinner />
             ) : siteBuildings.length === 0 ? (
               <div className="card p-8 text-center text-gray-400">Keine Gebäude vorhanden.</div>
             ) : (

@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '@/utils/api';
 import InfoTip from '@/components/ui/InfoTip';
 import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
 // ── Typen ──
 
@@ -130,7 +131,7 @@ function DashboardPanel() {
     loadDashboard();
   }, [loadDashboard]);
 
-  if (loading) return <div className="card text-gray-400">Laden...</div>;
+  if (loading) return <div className="card"><LoadingSpinner /></div>;
   if (!dashboard) return <div className="card text-gray-400">Keine Daten verfügbar.</div>;
 
   const current = dashboard.current_year;
@@ -379,7 +380,7 @@ function FactorsPanel() {
       {/* Faktor-Tabelle */}
       <div className="card overflow-hidden p-0">
         {loading ? (
-          <div className="p-8 text-center text-gray-400">Laden...</div>
+          <LoadingSpinner />
         ) : factors.length === 0 ? (
           <div className="p-8 text-center text-gray-400">
             Keine Emissionsfaktoren gefunden. Importieren Sie die BAFA-Standardwerte oder legen Sie eigene Faktoren an.

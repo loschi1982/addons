@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { SlidersHorizontal, Plus, X, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { apiClient } from '@/utils/api';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
 interface Strategy {
   id: string;
@@ -221,7 +222,7 @@ export default function ControlStrategiesPage() {
         {/* Strategieliste */}
         <div className="lg:col-span-2 card">
           {loading ? (
-            <div className="py-12 text-center text-gray-500">Laden...</div>
+            <LoadingSpinner />
           ) : strategies.length === 0 ? (
             <div className="py-12 text-center text-gray-500">Keine Regelstrategien angelegt.</div>
           ) : (

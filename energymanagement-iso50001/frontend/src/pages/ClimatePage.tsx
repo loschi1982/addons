@@ -3,6 +3,7 @@ import { apiClient } from '@/utils/api';
 import { type PaginatedResponse } from '@/types';
 import DiscoveryModal from '@/components/DiscoveryModal';
 import InfoTip from '@/components/ui/InfoTip';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
 // ── Typen ──
 
@@ -219,7 +220,7 @@ function SensorsPanel() {
 
       <div className="card overflow-hidden p-0">
         {loading ? (
-          <div className="p-8 text-center text-gray-400">Laden...</div>
+          <LoadingSpinner />
         ) : sensors.length === 0 ? (
           <div className="p-8 text-center text-gray-400">Keine Sensoren angelegt.</div>
         ) : (
@@ -452,7 +453,7 @@ function ReadingsPanel() {
       {selectedSensor && (
         <div className="card overflow-hidden p-0">
           {loading ? (
-            <div className="p-8 text-center text-gray-400">Laden...</div>
+            <LoadingSpinner />
           ) : readings.length === 0 ? (
             <div className="p-8 text-center text-gray-400">Keine Messwerte vorhanden.</div>
           ) : (
@@ -531,7 +532,7 @@ function ComfortPanel() {
     })();
   }, []);
 
-  if (loading) return <div className="card text-gray-400">Laden...</div>;
+  if (loading) return <div className="card"><LoadingSpinner /></div>;
   if (!dashboard) return <div className="card text-gray-400">Keine Daten verfügbar.</div>;
 
   return (

@@ -5,6 +5,7 @@ import { apiClient, setBackupRunning } from '@/utils/api';
 import { useAppDispatch } from '@/hooks/useRedux';
 import { logout } from '@/store/slices/authSlice';
 import { setBackupLocked } from '@/store/slices/uiSlice';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
 interface SettingEntry {
   value: Record<string, unknown>;
@@ -2364,7 +2365,7 @@ function LogPanel() {
       </div>
 
       {loading ? (
-        <div className="py-8 text-center text-gray-400">Laden...</div>
+        <LoadingSpinner />
       ) : entries.length === 0 ? (
         <div className="py-12 text-center">
           <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-3" />
