@@ -606,6 +606,7 @@ class DashboardService:
             select(
                 Meter.id,
                 Meter.name,
+                Meter.display_name,
                 Meter.energy_type,
                 Meter.unit,
                 func.sum(MeterReading.consumption).label("consumption"),
@@ -619,7 +620,7 @@ class DashboardService:
                 MeterReading.timestamp >= ts_start,
                 MeterReading.timestamp < ts_end,
             )
-            .group_by(Meter.id, Meter.name, Meter.energy_type, Meter.unit)
+            .group_by(Meter.id, Meter.name, Meter.display_name, Meter.energy_type, Meter.unit)
             .having(func.sum(MeterReading.consumption) > 0)
             .order_by(func.sum(MeterReading.consumption).desc().nullslast())
         )
@@ -634,9 +635,14 @@ class DashboardService:
             if et not in groups:
                 groups[et] = []
             if len(groups[et]) < 3:
+                # Name: Klarname bevorzugen, sonst technischen Namen + Klarname
+                if row.display_name:
+                    label = f"{row.display_name} ({row.name})"
+                else:
+                    label = row.name
                 groups[et].append({
                     "meter_id": str(row.id),
-                    "name": row.name,
+                    "name": label,
                     "energy_type": et,
                     "consumption": round(float(row.consumption or 0), 1),
                     "unit": row.unit,
