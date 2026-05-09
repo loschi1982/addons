@@ -132,12 +132,18 @@ class EconomicsService:
 
         # ── 1. EnergyInvoice (letzten 12 Monate, Ø effektiver Preis) ──
         try:
+            # effective_price_per_kwh ist eine Python-Property, keine DB-Spalte
+            # → als SQL-Ausdruck berechnen
+            effective_price_expr = (
+                (EnergyInvoice.total_cost_net - func.coalesce(EnergyInvoice.base_fee, 0))
+                / func.nullif(EnergyInvoice.total_consumption, 0)
+            )
             inv_query = select(
-                func.avg(EnergyInvoice.effective_price_per_kwh)
+                func.avg(effective_price_expr)
             ).where(
-                EnergyInvoice.effective_price_per_kwh.isnot(None),
-                EnergyInvoice.effective_price_per_kwh > 0,
-                EnergyInvoice.billing_date >= twelve_months_ago,
+                EnergyInvoice.total_consumption > 0,
+                EnergyInvoice.total_cost_net > 0,
+                EnergyInvoice.period_end >= twelve_months_ago,
             )
             if meter_ids:
                 inv_query = inv_query.where(EnergyInvoice.meter_id.in_(meter_ids))

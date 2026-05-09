@@ -67,6 +67,15 @@ interface Alert {
   meter_id: string;
 }
 
+interface PlausibilityWarning {
+  meter_name: string;
+  energy_type: string;
+  main_value: number;
+  main_unit: string;
+  sub_sum: number;
+  diff_percent: number;
+}
+
 interface DashboardData {
   period_start: string;
   period_end: string;
@@ -76,6 +85,7 @@ interface DashboardData {
   top_consumers: TopConsumerGroup[];
   enpi_overview: Record<string, unknown>[];
   alerts: Alert[];
+  plausibility_warnings: PlausibilityWarning[];
 }
 
 /* ── Hilfsfunktionen ── */
@@ -207,6 +217,28 @@ function AlertBanner({ alerts }: { alerts: Alert[] }) {
       <ul className="space-y-1">
         {alerts.slice(0, 5).map((a, i) => (
           <li key={i} className="text-sm text-amber-700">• {a.message}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PlausibilityBanner({ warnings }: { warnings: PlausibilityWarning[] }) {
+  if (!warnings || warnings.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
+      <div className="flex items-center gap-2 mb-2">
+        <AlertTriangle className="h-5 w-5 text-orange-600" />
+        <h3 className="font-medium text-orange-800">
+          Plausibilitätsprüfung: {warnings.length} Abweichung{warnings.length > 1 ? 'en' : ''}
+        </h3>
+      </div>
+      <ul className="space-y-1.5">
+        {warnings.map((w, i) => (
+          <li key={i} className="text-sm text-orange-700">
+            <span className="font-medium">{w.meter_name}</span>: Hauptzähler {formatNumber(w.main_value, 0)} {w.main_unit},
+            Unterzähler-Summe {formatNumber(w.sub_sum, 0)} {w.main_unit} ({w.diff_percent.toFixed(1)} % Differenz)
+          </li>
         ))}
       </ul>
     </div>
@@ -577,6 +609,13 @@ export default function DashboardPage() {
       {data.alerts.length > 0 && (
         <div className="mt-4">
           <AlertBanner alerts={data.alerts} />
+        </div>
+      )}
+
+      {/* Plausibilitätsprüfung */}
+      {data.plausibility_warnings && data.plausibility_warnings.length > 0 && (
+        <div className="mt-4">
+          <PlausibilityBanner warnings={data.plausibility_warnings} />
         </div>
       )}
 

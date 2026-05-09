@@ -60,6 +60,16 @@ class ConsumptionChart(BaseModel):
 # Dashboard-Response
 # ---------------------------------------------------------------------------
 
+class PlausibilityWarning(BaseModel):
+    """Warnung bei Abweichung Hauptzähler vs. Unterzähler-Summe."""
+    meter_name: str
+    energy_type: str
+    main_value: float
+    main_unit: str
+    sub_sum: float
+    diff_percent: float
+
+
 class DashboardResponse(BaseModel):
     """Komplette Dashboard-Daten."""
     period_start: date
@@ -70,6 +80,7 @@ class DashboardResponse(BaseModel):
     top_consumers: list[dict] = []
     alerts: list[dict] = []
     enpi_overview: list[dict] = []
+    plausibility_warnings: list[PlausibilityWarning] = []
 
 
 class EnPIResponse(BaseModel):

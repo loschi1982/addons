@@ -153,6 +153,12 @@ class DashboardService:
             logger.error("dashboard_enpi_error", error=str(e))
             enpi = []
 
+        try:
+            plausibility = await self._get_plausibility_warnings(period_start, period_end, meter_ids)
+        except Exception as e:
+            logger.error("dashboard_plausibility_error", error=str(e))
+            plausibility = []
+
         return {
             "period_start": period_start,
             "period_end": period_end,
@@ -162,6 +168,7 @@ class DashboardService:
             "top_consumers": top_consumers,
             "alerts": alerts,
             "enpi_overview": enpi,
+            "plausibility_warnings": plausibility,
         }
 
     async def _consumption_by_energy_type(
@@ -414,8 +421,14 @@ class DashboardService:
             return Decimal("0")
 
     async def _total_cost(self, start: date, end: date, meter_ids: list | None = None) -> Decimal:
-        """Geschätzte Gesamtkosten aus Tarif-Informationen (einzelne Batch-Abfrage)."""
-        # Alle aktiven Hauptzähler mit Tarif in einer Abfrage laden
+        """Gesamtkosten aus Tarif-Informationen + direkte Reading-Kosten."""
+        start_ts = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
+        end_ts = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+
+        total_cost = Decimal("0")
+        tariff_meter_ids: set = set()
+
+        # ── 1. Tarif-basierte Kosten (Zähler mit price_per_kwh) ──
         meters_q = select(Meter).where(
             Meter.is_active == True,  # noqa: E712
             Meter.is_feed_in != True,
@@ -425,44 +438,56 @@ class DashboardService:
             meters_q = meters_q.where(Meter.id.in_(meter_ids))
         meters_result = await self.db.execute(meters_q)
         meters = list(meters_result.scalars().all())
-        if not meters:
-            return Decimal("0")
 
-        # Zähler mit positivem Tarif filtern (kein DB-Roundtrip mehr pro Zähler)
         priced_meters = [
             m for m in meters
             if Decimal(str((m.tariff_info or {}).get("price_per_kwh", 0))) > 0
         ]
-        if not priced_meters:
-            return Decimal("0")
 
-        meter_id_list = [m.id for m in priced_meters]
-        start_ts = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
-        end_ts = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+        if priced_meters:
+            meter_id_list = [m.id for m in priced_meters]
+            tariff_meter_ids = set(meter_id_list)
 
-        # Verbrauch aller Zähler in einer einzigen GROUP-BY-Abfrage
-        rows = (await self.db.execute(
-            select(
-                MeterReading.meter_id,
-                func.sum(MeterReading.consumption).label("total_consumption"),
-            )
+            rows = (await self.db.execute(
+                select(
+                    MeterReading.meter_id,
+                    func.sum(MeterReading.consumption).label("total_consumption"),
+                )
+                .where(
+                    MeterReading.meter_id.in_(meter_id_list),
+                    MeterReading.timestamp >= start_ts,
+                    MeterReading.timestamp < end_ts,
+                )
+                .group_by(MeterReading.meter_id)
+            )).all()
+
+            meter_lookup = {m.id: m for m in priced_meters}
+            for row in rows:
+                consumption = row.total_consumption or Decimal("0")
+                meter = meter_lookup[row.meter_id]
+                price_per_kwh = Decimal(str((meter.tariff_info or {}).get("price_per_kwh", 0)))
+                conv = CONVERSION_FACTORS.get(meter.unit, Decimal("1"))
+                total_cost += consumption * conv * price_per_kwh
+
+        # ── 2. Direkte Kosten aus Readings (Abrechnungsdaten) ──
+        # Für Zähler OHNE tariff_info, die cost_net direkt in den Readings haben
+        direct_q = (
+            select(func.sum(MeterReading.cost_net))
+            .join(Meter, Meter.id == MeterReading.meter_id)
             .where(
-                MeterReading.meter_id.in_(meter_id_list),
+                Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,
+                MeterReading.cost_net > 0,
                 MeterReading.timestamp >= start_ts,
                 MeterReading.timestamp < end_ts,
             )
-            .group_by(MeterReading.meter_id)
-        )).all()
-
-        consumption_by_meter = {row.meter_id: row.total_consumption or Decimal("0") for row in rows}
-        meter_lookup = {m.id: m for m in priced_meters}
-
-        total_cost = Decimal("0")
-        for meter_id, consumption in consumption_by_meter.items():
-            meter = meter_lookup[meter_id]
-            price_per_kwh = Decimal(str((meter.tariff_info or {}).get("price_per_kwh", 0)))
-            conv = CONVERSION_FACTORS.get(meter.unit, Decimal("1"))
-            total_cost += consumption * conv * price_per_kwh
+        )
+        if tariff_meter_ids:
+            direct_q = direct_q.where(~MeterReading.meter_id.in_(tariff_meter_ids))
+        if meter_ids is not None:
+            direct_q = direct_q.where(Meter.id.in_(meter_ids))
+        direct_cost = (await self.db.execute(direct_q)).scalar() or Decimal("0")
+        total_cost += direct_cost
 
         return Decimal(str(round(float(total_cost), 2)))
 
@@ -536,7 +561,38 @@ class DashboardService:
         # Versorger-spezifische Faktoren anwenden
         factors = await self._apply_provider_overrides(factors)
 
-        # Schritt 4: Pro Energietyp aggregieren
+        # Schritt 4: Direkte Kosten aus Readings laden (für Zähler ohne Tarif)
+        tariffed_ids = {m_id for m_id, t in tariffs.items() if t.get("price_per_kwh")}
+        direct_costs_by_et: dict[str, Decimal] = {}
+        if True:
+            dcq = (
+                select(
+                    Meter.energy_type,
+                    func.sum(MeterReading.cost_net).label("direct_cost"),
+                )
+                .join(MeterReading, MeterReading.meter_id == Meter.id)
+                .where(
+                    Meter.is_active == True,  # noqa: E712
+                    Meter.is_feed_in != True,
+                    MeterReading.cost_net > 0,
+                    MeterReading.timestamp >= datetime.combine(
+                        start, datetime.min.time(), tzinfo=timezone.utc
+                    ),
+                    MeterReading.timestamp < datetime.combine(
+                        end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+                    ),
+                )
+                .group_by(Meter.energy_type)
+            )
+            if tariffed_ids:
+                dcq = dcq.where(~Meter.id.in_(tariffed_ids))
+            if meter_ids is not None:
+                dcq = dcq.where(Meter.id.in_(meter_ids))
+            dc_result = await self.db.execute(dcq)
+            for dc_row in dc_result.all():
+                direct_costs_by_et[dc_row.energy_type] = dc_row.direct_cost or Decimal("0")
+
+        # Schritt 5: Pro Energietyp aggregieren
         groups: dict[str, dict] = {}
         for row in rows:
             raw = row.consumption or Decimal("0")
@@ -562,6 +618,11 @@ class DashboardService:
             # CO₂ schätzen
             factor = factors.get(row.energy_type, Decimal("0"))
             groups[row.energy_type]["co2_kg"] += kwh * factor / Decimal("1000")
+
+        # Direkte Kosten aus Readings hinzufügen
+        for et, dc in direct_costs_by_et.items():
+            if et in groups:
+                groups[et]["cost_eur"] += dc
 
         total = sum(g["kwh"] for g in groups.values())
         return [
@@ -755,6 +816,90 @@ class DashboardService:
             end = end_date or today
 
         return await self._get_enpi_overview(start, end)
+
+    async def _get_plausibility_warnings(
+        self, start: date, end: date, meter_ids: list | None = None
+    ) -> list[dict]:
+        """Plausibilitätsprüfung: Hauptzähler vs. Summe Unterzähler.
+
+        Warnt wenn die Differenz > 15 % beträgt.
+        """
+        ts_start = datetime.combine(start, time.min, tzinfo=timezone.utc)
+        ts_end = datetime.combine(end + timedelta(days=1), time.min, tzinfo=timezone.utc)
+
+        # Hauptzähler laden, die Unterzähler haben
+        parent_q = (
+            select(Meter.id, Meter.name, Meter.display_name, Meter.energy_type, Meter.unit)
+            .where(
+                Meter.is_active == True,  # noqa: E712
+                Meter.parent_meter_id.is_(None),
+                Meter.id.in_(
+                    select(Meter.parent_meter_id).where(
+                        Meter.parent_meter_id.isnot(None),
+                        Meter.is_active == True,  # noqa: E712
+                    ).distinct()
+                ),
+            )
+        )
+        if meter_ids is not None:
+            parent_q = parent_q.where(Meter.id.in_(meter_ids))
+        parents = (await self.db.execute(parent_q)).all()
+        if not parents:
+            return []
+
+        parent_ids = [p.id for p in parents]
+
+        # Verbrauch der Hauptzähler
+        main_q = (
+            select(
+                MeterReading.meter_id,
+                func.sum(MeterReading.consumption).label("total"),
+            )
+            .where(
+                MeterReading.meter_id.in_(parent_ids),
+                MeterReading.timestamp >= ts_start,
+                MeterReading.timestamp < ts_end,
+            )
+            .group_by(MeterReading.meter_id)
+        )
+        main_result = {r.meter_id: float(r.total or 0) for r in (await self.db.execute(main_q)).all()}
+
+        # Alle Unterzähler + deren Verbrauch
+        sub_q = (
+            select(
+                Meter.parent_meter_id,
+                func.sum(MeterReading.consumption).label("total"),
+            )
+            .join(MeterReading, MeterReading.meter_id == Meter.id)
+            .where(
+                Meter.parent_meter_id.in_(parent_ids),
+                Meter.is_active == True,  # noqa: E712
+                MeterReading.timestamp >= ts_start,
+                MeterReading.timestamp < ts_end,
+            )
+            .group_by(Meter.parent_meter_id)
+        )
+        sub_result = {r.parent_meter_id: float(r.total or 0) for r in (await self.db.execute(sub_q)).all()}
+
+        warnings = []
+        for p in parents:
+            main_val = main_result.get(p.id, 0)
+            sub_sum = sub_result.get(p.id, 0)
+            if main_val <= 0 or sub_sum <= 0:
+                continue
+            diff_pct = abs(1 - sub_sum / main_val) * 100
+            if diff_pct > 15:
+                name = p.display_name or p.name
+                warnings.append({
+                    "meter_name": name,
+                    "energy_type": p.energy_type,
+                    "main_value": round(main_val, 1),
+                    "main_unit": p.unit,
+                    "sub_sum": round(sub_sum, 1),
+                    "diff_percent": round(diff_pct, 1),
+                })
+
+        return warnings
 
     async def _get_enpi_overview(self, start: date, end: date) -> list[dict]:
         """EnPI-Berechnung für alle aktiven Zähler (eine Batch-Abfrage)."""
