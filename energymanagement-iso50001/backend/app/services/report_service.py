@@ -2628,11 +2628,11 @@ p {{ margin: 5pt 0; }}
         end: date,
         meter_ids: list[uuid.UUID] | None = None,
     ) -> dict:
-        """Kosten-Zusammenfassung aus MeterReading.cost_net/cost_gross."""
+        """Kosten-Zusammenfassung aus MeterReading.cost_net/cost_gross + Tarif-Fallback."""
         start_dt = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
         end_dt = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
 
-        # Gesamtsumme
+        # ── 1. Direkte Kosten aus Readings (Abrechnungsdaten) ──
         total_query = select(
             func.sum(MeterReading.cost_net),
             func.sum(MeterReading.cost_gross),
@@ -2647,14 +2647,75 @@ p {{ margin: 5pt 0; }}
         result = await self.db.execute(total_query)
         total_cost_net, total_cost_gross = result.one()
 
-        if total_cost_net is None:
-            return {"available": False}
+        # Zähler mit direkten Kosten merken (um Doppelzählung zu vermeiden)
+        direct_cost_meter_ids: set = set()
+        if total_cost_net is not None:
+            dcm_query = (
+                select(MeterReading.meter_id)
+                .where(
+                    MeterReading.timestamp >= start_dt,
+                    MeterReading.timestamp < end_dt,
+                    MeterReading.cost_net.is_not(None),
+                )
+                .distinct()
+            )
+            if meter_ids:
+                dcm_query = dcm_query.where(MeterReading.meter_id.in_(meter_ids))
+            dcm_result = await self.db.execute(dcm_query)
+            direct_cost_meter_ids = {row[0] for row in dcm_result.all()}
 
         total_cost_net = float(total_cost_net or 0)
         total_cost_gross = float(total_cost_gross or 0)
 
-        # Monatliche Aufschlüsselung
+        # ── 2. Tarif-basierte Kosten für Zähler OHNE direkte Kosten ──
+        tariff_cost = Decimal("0")
+        meters_q = select(Meter).where(
+            Meter.is_active == True,  # noqa: E712
+            Meter.is_feed_in != True,
+            Meter.tariff_info.isnot(None),
+        )
+        if meter_ids:
+            meters_q = meters_q.where(Meter.id.in_(meter_ids))
+        if direct_cost_meter_ids:
+            meters_q = meters_q.where(~Meter.id.in_(direct_cost_meter_ids))
+        meters_result = await self.db.execute(meters_q)
+        priced_meters = [
+            m for m in meters_result.scalars().all()
+            if Decimal(str((m.tariff_info or {}).get("price_per_kwh", 0))) > 0
+        ]
+        if priced_meters:
+            meter_id_list = [m.id for m in priced_meters]
+            rows = (await self.db.execute(
+                select(
+                    MeterReading.meter_id,
+                    func.sum(MeterReading.consumption).label("total_consumption"),
+                )
+                .where(
+                    MeterReading.meter_id.in_(meter_id_list),
+                    MeterReading.timestamp >= start_dt,
+                    MeterReading.timestamp < end_dt,
+                )
+                .group_by(MeterReading.meter_id)
+            )).all()
+            meter_lookup = {m.id: m for m in priced_meters}
+            for row in rows:
+                consumption = row.total_consumption or Decimal("0")
+                meter = meter_lookup[row.meter_id]
+                price = Decimal(str((meter.tariff_info or {}).get("price_per_kwh", 0)))
+                conv = CONVERSION_FACTORS.get(meter.unit, Decimal("1"))
+                tariff_cost += consumption * conv * price
+
+        total_cost_net += float(tariff_cost)
+        total_cost_gross += float(tariff_cost)  # Brutto ≈ Netto als Schätzung
+
+        if total_cost_net == 0:
+            return {"available": False}
+
+        # Monatliche Aufschlüsselung (direkte + tarifbasierte Kosten)
         from sqlalchemy import extract
+        monthly_costs_map: dict[str, float] = {}
+
+        # 2a. Direkte Kosten pro Monat
         monthly_query = (
             select(
                 extract("year", MeterReading.timestamp).label("year"),
@@ -2673,12 +2734,40 @@ p {{ margin: 5pt 0; }}
             monthly_query = monthly_query.where(MeterReading.meter_id.in_(meter_ids))
 
         monthly_result = await self.db.execute(monthly_query)
+        for row in monthly_result.all():
+            key = f"{int(row.year)}-{int(row.month):02d}"
+            monthly_costs_map[key] = float(row.cost_net or 0)
+
+        # 2b. Tarif-basierte Kosten pro Monat (für Zähler ohne direkte Kosten)
+        if priced_meters:
+            tariff_monthly_query = (
+                select(
+                    extract("year", MeterReading.timestamp).label("year"),
+                    extract("month", MeterReading.timestamp).label("month"),
+                    MeterReading.meter_id,
+                    func.sum(MeterReading.consumption).label("total_consumption"),
+                )
+                .where(
+                    MeterReading.meter_id.in_([m.id for m in priced_meters]),
+                    MeterReading.timestamp >= start_dt,
+                    MeterReading.timestamp < end_dt,
+                )
+                .group_by("year", "month", MeterReading.meter_id)
+                .order_by("year", "month")
+            )
+            tariff_monthly_result = await self.db.execute(tariff_monthly_query)
+            meter_lookup = {m.id: m for m in priced_meters}
+            for row in tariff_monthly_result.all():
+                key = f"{int(row.year)}-{int(row.month):02d}"
+                consumption = row.total_consumption or Decimal("0")
+                meter = meter_lookup[row.meter_id]
+                price = Decimal(str((meter.tariff_info or {}).get("price_per_kwh", 0)))
+                conv = CONVERSION_FACTORS.get(meter.unit, Decimal("1"))
+                monthly_costs_map[key] = monthly_costs_map.get(key, 0) + float(consumption * conv * price)
+
         monthly_costs = [
-            {
-                "month": f"{int(row.year)}-{int(row.month):02d}",
-                "cost_net": float(row.cost_net or 0),
-            }
-            for row in monthly_result.all()
+            {"month": k, "cost_net": round(v, 2)}
+            for k, v in sorted(monthly_costs_map.items())
         ]
 
         # Vorjahreskosten für YoY-Vergleich
@@ -2692,6 +2781,7 @@ p {{ margin: 5pt 0; }}
         prev_start_dt = datetime.combine(prev_start, datetime.min.time(), tzinfo=timezone.utc)
         prev_end_dt = datetime.combine(prev_end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
 
+        # Vorjahr: direkte Kosten
         prev_query = select(func.sum(MeterReading.cost_net)).where(
             MeterReading.timestamp >= prev_start_dt,
             MeterReading.timestamp < prev_end_dt,
@@ -2700,8 +2790,30 @@ p {{ margin: 5pt 0; }}
         if meter_ids:
             prev_query = prev_query.where(MeterReading.meter_id.in_(meter_ids))
         prev_result = await self.db.execute(prev_query)
-        prev_cost_net = prev_result.scalar()
-        prev_cost_net = float(prev_cost_net) if prev_cost_net is not None else None
+        prev_cost_net = float(prev_result.scalar() or 0) or None
+
+        # Vorjahr: Tarif-basierte Kosten ergänzen
+        if priced_meters:
+            prev_tariff_q = (
+                select(func.sum(MeterReading.consumption), MeterReading.meter_id)
+                .where(
+                    MeterReading.meter_id.in_([m.id for m in priced_meters]),
+                    MeterReading.timestamp >= prev_start_dt,
+                    MeterReading.timestamp < prev_end_dt,
+                )
+                .group_by(MeterReading.meter_id)
+            )
+            prev_tariff_result = await self.db.execute(prev_tariff_q)
+            prev_tariff_cost = Decimal("0")
+            for row in prev_tariff_result.all():
+                consumption = row[0] or Decimal("0")
+                meter = meter_lookup.get(row[1])
+                if meter:
+                    price = Decimal(str((meter.tariff_info or {}).get("price_per_kwh", 0)))
+                    conv = CONVERSION_FACTORS.get(meter.unit, Decimal("1"))
+                    prev_tariff_cost += consumption * conv * price
+            if float(prev_tariff_cost) > 0:
+                prev_cost_net = (prev_cost_net or 0) + float(prev_tariff_cost)
 
         cost_savings = None
         if prev_cost_net is not None and prev_cost_net > 0:
