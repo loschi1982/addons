@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { AlertTriangle, Trash2, Flag, TrendingDown, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { AlertTriangle, Trash2, Flag, TrendingDown, RefreshCw, ChevronUp, ChevronDown, ExternalLink } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS } from '@/types';
 
@@ -44,6 +45,7 @@ const ACTION_DESCRIPTIONS: Record<Action, string> = {
 // ── Komponente ──
 
 export default function OutliersPage() {
+  const navigate = useNavigate();
   const [outliers, setOutliers] = useState<OutlierItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -341,8 +343,13 @@ export default function OutliersPage() {
                           className="rounded"
                         />
                       </td>
-                      <td className="px-3 py-2.5 font-medium text-gray-900 max-w-xs truncate" title={o.meter_name}>
-                        {o.meter_name}
+                      <td className="px-3 py-2.5 font-medium max-w-xs truncate" title={`${o.meter_name} – Klicken um zum Messwert zu springen`}>
+                        <button
+                          onClick={() => navigate(`/readings?meter_id=${o.meter_id}&highlight=${o.reading_id}`)}
+                          className="text-primary-700 hover:text-primary-900 hover:underline text-left truncate w-full"
+                        >
+                          {o.meter_name}
+                        </button>
                       </td>
                       <td className="px-3 py-2.5">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ENERGY_TYPE_COLORS[o.energy_type] || 'bg-gray-100 text-gray-700'}`}>
@@ -373,6 +380,13 @@ export default function OutliersPage() {
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex justify-end gap-1.5">
+                          <ActionButton
+                            icon={<ExternalLink className="w-3.5 h-3.5" />}
+                            label="Anzeigen"
+                            title="Zum Messwert in der Zählerstands-Liste springen"
+                            color="gray"
+                            onClick={() => navigate(`/readings?meter_id=${o.meter_id}&highlight=${o.reading_id}`)}
+                          />
                           <ActionButton
                             icon={<TrendingDown className="w-3.5 h-3.5" />}
                             label="Interpolieren"
@@ -435,7 +449,7 @@ interface ActionButtonProps {
   icon: React.ReactNode;
   label: string;
   title: string;
-  color: 'red' | 'orange' | 'blue';
+  color: 'red' | 'orange' | 'blue' | 'gray';
   onClick: () => void;
   disabled?: boolean;
 }
@@ -445,6 +459,7 @@ function ActionButton({ icon, label, title, color, onClick, disabled }: ActionBu
     red: 'bg-red-50 hover:bg-red-100 text-red-600 border-red-200',
     orange: 'bg-orange-50 hover:bg-orange-100 text-orange-600 border-orange-200',
     blue: 'bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200',
+    gray: 'bg-gray-50 hover:bg-gray-100 text-gray-700 border-gray-200',
   };
   return (
     <button

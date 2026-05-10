@@ -66,6 +66,9 @@ export default function ReadingsPage() {
   const [searchParams] = useSearchParams();
   const highlightReadingId = searchParams.get('highlight') ?? '';
   const highlightRef = useRef<HTMLTableRowElement | null>(null);
+  // Initial-Skip-Flag: beim Highlight-Sprung warten wir auf page-info,
+  // damit nicht erst Page 1 und dann die richtige Seite geladen wird.
+  const skipInitialLoad = useRef<boolean>(!!highlightReadingId);
 
   // Zähler-Liste
   const [meters, setMeters] = useState<Meter[]>([]);
@@ -75,7 +78,7 @@ export default function ReadingsPage() {
   const [readings, setReadings] = useState<Reading[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(!!highlightReadingId);
   const pageSize = 25;
 
   // Einzelerfassung
@@ -105,28 +108,43 @@ export default function ReadingsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ value: '', notes: '' });
 
-  // Zähler laden + ggf. Seite aus highlight ableiten
+  // Initial: Zähler-Liste, page-info (bei highlight) und Readings parallel laden
   useEffect(() => {
     (async () => {
-      try {
-        const res = await apiClient.get<PaginatedResponse<Meter>>(
-          '/api/v1/meters?page_size=500'
-        );
-        setMeters(res.data.items.filter((m) => m.is_active));
-      } catch {
-        // Interceptor handled
-      }
-      // Wenn highlight gesetzt: richtige Seite ermitteln
+      const metersPromise = apiClient
+        .get<PaginatedResponse<Meter>>('/api/v1/meters?page_size=500')
+        .then((res) => setMeters(res.data.items.filter((m) => m.is_active)))
+        .catch(() => { /* Interceptor handled */ });
+
       if (highlightReadingId) {
+        // Page-Info ermittelt Zähler+Seite, dann sofort Readings laden
         try {
           const info = await apiClient.get<{ meter_id: string; page: number; position_on_page: number; total: number }>(
             `/api/v1/readings/${highlightReadingId}/page-info`,
             { params: { page_size: pageSize } }
           );
-          setSelectedMeterId(info.data.meter_id);
-          setPage(info.data.page);
-        } catch { /* leer */ }
+          const targetMeterId = info.data.meter_id;
+          const targetPage = info.data.page;
+          setSelectedMeterId(targetMeterId);
+          setPage(targetPage);
+
+          // Direkt Readings laden — nicht auf state-Update warten
+          try {
+            const params = new URLSearchParams({
+              meter_id: targetMeterId,
+              page: targetPage.toString(),
+              page_size: pageSize.toString(),
+            });
+            const r = await apiClient.get<PaginatedResponse<Reading>>(`/api/v1/readings?${params}`);
+            setReadings(r.data.items);
+            setTotal(r.data.total);
+          } catch { /* leer */ }
+        } catch { /* leer */ } finally {
+          skipInitialLoad.current = false;
+          setLoading(false);
+        }
       }
+      await metersPromise;
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -158,6 +176,12 @@ export default function ReadingsPage() {
   }, [selectedMeterId, page]);
 
   useEffect(() => {
+    // Beim Highlight-Sprung wird der initiale Load aus dem Mount-Effekt erledigt,
+    // damit nicht doppelt geladen wird (Page 1 + dann richtige Seite).
+    if (skipInitialLoad.current) {
+      skipInitialLoad.current = false;
+      return;
+    }
     loadReadings();
   }, [loadReadings]);
 
