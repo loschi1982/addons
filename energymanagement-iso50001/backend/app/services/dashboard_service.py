@@ -820,6 +820,112 @@ class DashboardService:
     async def _get_plausibility_warnings(
         self, start: date, end: date, meter_ids: list | None = None
     ) -> list[dict]:
+        """Plausibilitätsprüfungen kombiniert (Sub-Meter-Mismatch + eingefrorene Zähler)."""
+        warnings = await self._get_submeter_warnings(start, end, meter_ids)
+        warnings.extend(await self._get_frozen_meter_warnings(meter_ids))
+        return warnings
+
+    async def _get_frozen_meter_warnings(
+        self, meter_ids: list | None = None
+    ) -> list[dict]:
+        """Findet Zähler, deren Zählerstand seit X Tagen unverändert ist.
+
+        Strategie für Performance:
+        1. Single GROUP BY über die letzten 14 Tage findet Kandidaten (MIN(value)=MAX(value))
+        2. Nur für die Kandidaten wird die exakte Frozen-Dauer berechnet
+
+        Auto-Quellen (modbus/bacnet/shelly/knx/homeassistant/mqtt): Schwelle 14 Tage
+        Sonst: Schwelle 90 Tage (typisch für manuelle Eintragungen / Monatsabrechnungen)
+        """
+        auto_sources = {"modbus", "bacnet", "shelly", "knx", "homeassistant", "mqtt"}
+        AUTO_THRESHOLD_DAYS = 14
+        MANUAL_THRESHOLD_DAYS = 90
+        MAX_NO_DATA_DAYS = 30  # älter als 30 Tage ohne Reading = stillgelegt, keine Warnung
+
+        # 1. Kandidaten: Zähler ohne Wertänderung in den letzten 14 Tagen
+        candidate_q = text("""
+            SELECT
+                mr.meter_id,
+                MIN(mr.value) AS min_v,
+                MAX(mr.value) AS max_v,
+                MAX(mr.timestamp) AS last_ts,
+                COUNT(*) AS n
+            FROM meter_readings mr
+            WHERE mr.timestamp >= NOW() - INTERVAL '14 days'
+            GROUP BY mr.meter_id
+            HAVING MIN(mr.value) = MAX(mr.value) AND COUNT(*) >= 5
+        """)
+        candidates = (await self.db.execute(candidate_q)).all()
+        if not candidates:
+            return []
+
+        candidate_ids = [c.meter_id for c in candidates]
+        candidate_map = {c.meter_id: c for c in candidates}
+
+        # 2. Zähler-Metadaten laden (nur für Kandidaten)
+        meters_q = select(
+            Meter.id, Meter.name, Meter.display_name, Meter.energy_type,
+            Meter.unit, Meter.data_source,
+        ).where(
+            Meter.is_active == True,  # noqa: E712
+            Meter.id.in_(candidate_ids),
+        )
+        if meter_ids is not None:
+            meters_q = meters_q.where(Meter.id.in_(meter_ids))
+        meters = (await self.db.execute(meters_q)).all()
+
+        # 3. Pro Kandidat: Zeitpunkt der letzten Wertänderung
+        warnings: list[dict] = []
+        now = datetime.now(timezone.utc)
+        for m in meters:
+            cand = candidate_map[m.id]
+            last_ts = cand.last_ts
+            frozen_value = float(cand.min_v)
+
+            # Zähler seit > 30 Tagen ohne Reading? → stillgelegt, keine Warnung
+            if (now - last_ts).days > MAX_NO_DATA_DAYS:
+                continue
+
+            last_change_ts = (await self.db.execute(
+                select(func.max(MeterReading.timestamp)).where(
+                    MeterReading.meter_id == m.id,
+                    MeterReading.value != cand.min_v,
+                )
+            )).scalar()
+            if last_change_ts is None:
+                # Nie geändert – ältestes Reading als Beginn
+                last_change_ts = (await self.db.execute(
+                    select(func.min(MeterReading.timestamp)).where(
+                        MeterReading.meter_id == m.id,
+                    )
+                )).scalar()
+                if last_change_ts is None:
+                    continue
+
+            frozen_days = (last_ts - last_change_ts).days
+            threshold = AUTO_THRESHOLD_DAYS if m.data_source in auto_sources else MANUAL_THRESHOLD_DAYS
+            if frozen_days < threshold:
+                continue
+
+            name = m.display_name or m.name
+            warnings.append({
+                "warning_type": "frozen_meter",
+                "meter_name": name,
+                "meter_id": str(m.id),
+                "energy_type": m.energy_type,
+                "frozen_since": last_change_ts.date().isoformat(),
+                "frozen_days": frozen_days,
+                "frozen_value": frozen_value,
+                "last_reading_at": last_ts.isoformat(),
+                "main_unit": m.unit,
+            })
+
+        warnings.sort(key=lambda w: w["frozen_days"], reverse=True)
+        return warnings
+
+    async def _get_submeter_warnings(
+        self, start: date, end: date, meter_ids: list | None = None
+    ) -> list[dict]:
         """Plausibilitätsprüfung: Hauptzähler vs. Summe Unterzähler.
 
         Warnt wenn die Differenz > 15 % beträgt.
@@ -891,7 +997,9 @@ class DashboardService:
             if diff_pct > 15:
                 name = p.display_name or p.name
                 warnings.append({
+                    "warning_type": "sub_meter_mismatch",
                     "meter_name": name,
+                    "meter_id": str(p.id),
                     "energy_type": p.energy_type,
                     "main_value": round(main_val, 1),
                     "main_unit": p.unit,

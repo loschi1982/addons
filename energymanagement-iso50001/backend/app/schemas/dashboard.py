@@ -61,13 +61,21 @@ class ConsumptionChart(BaseModel):
 # ---------------------------------------------------------------------------
 
 class PlausibilityWarning(BaseModel):
-    """Warnung bei Abweichung Hauptzähler vs. Unterzähler-Summe."""
+    """Warnung – Hauptzähler-Abweichung oder eingefrorener Zähler."""
+    warning_type: str = "sub_meter_mismatch"  # "sub_meter_mismatch" | "frozen_meter"
     meter_name: str
     energy_type: str
-    main_value: float
-    main_unit: str
-    sub_sum: float
-    diff_percent: float
+    meter_id: str | None = None
+    # sub_meter_mismatch
+    main_value: float | None = None
+    main_unit: str | None = None
+    sub_sum: float | None = None
+    diff_percent: float | None = None
+    # frozen_meter
+    frozen_since: str | None = None  # ISO-Datum der letzten Wertänderung
+    frozen_days: int | None = None
+    frozen_value: float | None = None
+    last_reading_at: str | None = None
 
 
 class DashboardResponse(BaseModel):
