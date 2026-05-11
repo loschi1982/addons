@@ -106,6 +106,24 @@ function formatNumber(value: unknown, decimals = 1): string {
   return num.toFixed(decimals);
 }
 
+/* Formatierung passend zur Einheit:
+   - Energie & Geld (kWh, MWh, €, kg, kg CO₂): Mio./k-Skalierung (kompakt)
+   - Volumen & Längen (m³, l, m): vollständige Zahl mit deutschem Tausenderpunkt
+   - Stk./Prozent: ganzzahlig
+*/
+function formatValueForUnit(value: unknown, unit?: string): string {
+  const num = Number(value) || 0;
+  const u = (unit || '').trim();
+  const VOLUME_UNITS = new Set(['m³', 'l', 'L', 'm', 'kg']);
+  if (VOLUME_UNITS.has(u)) {
+    return num.toLocaleString('de-DE', { maximumFractionDigits: num >= 100 ? 0 : 1 });
+  }
+  if (u === 'Stk.' || u === 'Stk' || u === '%') {
+    return num.toLocaleString('de-DE', { maximumFractionDigits: 0 });
+  }
+  return formatNumber(num);
+}
+
 const KPI_ICONS: Record<string, React.ElementType> = {
   'Strom': Zap,
   'Gas': Flame,
@@ -190,7 +208,7 @@ function KPICardComponent({ card }: { card: KPICard }) {
             )}
           </p>
           <p className="mt-1 text-2xl font-bold text-gray-900">
-            {formatNumber(card.value)}
+            {formatValueForUnit(card.value, card.unit)}
             <span className="ml-1 text-sm font-normal text-gray-500">{card.unit}</span>
           </p>
         </div>
@@ -752,7 +770,7 @@ export default function DashboardPage() {
                         const entry = data.energy_breakdown.find(b => b.energy_type === name);
                         const lbl = ENERGY_TYPE_LABELS[name as keyof typeof ENERGY_TYPE_LABELS] || name;
                         if (entry?.original_unit && entry.original_unit !== 'kWh') {
-                          return [`${formatNumber(entry.original_value)} ${entry.original_unit} (${formatNumber(value)} kWh)`, lbl];
+                          return [`${formatValueForUnit(entry.original_value, entry.original_unit)} ${entry.original_unit} (${formatNumber(value)} kWh)`, lbl];
                         }
                         return [`${formatNumber(value)} kWh`, lbl];
                       }}
@@ -778,7 +796,7 @@ export default function DashboardPage() {
                     </div>
                     <span className="font-medium text-gray-900">
                       {b.original_unit && b.original_unit !== 'kWh'
-                        ? `${formatNumber(b.original_value)} ${b.original_unit}`
+                        ? `${formatValueForUnit(b.original_value, b.original_unit)} ${b.original_unit}`
                         : `${formatNumber(b.consumption_kwh)} kWh`
                       }
                       <span className="ml-1 text-gray-400 font-normal">
@@ -829,7 +847,7 @@ export default function DashboardPage() {
                             <div className="flex items-center justify-between text-sm">
                               <span className="font-medium text-gray-700">{m.name}</span>
                               <span className="text-gray-500">
-                                {formatNumber(m.consumption)} {m.unit}
+                                {formatValueForUnit(m.consumption, m.unit)} {m.unit}
                               </span>
                             </div>
                             <div className="mt-1 h-2 w-full rounded-full bg-gray-100">
