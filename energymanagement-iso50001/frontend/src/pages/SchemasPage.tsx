@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   Plus, Trash2, ArrowLeft, Search, Calendar,
   Gauge, Zap, Droplets, Flame, Sun, X, Users, FileDown,
+  ChevronRight, ChevronDown, Building2,
 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS } from '@/types';
@@ -47,7 +48,16 @@ interface Meter {
   unit: string;
   parent_meter_id: string | null;
   schema_label: string | null;
+  site_id?: string | null;
+  site_name?: string | null;
+  is_feed_in?: boolean;
+  is_virtual?: boolean;
 }
+
+const ENERGY_TYPE_ORDER = [
+  'electricity', 'natural_gas', 'gas', 'district_heating', 'district_cooling',
+  'water', 'heating_oil', 'oil', 'pellets', 'solar',
+];
 
 /* ── Konstanten ── */
 
@@ -680,11 +690,13 @@ function AddSchemaRootModal({
   const [schemaLabel, setSchemaLabel] = useState('');
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     (async () => {
       try {
-        const res = await apiClient.get('/api/v1/meters?page_size=100');
+        // Schlanker Endpoint – alle aktiven Zähler in einer Query, mit site_name.
+        const res = await apiClient.get('/api/v1/meters/tree');
         const items = res.data.items || res.data;
         setMeters(Array.isArray(items) ? items : []);
       } catch { /* leer */ }
@@ -692,11 +704,86 @@ function AddSchemaRootModal({
     })();
   }, []);
 
-  const filteredMeters = meters.filter((m) => {
-    if (existingRootIds.includes(m.id)) return false;
-    if (!search) return true;
-    return m.name.toLowerCase().includes(search.toLowerCase());
-  });
+  // Hierarchie: Standort → Energieart → Zähler
+  const hierarchy = (() => {
+    const searchLower = search.trim().toLowerCase();
+    const matches = (m: Meter) => {
+      if (!searchLower) return true;
+      if (m.name.toLowerCase().includes(searchLower)) return true;
+      if (m.site_name && m.site_name.toLowerCase().includes(searchLower)) return true;
+      return false;
+    };
+    const groups = new Map<string, Map<string, Meter[]>>();
+    for (const m of meters) {
+      if (existingRootIds.includes(m.id)) continue;
+      if (m.is_feed_in) continue;  // Einspeise-Zähler ausblenden
+      if (!matches(m)) continue;
+      const siteName = m.site_name || '(Ohne Standort)';
+      if (!groups.has(siteName)) groups.set(siteName, new Map());
+      const etMap = groups.get(siteName)!;
+      if (!etMap.has(m.energy_type)) etMap.set(m.energy_type, []);
+      etMap.get(m.energy_type)!.push(m);
+    }
+    // Sortierung anwenden
+    const result: Array<{
+      siteName: string;
+      siteKey: string;
+      groups: Array<{ energyType: string; etKey: string; meters: Meter[] }>;
+      total: number;
+    }> = [];
+    const sortedSites = Array.from(groups.keys()).sort((a, b) => {
+      if (a === '(Ohne Standort)') return 1;
+      if (b === '(Ohne Standort)') return -1;
+      return a.localeCompare(b, 'de');
+    });
+    for (const siteName of sortedSites) {
+      const etMap = groups.get(siteName)!;
+      const sortedEt = Array.from(etMap.keys()).sort((a, b) => {
+        const ia = ENERGY_TYPE_ORDER.indexOf(a);
+        const ib = ENERGY_TYPE_ORDER.indexOf(b);
+        if (ia === -1 && ib === -1) return a.localeCompare(b);
+        if (ia === -1) return 1;
+        if (ib === -1) return -1;
+        return ia - ib;
+      });
+      let siteTotal = 0;
+      const etGroups = sortedEt.map((et) => {
+        const list = etMap.get(et)!.sort((a, b) => a.name.localeCompare(b.name, 'de'));
+        siteTotal += list.length;
+        return { energyType: et, etKey: `et:${siteName}:${et}`, meters: list };
+      });
+      result.push({
+        siteName,
+        siteKey: `site:${siteName}`,
+        groups: etGroups,
+        total: siteTotal,
+      });
+    }
+    return result;
+  })();
+
+  // Suche expandiert alle Treffer-Pfade automatisch
+  useEffect(() => {
+    if (!search.trim()) return;
+    const newExpanded = new Set<string>();
+    for (const site of hierarchy) {
+      newExpanded.add(site.siteKey);
+      for (const g of site.groups) {
+        newExpanded.add(g.etKey);
+      }
+    }
+    setExpanded(newExpanded);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  const toggle = (key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const handleSave = async () => {
     if (!selectedMeter || !schemaLabel.trim()) return;
@@ -711,6 +798,8 @@ function AddSchemaRootModal({
     }
     setSaving(false);
   };
+
+  const totalShown = hierarchy.reduce((sum, s) => sum + s.total, 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -733,38 +822,69 @@ function AddSchemaRootModal({
             <input
               type="text"
               className="input pl-9"
-              placeholder="Zähler suchen…"
+              placeholder="Zähler oder Standort suchen…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <div className="max-h-48 overflow-y-auto rounded-lg border">
+          <div className="max-h-[60vh] overflow-y-auto rounded-lg border">
             {loading ? (
               <div className="p-4 text-center text-sm text-gray-400">Laden…</div>
-            ) : filteredMeters.length === 0 ? (
+            ) : totalShown === 0 ? (
               <div className="p-4 text-center text-sm text-gray-400">Keine passenden Zähler</div>
             ) : (
-              filteredMeters.map((m) => {
-                const Icon = ENERGY_ICONS[m.energy_type] || Gauge;
-                const color = NODE_COLORS[m.energy_type] || '#6b7280';
-                const isSelected = selectedMeter?.id === m.id;
+              hierarchy.map((site) => {
+                const siteOpen = expanded.has(site.siteKey);
                 return (
-                  <button
-                    key={m.id}
-                    onClick={() => {
-                      setSelectedMeter(m);
-                      if (!schemaLabel) setSchemaLabel(m.name);
-                    }}
-                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm border-b last:border-b-0 transition-colors ${
-                      isSelected ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50'
-                    }`}
-                  >
-                    <Icon className="h-4 w-4 flex-shrink-0" style={{ color }} />
-                    <span className="flex-1 truncate">{m.name}</span>
-                    <span className="text-xs text-gray-400">
-                      {ENERGY_TYPE_LABELS[m.energy_type as keyof typeof ENERGY_TYPE_LABELS] || m.energy_type}
-                    </span>
-                  </button>
+                  <div key={site.siteKey} className="border-b last:border-b-0">
+                    <button
+                      onClick={() => toggle(site.siteKey)}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium bg-gray-50 hover:bg-gray-100 transition-colors"
+                    >
+                      {siteOpen ? <ChevronDown className="h-4 w-4 text-gray-500" /> : <ChevronRight className="h-4 w-4 text-gray-500" />}
+                      <Building2 className="h-4 w-4 text-gray-500" />
+                      <span className="flex-1 truncate">{site.siteName}</span>
+                      <span className="text-xs text-gray-500">{site.total}</span>
+                    </button>
+                    {siteOpen && site.groups.map((g) => {
+                      const etOpen = expanded.has(g.etKey);
+                      const EtIcon = ENERGY_ICONS[g.energyType] || Gauge;
+                      const etColor = NODE_COLORS[g.energyType] || '#6b7280';
+                      return (
+                        <div key={g.etKey}>
+                          <button
+                            onClick={() => toggle(g.etKey)}
+                            className="flex w-full items-center gap-2 px-3 py-1.5 pl-7 text-left text-sm hover:bg-gray-50 transition-colors"
+                          >
+                            {etOpen ? <ChevronDown className="h-3.5 w-3.5 text-gray-400" /> : <ChevronRight className="h-3.5 w-3.5 text-gray-400" />}
+                            <EtIcon className="h-3.5 w-3.5" style={{ color: etColor }} />
+                            <span className="flex-1 truncate text-gray-700">
+                              {ENERGY_TYPE_LABELS[g.energyType as keyof typeof ENERGY_TYPE_LABELS] || g.energyType}
+                            </span>
+                            <span className="text-xs text-gray-400">{g.meters.length}</span>
+                          </button>
+                          {etOpen && g.meters.map((m) => {
+                            const isSelected = selectedMeter?.id === m.id;
+                            return (
+                              <button
+                                key={m.id}
+                                onClick={() => {
+                                  setSelectedMeter(m);
+                                  if (!schemaLabel) setSchemaLabel(m.name);
+                                }}
+                                className={`flex w-full items-center gap-2 px-3 py-1.5 pl-14 text-left text-sm transition-colors ${
+                                  isSelected ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50'
+                                }`}
+                              >
+                                <span className={`h-2 w-2 rounded-full flex-shrink-0 ${isSelected ? 'bg-primary-500' : 'bg-gray-300'}`} />
+                                <span className="flex-1 truncate">{m.name}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
                 );
               })
             )}
