@@ -60,6 +60,7 @@ const navGroups: NavGroup[] = [
     items: [
       { path: '/sites', labelKey: 'nav.sites', icon: Building2 },
       { path: '/meters', labelKey: 'nav.meters', icon: Gauge },
+      { path: '/schemas', labelKey: 'nav.schema', icon: Network },
       { path: '/readings', labelKey: 'nav.readings', icon: ClipboardList },
       { path: '/outliers', labelKey: 'nav.outliers', icon: AlertTriangle },
       { path: '/consumers', labelKey: 'nav.consumers', icon: Zap },
@@ -69,9 +70,9 @@ const navGroups: NavGroup[] = [
     labelKey: 'nav.group.analysis',
     items: [
       { path: '/energy-review', labelKey: 'nav.energyReview', icon: Activity },
-      { path: '/schemas', labelKey: 'nav.schema', icon: Network },
       { path: '/analytics', labelKey: 'nav.analytics', icon: TrendingUp },
       { path: '/load-profile', labelKey: 'nav.loadProfile', icon: BarChart3 },
+      { path: '/reports', labelKey: 'nav.reports', icon: FileText },
     ],
   },
   {
@@ -102,7 +103,6 @@ const navGroups: NavGroup[] = [
   {
     labelKey: 'nav.group.system',
     items: [
-      { path: '/reports', labelKey: 'nav.reports', icon: FileText },
       { path: '/import', labelKey: 'nav.import', icon: Upload },
       { path: '/users', labelKey: 'nav.users', icon: Users },
       { path: '/settings', labelKey: 'nav.settings', icon: Settings },

@@ -232,8 +232,9 @@ function AlertBanner({ alerts }: { alerts: Alert[] }) {
   );
 }
 
-function PlausibilityBanner({ warnings }: { warnings: PlausibilityWarning[] }) {
+function PlausibilityBanner({ warnings, onReload }: { warnings: PlausibilityWarning[]; onReload: () => void }) {
   const navigate = useNavigate();
+  const [busy, setBusy] = useState<string | null>(null);
   if (!warnings || warnings.length === 0) return null;
 
   const mismatch = warnings.filter((w) => (w.warning_type ?? 'sub_meter_mismatch') === 'sub_meter_mismatch');
@@ -242,6 +243,19 @@ function PlausibilityBanner({ warnings }: { warnings: PlausibilityWarning[] }) {
   const fmtFrozenSince = (iso?: string) => {
     if (!iso) return '–';
     return new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  };
+
+  const handleDeactivate = async (meterId: string, name: string) => {
+    if (!confirm(`Zähler "${name}" wirklich deaktivieren? Er wird in Auswertungen nicht mehr berücksichtigt.`)) return;
+    setBusy(meterId);
+    try {
+      await apiClient.put(`/api/v1/meters/${meterId}`, { is_active: false });
+      onReload();
+    } catch {
+      alert('Deaktivieren fehlgeschlagen.');
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (
@@ -255,12 +269,20 @@ function PlausibilityBanner({ warnings }: { warnings: PlausibilityWarning[] }) {
             </h3>
           </div>
           <ul className="space-y-1.5">
-            {mismatch.map((w, i) => (
-              <li key={i} className="text-sm text-orange-700">
-                <span className="font-medium">{w.meter_name}</span>: Hauptzähler {formatNumber(w.main_value ?? 0, 0)} {w.main_unit},
-                Unterzähler-Summe {formatNumber(w.sub_sum ?? 0, 0)} {w.main_unit} ({(w.diff_percent ?? 0).toFixed(1)} % Differenz)
-              </li>
-            ))}
+            {mismatch.map((w, i) => {
+              const subGtMain = (w.sub_sum ?? 0) > (w.main_value ?? 0);
+              return (
+                <li key={i} className="text-sm text-orange-700">
+                  <span className="font-medium">{w.meter_name}</span>: Hauptzähler {formatNumber(w.main_value ?? 0, 0)} {w.main_unit},
+                  Unterzähler-Summe {formatNumber(w.sub_sum ?? 0, 0)} {w.main_unit} ({(w.diff_percent ?? 0).toFixed(1)} % Differenz)
+                  {subGtMain && (
+                    <span className="ml-2 inline-block rounded bg-orange-200 px-1.5 py-0.5 text-xs font-medium text-orange-900">
+                      Unterzähler &gt; Hauptzähler – Datenfehler prüfen
+                    </span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -275,19 +297,31 @@ function PlausibilityBanner({ warnings }: { warnings: PlausibilityWarning[] }) {
           </div>
           <ul className="space-y-1.5">
             {frozen.map((w, i) => (
-              <li key={i} className="text-sm text-amber-700">
-                {w.meter_id ? (
+              <li key={i} className="flex items-center gap-2 text-sm text-amber-700">
+                <span className="flex-1">
+                  {w.meter_id ? (
+                    <button
+                      onClick={() => navigate(`/readings?meter_id=${w.meter_id}`)}
+                      className="font-medium hover:underline text-left"
+                    >
+                      {w.meter_name}
+                    </button>
+                  ) : (
+                    <span className="font-medium">{w.meter_name}</span>
+                  )}
+                  : seit {fmtFrozenSince(w.frozen_since)} unverändert ({w.frozen_days} Tage),
+                  Wert: {formatNumber(w.frozen_value ?? 0, 2)} {w.main_unit}
+                </span>
+                {w.meter_id && (
                   <button
-                    onClick={() => navigate(`/readings?meter_id=${w.meter_id}`)}
-                    className="font-medium hover:underline text-left"
+                    onClick={() => handleDeactivate(w.meter_id!, w.meter_name)}
+                    disabled={busy === w.meter_id}
+                    className="flex-shrink-0 rounded border border-amber-300 bg-white px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                    title="Zähler deaktivieren (is_active=false)"
                   >
-                    {w.meter_name}
+                    {busy === w.meter_id ? 'Wird deaktiviert…' : 'Deaktivieren'}
                   </button>
-                ) : (
-                  <span className="font-medium">{w.meter_name}</span>
                 )}
-                : seit {fmtFrozenSince(w.frozen_since)} unverändert ({w.frozen_days} Tage),
-                Wert: {formatNumber(w.frozen_value ?? 0, 2)} {w.main_unit}
               </li>
             ))}
           </ul>
@@ -670,7 +704,7 @@ export default function DashboardPage() {
       {/* Plausibilitätsprüfung */}
       {data.plausibility_warnings && data.plausibility_warnings.length > 0 && (
         <div className="mt-4">
-          <PlausibilityBanner warnings={data.plausibility_warnings} />
+          <PlausibilityBanner warnings={data.plausibility_warnings} onReload={fetchDashboard} />
         </div>
       )}
 
