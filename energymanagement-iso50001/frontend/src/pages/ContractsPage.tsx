@@ -4,6 +4,7 @@ import {
   TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp, X,
 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
+import PageTabs, { COST_TABS } from '@/components/layout/PageTabs';
 
 /* ── Typen ── */
 
@@ -403,6 +404,7 @@ export default function ContractsPage() {
 
   return (
     <div className="p-6 space-y-6">
+      <PageTabs tabs={COST_TABS} />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="page-title">Energielieferverträge</h1>

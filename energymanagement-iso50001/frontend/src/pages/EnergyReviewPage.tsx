@@ -9,6 +9,7 @@ import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
 import InfoTip from '@/components/ui/InfoTip';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import PageTabs, { ANALYSIS_TABS } from '@/components/layout/PageTabs';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine,
@@ -175,6 +176,7 @@ export default function EnergyReviewPage() {
 
   return (
     <div>
+      <PageTabs tabs={ANALYSIS_TABS} />
       <div>
         <h1 className="page-title">Energiebewertung</h1>
         <p className="mt-1 text-sm text-gray-500">

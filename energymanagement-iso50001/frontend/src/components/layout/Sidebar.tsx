@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  BarChart3,
   Building2,
   Gauge,
   ClipboardList,
@@ -19,13 +18,10 @@ import {
   ChevronRight,
   ChevronDown,
   Leaf,
-  TrendingUp,
   Settings,
   Globe,
   Network,
   Euro,
-  PieChart,
-  Handshake,
   BookOpen,
   GraduationCap,
   SlidersHorizontal,
@@ -69,18 +65,14 @@ const navGroups: NavGroup[] = [
   {
     labelKey: 'nav.group.analysis',
     items: [
-      { path: '/energy-review', labelKey: 'nav.energyReview', icon: Activity },
-      { path: '/analytics', labelKey: 'nav.analytics', icon: TrendingUp },
-      { path: '/load-profile', labelKey: 'nav.loadProfile', icon: BarChart3 },
+      { path: '/energy-review', labelKey: 'nav.analysis', icon: Activity },
       { path: '/reports', labelKey: 'nav.reports', icon: FileText },
     ],
   },
   {
     labelKey: 'nav.group.costs',
     items: [
-      { path: '/cost-allocation', labelKey: 'nav.costAllocation', icon: PieChart },
-      { path: '/contracts', labelKey: 'nav.contracts', icon: Handshake },
-      { path: '/economics', labelKey: 'nav.economics', icon: Euro },
+      { path: '/economics', labelKey: 'nav.costsEconomy', icon: Euro },
     ],
   },
   {

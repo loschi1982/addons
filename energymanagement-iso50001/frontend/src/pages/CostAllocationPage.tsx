@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { RefreshCw, Euro, Zap, Building2 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
+import PageTabs, { COST_TABS } from '@/components/layout/PageTabs';
 
 /* ── Typen ── */
 
@@ -80,6 +81,7 @@ export default function CostAllocationPage() {
 
   return (
     <div className="p-6 space-y-6">
+      <PageTabs tabs={COST_TABS} />
       <div>
         <h1 className="page-title">Kostenumlage</h1>
         <p className="text-sm text-gray-500 mt-1">

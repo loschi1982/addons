@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { RefreshCw, Zap, AlertTriangle, TrendingUp, Activity } from 'lucide-react';
 import { apiClient } from '@/utils/api';
+import PageTabs, { ANALYSIS_TABS } from '@/components/layout/PageTabs';
 
 /* ── Typen ── */
 
@@ -142,6 +143,7 @@ export default function LoadProfilePage() {
 
   return (
     <div className="p-6 space-y-6">
+      <PageTabs tabs={ANALYSIS_TABS} />
       <div>
         <h1 className="page-title">Lastprofil & Spitzenlast</h1>
         <p className="text-sm text-gray-500 mt-1">

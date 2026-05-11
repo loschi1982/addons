@@ -13,6 +13,7 @@ import SankeyDiagram from '@/components/charts/SankeyDiagram';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import PageTabs, { ANALYSIS_TABS } from '@/components/layout/PageTabs';
 
 const MonthlyComparisonPage = lazy(() => import('./MonthlyComparisonPage'));
 const EnergyBalancePage = lazy(() => import('./EnergyBalancePage'));
@@ -222,6 +223,7 @@ export default function AnalyticsPage() {
 
   return (
     <div>
+      <PageTabs tabs={ANALYSIS_TABS} />
       <div className="flex items-end justify-between">
         <div>
           <h1 className="page-title">Analysen</h1>

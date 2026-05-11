@@ -4,6 +4,7 @@ import {
   Loader2, RefreshCw, Info,
 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
+import PageTabs, { COST_TABS } from '@/components/layout/PageTabs';
 
 /* ── Typen ── */
 
@@ -245,6 +246,7 @@ export default function EconomicsPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
+      <PageTabs tabs={COST_TABS} />
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
