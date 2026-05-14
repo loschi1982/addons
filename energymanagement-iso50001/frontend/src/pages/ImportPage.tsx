@@ -1028,33 +1028,36 @@ function SpiePanel() {
       </div>
 
       {/* Aktivieren + Speichern */}
-      <div className="flex items-center justify-between border-t pt-3">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={e => setEnabled(e.target.checked)}
-            className="rounded"
-            disabled={isRunning}
-          />
-          <span className="text-sm text-gray-700">Automatischer Import alle 3 Tage</span>
-        </label>
-        <div className="flex gap-2">
-          <button
-            onClick={handleSave}
-            disabled={saving || isRunning || !username}
-            className="btn-primary text-sm"
-          >
-            {saving ? 'Speichern…' : 'Speichern'}
-          </button>
-          <button
-            onClick={handleSync}
-            disabled={isRunning || !username}
-            className="btn-secondary text-sm"
-          >
-            Jetzt importieren
-          </button>
+      <div className="border-t pt-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={e => setEnabled(e.target.checked)}
+              className="rounded"
+              disabled={isRunning}
+            />
+            <span className="text-sm text-gray-700">Automatischer Import alle 3 Tage</span>
+          </label>
+          <div className="flex gap-2">
+            <button
+              onClick={handleSave}
+              disabled={saving || isRunning || !username}
+              className="btn-primary text-sm"
+            >
+              {saving ? 'Speichern…' : 'Speichern'}
+            </button>
+            <button
+              onClick={handleSync}
+              disabled={isRunning || !username}
+              className="btn-secondary text-sm"
+            >
+              Jetzt importieren
+            </button>
+          </div>
         </div>
+        {enabled && <SpieNextRunBar lastSyncedAt={lastSync?.synced_at ?? null} />}
       </div>
 
       {/* Fortschrittsanzeige */}
@@ -1157,4 +1160,73 @@ function StatusBadge({ status }: { status: string }) {
       {labels[status] || status}
     </span>
   );
+}
+
+
+/* ── Fortschrittsbalken: Zeit bis zum nächsten SPIE-Auto-Import ── */
+
+const SPIE_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000; // 3 Tage
+
+function SpieNextRunBar({ lastSyncedAt }: { lastSyncedAt: string | null }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 60_000); // Minute
+    return () => clearInterval(tick);
+  }, []);
+
+  if (!lastSyncedAt) {
+    return (
+      <div className="ml-6 text-xs text-gray-400">
+        Noch kein Import durchgeführt – nächster Lauf bei nächster Beat-Tick-Auslösung.
+      </div>
+    );
+  }
+
+  const last = new Date(lastSyncedAt).getTime();
+  const next = last + SPIE_INTERVAL_MS;
+  const remainingMs = Math.max(0, next - now);
+  const elapsedMs = Math.min(SPIE_INTERVAL_MS, now - last);
+  const percent = Math.min(100, Math.max(0, (elapsedMs / SPIE_INTERVAL_MS) * 100));
+
+  const isOverdue = remainingMs === 0;
+  const remainingLabel = formatRemaining(remainingMs);
+  const nextLabel = new Date(next).toLocaleString('de-DE', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+
+  return (
+    <div className="ml-6">
+      <div className="flex justify-between text-xs text-gray-500 mb-1">
+        <span>
+          {isOverdue
+            ? 'Nächster Import überfällig – läuft beim nächsten Beat-Tick.'
+            : `Nächster Import in ${remainingLabel}`}
+        </span>
+        <span className="text-gray-400">{nextLabel}</span>
+      </div>
+      <div className="h-2 w-full rounded-full bg-gray-100">
+        <div
+          className={`h-2 rounded-full transition-all duration-500 ${
+            isOverdue ? 'bg-amber-500' : 'bg-primary-500'
+          }`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function formatRemaining(ms: number): string {
+  if (ms <= 0) return '0 min';
+  const total_min = Math.floor(ms / 60_000);
+  const days = Math.floor(total_min / 1440);
+  const hours = Math.floor((total_min % 1440) / 60);
+  const mins = total_min % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days} Tag${days === 1 ? '' : 'e'}`);
+  if (hours > 0) parts.push(`${hours} Std`);
+  if (mins > 0 && days === 0) parts.push(`${mins} Min`);
+  return parts.length ? parts.join(' ') : '< 1 Min';
 }
