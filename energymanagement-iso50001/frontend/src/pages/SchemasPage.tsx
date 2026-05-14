@@ -12,11 +12,12 @@ import InfoTip from '@/components/ui/InfoTip';
 
 interface SchemaRoot {
   id: string;
-  name: string;
-  schema_label: string;
-  energy_type: string;
-  unit: string;
-  child_count: number;
+  label: string;
+  scope_type: 'site' | 'building' | 'usage_unit' | 'meter';
+  scope_id: string;
+  scope_name: string | null;
+  energy_type: string | null;
+  meter_count: number;
 }
 
 interface ConsumerInfo {
@@ -39,6 +40,8 @@ interface TreeNode {
   unaccounted: number | null;
   consumers: ConsumerInfo[];
   children: TreeNode[];
+  is_virtual_root?: boolean;
+  scope?: { type: string; id: string; name: string };
 }
 
 interface Meter {
@@ -202,7 +205,7 @@ export default function SchemasPage() {
 
   const fetchRoots = useCallback(async () => {
     try {
-      const res = await apiClient.get('/api/v1/meters/schema-roots');
+      const res = await apiClient.get('/api/v1/monitoring-points');
       setRoots(res.data);
     } catch { /* leer */ }
     setLoading(false);
@@ -217,19 +220,19 @@ export default function SchemasPage() {
       const ps = start || periodStart;
       const pe = end || periodEnd;
       const res = await apiClient.get(
-        `/api/v1/meters/${root.id}/subtree?period_start=${ps}&period_end=${pe}`
+        `/api/v1/monitoring-points/${root.id}/subtree?period_start=${ps}&period_end=${pe}`
       );
       setSelectedTree(res.data);
       setSelectedRoot(root);
     } catch { /* leer */ }
   }, [periodStart, periodEnd]);
 
-  const removeLabel = async (meterId: string) => {
+  const removeLabel = async (mpId: string) => {
     if (!confirm('Betrachtungspunkt wirklich entfernen?')) return;
     try {
-      await apiClient.put(`/api/v1/meters/${meterId}`, { schema_label: null });
-      setRoots((prev) => prev.filter((r) => r.id !== meterId));
-      if (selectedTree?.id === meterId) {
+      await apiClient.delete(`/api/v1/monitoring-points/${mpId}`);
+      setRoots((prev) => prev.filter((r) => r.id !== mpId));
+      if (selectedRoot?.id === mpId) {
         setSelectedTree(null);
         setSelectedRoot(null);
       }
@@ -281,8 +284,16 @@ export default function SchemasPage() {
             </div>
           ) : (
             roots.map((root) => {
-              const Icon = ENERGY_ICONS[root.energy_type] || Gauge;
-              const color = NODE_COLORS[root.energy_type] || '#6b7280';
+              const Icon = root.energy_type
+                ? (ENERGY_ICONS[root.energy_type] || Gauge)
+                : (root.scope_type === 'meter' ? Gauge : Building2);
+              const color = root.energy_type ? (NODE_COLORS[root.energy_type] || '#6b7280') : '#1B5E7B';
+              const scopeLabel = {
+                site: 'Standort',
+                building: 'Gebäude',
+                usage_unit: 'Nutzungseinheit',
+                meter: 'Zähler',
+              }[root.scope_type];
               return (
                 <div
                   key={root.id}
@@ -295,8 +306,10 @@ export default function SchemasPage() {
                         <Icon className="h-5 w-5" style={{ color }} />
                       </div>
                       <div>
-                        <h3 className="font-semibold text-gray-900">{root.schema_label}</h3>
-                        <p className="text-sm text-gray-500">{root.name}</p>
+                        <h3 className="font-semibold text-gray-900">{root.label}</h3>
+                        <p className="text-sm text-gray-500">
+                          {scopeLabel}: {root.scope_name || '—'}
+                        </p>
                       </div>
                     </div>
                     <button
@@ -308,8 +321,12 @@ export default function SchemasPage() {
                     </button>
                   </div>
                   <div className="mt-3 flex items-center gap-4 text-xs text-gray-400">
-                    <span>{ENERGY_TYPE_LABELS[root.energy_type as keyof typeof ENERGY_TYPE_LABELS] || root.energy_type}</span>
-                    <span>{root.child_count} Unterzähler</span>
+                    <span>
+                      {root.energy_type
+                        ? (ENERGY_TYPE_LABELS[root.energy_type as keyof typeof ENERGY_TYPE_LABELS] || root.energy_type)
+                        : 'Alle Energiearten'}
+                    </span>
+                    <span>{root.meter_count} Zähler</span>
                   </div>
                 </div>
               );
@@ -319,7 +336,8 @@ export default function SchemasPage() {
       ) : (
         <TreeView
           tree={selectedTree}
-          label={selectedRoot?.schema_label || ''}
+          label={selectedRoot?.label || ''}
+          monitoringPointId={selectedRoot?.id || ''}
           periodStart={periodStart}
           periodEnd={periodEnd}
           onPeriodChange={handlePeriodChange}
@@ -334,7 +352,6 @@ export default function SchemasPage() {
             setShowAddModal(false);
             fetchRoots();
           }}
-          existingRootIds={roots.map((r) => r.id)}
         />
       )}
     </div>
@@ -346,6 +363,7 @@ export default function SchemasPage() {
 function TreeView({
   tree,
   label,
+  monitoringPointId,
   periodStart,
   periodEnd,
   onPeriodChange,
@@ -353,6 +371,7 @@ function TreeView({
 }: {
   tree: TreeNode;
   label: string;
+  monitoringPointId: string;
   periodStart: string;
   periodEnd: string;
   onPeriodChange: (start: string, end: string) => void;
@@ -402,10 +421,9 @@ function TreeView({
       const params = new URLSearchParams({
         period_start: periodStart,
         period_end: periodEnd,
-        schema_label: label,
       });
       const res = await fetch(
-        `/api/v1/meters/${tree.id}/subtree-pdf?${params}`,
+        `/api/v1/monitoring-points/${monitoringPointId}/subtree-pdf?${params}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!res.ok) throw new Error('Export fehlgeschlagen');
@@ -538,8 +556,13 @@ function TreeView({
 
           {/* Knoten */}
           {nodes.map((n) => {
-            const color = NODE_COLORS[n.node.energy_type] || '#6b7280';
-            const Icon = ENERGY_ICONS[n.node.energy_type] || Gauge;
+            const isVirtualRoot = n.node.is_virtual_root === true;
+            const color = isVirtualRoot
+              ? '#1B5E7B'
+              : (NODE_COLORS[n.node.energy_type] || '#6b7280');
+            const Icon = isVirtualRoot
+              ? Building2
+              : (ENERGY_ICONS[n.node.energy_type] || Gauge);
             const share = rootConsumption > 0 && n.node.consumption > 0
               ? Math.round((n.node.consumption / rootConsumption) * 100)
               : 0;
@@ -675,18 +698,31 @@ function TreeView({
 
 /* ── Betrachtungspunkt hinzufügen Modal ── */
 
+type ScopeType = 'site' | 'building' | 'usage_unit' | 'meter';
+
+interface SiteLite { id: string; name: string }
+interface BuildingLite { id: string; name: string; site_id: string }
+interface UnitLite { id: string; name: string; building_id: string }
+
 function AddSchemaRootModal({
   onClose,
   onAdded,
-  existingRootIds,
 }: {
   onClose: () => void;
   onAdded: () => void;
-  existingRootIds: string[];
+  existingRootIds?: string[];
 }) {
+  const [scopeType, setScopeType] = useState<ScopeType>('site');
   const [meters, setMeters] = useState<Meter[]>([]);
-  const [search, setSearch] = useState('');
+  const [sites, setSites] = useState<SiteLite[]>([]);
+  const [buildings, setBuildings] = useState<BuildingLite[]>([]);
+  const [units, setUnits] = useState<UnitLite[]>([]);
+  const [selectedSiteId, setSelectedSiteId] = useState<string>('');
+  const [selectedBuildingId, setSelectedBuildingId] = useState<string>('');
+  const [selectedUnitId, setSelectedUnitId] = useState<string>('');
   const [selectedMeter, setSelectedMeter] = useState<Meter | null>(null);
+  const [search, setSearch] = useState('');
+  const [energyType, setEnergyType] = useState<string>('');  // '' = alle
   const [schemaLabel, setSchemaLabel] = useState('');
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -695,14 +731,77 @@ function AddSchemaRootModal({
   useEffect(() => {
     (async () => {
       try {
-        // Schlanker Endpoint – alle aktiven Zähler in einer Query, mit site_name.
-        const res = await apiClient.get('/api/v1/meters/tree');
-        const items = res.data.items || res.data;
-        setMeters(Array.isArray(items) ? items : []);
+        const [metersRes, sitesRes] = await Promise.all([
+          apiClient.get('/api/v1/meters/tree'),
+          apiClient.get('/api/v1/sites?page_size=200'),
+        ]);
+        const mItems = metersRes.data.items || metersRes.data;
+        setMeters(Array.isArray(mItems) ? mItems : []);
+        const sItems = sitesRes.data.items || sitesRes.data;
+        setSites(Array.isArray(sItems) ? sItems.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name })) : []);
       } catch { /* leer */ }
       setLoading(false);
     })();
   }, []);
+
+  // Buildings + UsageUnits aus Meter-Daten + Site-Endpoints ableiten.
+  // Pragmatisch: laden, wenn Site gewählt wird.
+  useEffect(() => {
+    if (!selectedSiteId) { setBuildings([]); setSelectedBuildingId(''); return; }
+    (async () => {
+      try {
+        const res = await apiClient.get(`/api/v1/sites/${selectedSiteId}/buildings`);
+        const items = res.data.items || res.data;
+        setBuildings(Array.isArray(items) ? items.map((b: { id: string; name: string }) => ({ id: b.id, name: b.name, site_id: selectedSiteId })) : []);
+      } catch { setBuildings([]); }
+    })();
+  }, [selectedSiteId]);
+
+  useEffect(() => {
+    if (!selectedBuildingId || !selectedSiteId) { setUnits([]); setSelectedUnitId(''); return; }
+    (async () => {
+      try {
+        const res = await apiClient.get(`/api/v1/sites/${selectedSiteId}/buildings/${selectedBuildingId}`);
+        const list = (res.data?.usage_units ?? []) as Array<{ id: string; name: string }>;
+        setUnits(list.map((u) => ({ id: u.id, name: u.name, building_id: selectedBuildingId })));
+      } catch { setUnits([]); }
+    })();
+  }, [selectedBuildingId, selectedSiteId]);
+
+  // Energiearten aus den Metern ableiten
+  const availableEnergyTypes = (() => {
+    const types = new Set<string>();
+    for (const m of meters) if (m.energy_type) types.add(m.energy_type);
+    return Array.from(types).sort((a, b) => {
+      const ia = ENERGY_TYPE_ORDER.indexOf(a);
+      const ib = ENERGY_TYPE_ORDER.indexOf(b);
+      if (ia === -1 && ib === -1) return a.localeCompare(b);
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+  })();
+
+  // Auto-Label generieren wenn User noch nichts eingegeben hat
+  useEffect(() => {
+    let label = '';
+    if (scopeType === 'site' && selectedSiteId) {
+      label = sites.find((s) => s.id === selectedSiteId)?.name ?? '';
+    } else if (scopeType === 'building' && selectedBuildingId) {
+      label = buildings.find((b) => b.id === selectedBuildingId)?.name ?? '';
+    } else if (scopeType === 'usage_unit' && selectedUnitId) {
+      label = units.find((u) => u.id === selectedUnitId)?.name ?? '';
+    } else if (scopeType === 'meter' && selectedMeter) {
+      label = selectedMeter.name;
+    }
+    if (label && scopeType !== 'meter') {
+      label += energyType
+        ? ` – ${ENERGY_TYPE_LABELS[energyType as keyof typeof ENERGY_TYPE_LABELS] || energyType}`
+        : ' – Alle Energiearten';
+    }
+    setSchemaLabel(label);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeType, selectedSiteId, selectedBuildingId, selectedUnitId, selectedMeter, energyType]);
 
   // Hierarchie: Standort → Energieart → Zähler
   const hierarchy = (() => {
@@ -715,7 +814,6 @@ function AddSchemaRootModal({
     };
     const groups = new Map<string, Map<string, Meter[]>>();
     for (const m of meters) {
-      if (existingRootIds.includes(m.id)) continue;
       if (m.is_feed_in) continue;  // Einspeise-Zähler ausblenden
       if (!matches(m)) continue;
       const siteName = m.site_name || '(Ohne Standort)';
@@ -786,11 +884,21 @@ function AddSchemaRootModal({
   };
 
   const handleSave = async () => {
-    if (!selectedMeter || !schemaLabel.trim()) return;
+    if (!schemaLabel.trim()) return;
+    let scope_id: string | null = null;
+    if (scopeType === 'site') scope_id = selectedSiteId;
+    else if (scopeType === 'building') scope_id = selectedBuildingId;
+    else if (scopeType === 'usage_unit') scope_id = selectedUnitId;
+    else if (scopeType === 'meter') scope_id = selectedMeter?.id ?? null;
+    if (!scope_id) return;
+
     setSaving(true);
     try {
-      await apiClient.put(`/api/v1/meters/${selectedMeter.id}`, {
-        schema_label: schemaLabel.trim(),
+      await apiClient.post('/api/v1/monitoring-points', {
+        label: schemaLabel.trim(),
+        scope_type: scopeType,
+        scope_id,
+        energy_type: scopeType === 'meter' || !energyType ? null : energyType,
       });
       onAdded();
     } catch {
@@ -799,11 +907,25 @@ function AddSchemaRootModal({
     setSaving(false);
   };
 
+  const canSave = !!schemaLabel.trim() && (
+    (scopeType === 'site' && !!selectedSiteId) ||
+    (scopeType === 'building' && !!selectedBuildingId) ||
+    (scopeType === 'usage_unit' && !!selectedUnitId) ||
+    (scopeType === 'meter' && !!selectedMeter)
+  );
+
+  const SCOPE_TABS: { key: ScopeType; label: string; icon: React.ElementType }[] = [
+    { key: 'site', label: 'Standort', icon: Building2 },
+    { key: 'building', label: 'Gebäude', icon: Building2 },
+    { key: 'usage_unit', label: 'Nutzungseinheit', icon: Users },
+    { key: 'meter', label: 'Zähler', icon: Gauge },
+  ];
+
   const totalShown = hierarchy.reduce((sum, s) => sum + s.total, 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">Betrachtungspunkt hinzufügen</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
@@ -811,85 +933,186 @@ function AddSchemaRootModal({
           </button>
         </div>
 
-        <p className="text-sm text-gray-500 mb-4">
-          Wählen Sie einen Zähler als Einstiegspunkt. Der gesamte Unterbaum ab diesem Zähler wird als Energieschema dargestellt.
-        </p>
-
-        <div className="mb-4">
-          <label className="label">Zähler auswählen</label>
-          <div className="relative mb-2">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              className="input pl-9"
-              placeholder="Zähler oder Standort suchen…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          <div className="max-h-[60vh] overflow-y-auto rounded-lg border">
-            {loading ? (
-              <div className="p-4 text-center text-sm text-gray-400">Laden…</div>
-            ) : totalShown === 0 ? (
-              <div className="p-4 text-center text-sm text-gray-400">Keine passenden Zähler</div>
-            ) : (
-              hierarchy.map((site) => {
-                const siteOpen = expanded.has(site.siteKey);
-                return (
-                  <div key={site.siteKey} className="border-b last:border-b-0">
-                    <button
-                      onClick={() => toggle(site.siteKey)}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium bg-gray-50 hover:bg-gray-100 transition-colors"
-                    >
-                      {siteOpen ? <ChevronDown className="h-4 w-4 text-gray-500" /> : <ChevronRight className="h-4 w-4 text-gray-500" />}
-                      <Building2 className="h-4 w-4 text-gray-500" />
-                      <span className="flex-1 truncate">{site.siteName}</span>
-                      <span className="text-xs text-gray-500">{site.total}</span>
-                    </button>
-                    {siteOpen && site.groups.map((g) => {
-                      const etOpen = expanded.has(g.etKey);
-                      const EtIcon = ENERGY_ICONS[g.energyType] || Gauge;
-                      const etColor = NODE_COLORS[g.energyType] || '#6b7280';
-                      return (
-                        <div key={g.etKey}>
-                          <button
-                            onClick={() => toggle(g.etKey)}
-                            className="flex w-full items-center gap-2 px-3 py-1.5 pl-7 text-left text-sm hover:bg-gray-50 transition-colors"
-                          >
-                            {etOpen ? <ChevronDown className="h-3.5 w-3.5 text-gray-400" /> : <ChevronRight className="h-3.5 w-3.5 text-gray-400" />}
-                            <EtIcon className="h-3.5 w-3.5" style={{ color: etColor }} />
-                            <span className="flex-1 truncate text-gray-700">
-                              {ENERGY_TYPE_LABELS[g.energyType as keyof typeof ENERGY_TYPE_LABELS] || g.energyType}
-                            </span>
-                            <span className="text-xs text-gray-400">{g.meters.length}</span>
-                          </button>
-                          {etOpen && g.meters.map((m) => {
-                            const isSelected = selectedMeter?.id === m.id;
-                            return (
-                              <button
-                                key={m.id}
-                                onClick={() => {
-                                  setSelectedMeter(m);
-                                  if (!schemaLabel) setSchemaLabel(m.name);
-                                }}
-                                className={`flex w-full items-center gap-2 px-3 py-1.5 pl-14 text-left text-sm transition-colors ${
-                                  isSelected ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50'
-                                }`}
-                              >
-                                <span className={`h-2 w-2 rounded-full flex-shrink-0 ${isSelected ? 'bg-primary-500' : 'bg-gray-300'}`} />
-                                <span className="flex-1 truncate">{m.name}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })
-            )}
-          </div>
+        {/* Scope-Tabs */}
+        <div className="mb-4 flex rounded-lg border border-gray-200 p-1 bg-gray-50">
+          {SCOPE_TABS.map((t) => {
+            const TabIcon = t.icon;
+            const active = scopeType === t.key;
+            return (
+              <button
+                key={t.key}
+                onClick={() => setScopeType(t.key)}
+                className={`flex-1 flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-medium transition-colors ${
+                  active ? 'bg-white text-primary-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <TabIcon className="h-3.5 w-3.5" />
+                {t.label}
+              </button>
+            );
+          })}
         </div>
+
+        {/* Scope-spezifische Auswahl */}
+        {scopeType === 'site' && (
+          <div className="mb-4">
+            <label className="label">Standort *</label>
+            <select className="input" value={selectedSiteId} onChange={(e) => setSelectedSiteId(e.target.value)}>
+              <option value="">– Standort wählen –</option>
+              {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+        )}
+
+        {scopeType === 'building' && (
+          <>
+            <div className="mb-3">
+              <label className="label">Standort</label>
+              <select className="input" value={selectedSiteId} onChange={(e) => setSelectedSiteId(e.target.value)}>
+                <option value="">– Standort wählen –</option>
+                {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div className="mb-4">
+              <label className="label">Gebäude *</label>
+              <select
+                className="input"
+                value={selectedBuildingId}
+                onChange={(e) => setSelectedBuildingId(e.target.value)}
+                disabled={!selectedSiteId || buildings.length === 0}
+              >
+                <option value="">{selectedSiteId ? (buildings.length ? '– Gebäude wählen –' : 'Keine Gebäude') : 'Erst Standort wählen'}</option>
+                {buildings.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+          </>
+        )}
+
+        {scopeType === 'usage_unit' && (
+          <>
+            <div className="mb-3">
+              <label className="label">Standort</label>
+              <select className="input" value={selectedSiteId} onChange={(e) => setSelectedSiteId(e.target.value)}>
+                <option value="">– Standort wählen –</option>
+                {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div className="mb-3">
+              <label className="label">Gebäude</label>
+              <select
+                className="input"
+                value={selectedBuildingId}
+                onChange={(e) => setSelectedBuildingId(e.target.value)}
+                disabled={!selectedSiteId || buildings.length === 0}
+              >
+                <option value="">{selectedSiteId ? (buildings.length ? '– Gebäude wählen –' : 'Keine Gebäude') : 'Erst Standort wählen'}</option>
+                {buildings.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+            <div className="mb-4">
+              <label className="label">Nutzungseinheit *</label>
+              <select
+                className="input"
+                value={selectedUnitId}
+                onChange={(e) => setSelectedUnitId(e.target.value)}
+                disabled={!selectedBuildingId || units.length === 0}
+              >
+                <option value="">{selectedBuildingId ? (units.length ? '– Einheit wählen –' : 'Keine Einheiten') : 'Erst Gebäude wählen'}</option>
+                {units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </div>
+          </>
+        )}
+
+        {scopeType === 'meter' && (
+          <div className="mb-4">
+            <label className="label">Zähler auswählen *</label>
+            <div className="relative mb-2">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                className="input pl-9"
+                placeholder="Zähler oder Standort suchen…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <div className="max-h-[40vh] overflow-y-auto rounded-lg border">
+              {loading ? (
+                <div className="p-4 text-center text-sm text-gray-400">Laden…</div>
+              ) : totalShown === 0 ? (
+                <div className="p-4 text-center text-sm text-gray-400">Keine passenden Zähler</div>
+              ) : (
+                hierarchy.map((site) => {
+                  const siteOpen = expanded.has(site.siteKey);
+                  return (
+                    <div key={site.siteKey} className="border-b last:border-b-0">
+                      <button
+                        onClick={() => toggle(site.siteKey)}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium bg-gray-50 hover:bg-gray-100 transition-colors"
+                      >
+                        {siteOpen ? <ChevronDown className="h-4 w-4 text-gray-500" /> : <ChevronRight className="h-4 w-4 text-gray-500" />}
+                        <Building2 className="h-4 w-4 text-gray-500" />
+                        <span className="flex-1 truncate">{site.siteName}</span>
+                        <span className="text-xs text-gray-500">{site.total}</span>
+                      </button>
+                      {siteOpen && site.groups.map((g) => {
+                        const etOpen = expanded.has(g.etKey);
+                        const EtIcon = ENERGY_ICONS[g.energyType] || Gauge;
+                        const etColor = NODE_COLORS[g.energyType] || '#6b7280';
+                        return (
+                          <div key={g.etKey}>
+                            <button
+                              onClick={() => toggle(g.etKey)}
+                              className="flex w-full items-center gap-2 px-3 py-1.5 pl-7 text-left text-sm hover:bg-gray-50 transition-colors"
+                            >
+                              {etOpen ? <ChevronDown className="h-3.5 w-3.5 text-gray-400" /> : <ChevronRight className="h-3.5 w-3.5 text-gray-400" />}
+                              <EtIcon className="h-3.5 w-3.5" style={{ color: etColor }} />
+                              <span className="flex-1 truncate text-gray-700">
+                                {ENERGY_TYPE_LABELS[g.energyType as keyof typeof ENERGY_TYPE_LABELS] || g.energyType}
+                              </span>
+                              <span className="text-xs text-gray-400">{g.meters.length}</span>
+                            </button>
+                            {etOpen && g.meters.map((m) => {
+                              const isSelected = selectedMeter?.id === m.id;
+                              return (
+                                <button
+                                  key={m.id}
+                                  onClick={() => setSelectedMeter(m)}
+                                  className={`flex w-full items-center gap-2 px-3 py-1.5 pl-14 text-left text-sm transition-colors ${
+                                    isSelected ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50'
+                                  }`}
+                                >
+                                  <span className={`h-2 w-2 rounded-full flex-shrink-0 ${isSelected ? 'bg-primary-500' : 'bg-gray-300'}`} />
+                                  <span className="flex-1 truncate">{m.name}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Energieart-Filter (nicht bei Zähler-Scope) */}
+        {scopeType !== 'meter' && (
+          <div className="mb-4">
+            <label className="label">Energieart (optional)</label>
+            <select className="input" value={energyType} onChange={(e) => setEnergyType(e.target.value)}>
+              <option value="">Alle Energiearten</option>
+              {availableEnergyTypes.map((et) => (
+                <option key={et} value={et}>
+                  {ENERGY_TYPE_LABELS[et as keyof typeof ENERGY_TYPE_LABELS] || et}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="mb-4">
           <label className="label">Bezeichnung *</label>
@@ -897,7 +1120,7 @@ function AddSchemaRootModal({
             className="input"
             value={schemaLabel}
             onChange={(e) => setSchemaLabel(e.target.value)}
-            placeholder="z.B. Stromverteilung Halle 2"
+            placeholder="z.B. Konzert – Strom"
           />
         </div>
 
@@ -908,7 +1131,7 @@ function AddSchemaRootModal({
           <button
             onClick={handleSave}
             className="btn-primary"
-            disabled={!selectedMeter || !schemaLabel.trim() || saving}
+            disabled={!canSave || saving}
           >
             {saving ? 'Speichere…' : 'Hinzufügen'}
           </button>

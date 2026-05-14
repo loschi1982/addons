@@ -27,6 +27,7 @@ from app.api.v1 import (
     invoices,
     iso,
     meters,
+    monitoring_points,
     readings,
     reports,
     schemas,
@@ -64,6 +65,7 @@ api_router.include_router(contracts.router, prefix="/contracts", tags=["Energiel
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analysen"])
 api_router.include_router(schemas.router, prefix="/schemas", tags=["Energieschema"])
+api_router.include_router(monitoring_points.router, prefix="/monitoring-points", tags=["Betrachtungspunkte"])
 api_router.include_router(emissions.router, prefix="/emissions", tags=["CO₂-Emissionen"])
 api_router.include_router(weather.router, prefix="/weather", tags=["Wetterdaten"])
 api_router.include_router(climate.router, prefix="/climate", tags=["Klimasensoren"])
