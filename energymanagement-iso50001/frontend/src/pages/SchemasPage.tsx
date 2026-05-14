@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Plus, Trash2, ArrowLeft, Search, Calendar,
   Gauge, Zap, Droplets, Flame, Sun, X, Users, FileDown,
@@ -203,6 +204,9 @@ export default function SchemasPage() {
   const [periodStart, setPeriodStart] = useState(defaultPeriod.start);
   const [periodEnd, setPeriodEnd] = useState(defaultPeriod.end);
 
+  const [searchParams] = useSearchParams();
+  const focusMeterId = searchParams.get('meter_id');
+
   const fetchRoots = useCallback(async () => {
     try {
       const res = await apiClient.get('/api/v1/monitoring-points');
@@ -214,6 +218,14 @@ export default function SchemasPage() {
   useEffect(() => {
     fetchRoots();
   }, [fetchRoots]);
+
+  // Wenn ?meter_id=X aus URL: einen passenden MonitoringPoint öffnen (scope=meter)
+  useEffect(() => {
+    if (!focusMeterId || roots.length === 0 || selectedRoot) return;
+    const match = roots.find((r) => r.scope_type === 'meter' && r.scope_id === focusMeterId);
+    if (match) loadSubtree(match);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusMeterId, roots]);
 
   const loadSubtree = useCallback(async (root: SchemaRoot, start?: string, end?: string) => {
     try {

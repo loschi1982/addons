@@ -66,11 +66,16 @@ interface Alert {
   severity: string;
   message: string;
   meter_id: string;
+  meter_name?: string;
+  meter_display_name?: string | null;
+  last_reading_at?: string | null;
+  days_since?: number | null;
 }
 
 interface PlausibilityWarning {
   warning_type?: 'sub_meter_mismatch' | 'frozen_meter';
   meter_name: string;
+  meter_display_name?: string | null;
   meter_id?: string;
   energy_type: string;
   // sub_meter_mismatch
@@ -232,19 +237,48 @@ function KPICardComponent({ card }: { card: KPICard }) {
 }
 
 function AlertBanner({ alerts }: { alerts: Alert[] }) {
+  const navigate = useNavigate();
   if (alerts.length === 0) return null;
+
+  const fmtDate = (iso?: string | null) => {
+    if (!iso) return '–';
+    return new Date(iso).toLocaleDateString('de-DE', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+    });
+  };
+
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
       <div className="flex items-center gap-2 mb-2">
         <AlertTriangle className="h-5 w-5 text-amber-600" />
         <h3 className="font-medium text-amber-800">
-          {alerts.length} Warnung{alerts.length > 1 ? 'en' : ''}
+          {alerts.length} Warnung{alerts.length > 1 ? 'en' : ''} – Zähler ohne aktuelle Daten
         </h3>
       </div>
       <ul className="space-y-1">
-        {alerts.slice(0, 5).map((a, i) => (
-          <li key={i} className="text-sm text-amber-700">• {a.message}</li>
-        ))}
+        {alerts.map((a, i) => {
+          const name = a.meter_name ?? '';
+          const display = a.meter_display_name;
+          const hasReading = !!a.last_reading_at;
+          return (
+            <li key={i} className="text-sm text-amber-700">
+              {a.meter_id ? (
+                <button
+                  onClick={() => navigate(`/readings?meter_id=${a.meter_id}`)}
+                  className="font-medium hover:underline text-left"
+                >
+                  {name}
+                </button>
+              ) : (
+                <span className="font-medium">{name}</span>
+              )}
+              {display ? <span className="text-amber-600"> – {display}</span> : null}
+              {hasReading
+                ? ` hat seit ${fmtDate(a.last_reading_at)} (${a.days_since} Tagen) keine Daten geliefert.`
+                : ` hat noch keine Daten geliefert.`}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -291,7 +325,19 @@ function PlausibilityBanner({ warnings, onReload }: { warnings: PlausibilityWarn
               const subGtMain = (w.sub_sum ?? 0) > (w.main_value ?? 0);
               return (
                 <li key={i} className="text-sm text-orange-700">
-                  <span className="font-medium">{w.meter_name}</span>: Hauptzähler {formatNumber(w.main_value ?? 0, 0)} {w.main_unit},
+                  {w.meter_id ? (
+                    <button
+                      onClick={() => navigate(`/schemas?meter_id=${w.meter_id}`)}
+                      className="font-medium hover:underline text-left"
+                      title="Im Energieschema öffnen"
+                    >
+                      {w.meter_name}
+                    </button>
+                  ) : (
+                    <span className="font-medium">{w.meter_name}</span>
+                  )}
+                  {w.meter_display_name ? <span className="text-orange-600"> – {w.meter_display_name}</span> : null}
+                  : Hauptzähler {formatNumber(w.main_value ?? 0, 0)} {w.main_unit},
                   Unterzähler-Summe {formatNumber(w.sub_sum ?? 0, 0)} {w.main_unit} ({(w.diff_percent ?? 0).toFixed(1)} % Differenz)
                   {subGtMain && (
                     <span className="ml-2 inline-block rounded bg-orange-200 px-1.5 py-0.5 text-xs font-medium text-orange-900">
@@ -327,7 +373,8 @@ function PlausibilityBanner({ warnings, onReload }: { warnings: PlausibilityWarn
                   ) : (
                     <span className="font-medium">{w.meter_name}</span>
                   )}
-                  : seit {fmtFrozenSince(w.frozen_since)} unverändert ({w.frozen_days} Tage),
+                  {w.meter_display_name ? <span className="text-amber-600"> – {w.meter_display_name}</span> : null}
+                  {' '}– seit {fmtFrozenSince(w.frozen_since)} unverändert ({w.frozen_days} Tage),
                   Wert: {formatNumber(w.frozen_value ?? 0, 2)} {w.main_unit}
                 </span>
                 {w.meter_id && (

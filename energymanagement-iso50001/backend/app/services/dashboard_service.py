@@ -1265,38 +1265,55 @@ class DashboardService:
         ]
 
     async def _get_alerts(self) -> list[dict]:
-        """Aktive Warnungen (Zähler ohne aktuelle Daten) – eine aggregierte Abfrage."""
-        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        """Aktive Warnungen: aktive Zähler ohne Reading der letzten 7 Tage.
 
-        # Eine einzige Abfrage: letzter Messwert je Zähler
+        Liefert alle betroffenen Zähler (kein Limit) mit technischem Namen,
+        Klarnamen, letztem Reading-Zeitpunkt und Anzahl Tage ohne Daten.
+        """
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(days=7)
+
+        # Letzter Reading je Zähler über *alle* Daten (nicht nur 30 Tage),
+        # damit der Zeitpunkt korrekt angezeigt werden kann.
         subq = (
             select(
                 MeterReading.meter_id,
                 func.max(MeterReading.timestamp).label("last_ts"),
             )
-            .where(MeterReading.timestamp >= datetime.now(timezone.utc) - timedelta(days=30))
             .group_by(MeterReading.meter_id)
             .subquery()
         )
         result = await self.db.execute(
-            select(Meter.id, Meter.name, subq.c.last_ts)
+            select(Meter.id, Meter.name, Meter.display_name, subq.c.last_ts)
             .outerjoin(subq, Meter.id == subq.c.meter_id)
-            .where(Meter.is_active == True)  # noqa: E712
+            .where(
+                Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,
+            )
         )
         alerts = []
         for row in result.all():
             last_ts = row.last_ts
             if last_ts and last_ts.tzinfo is None:
                 last_ts = last_ts.replace(tzinfo=timezone.utc)
-            if not last_ts or last_ts < cutoff:
-                alerts.append({
-                    "type": "no_data",
-                    "severity": "warnung",
-                    "message": f"Zähler '{row.name}' hat seit >7 Tagen keine Daten",
-                    "meter_id": str(row.id),
-                })
+            if last_ts and last_ts >= cutoff:
+                continue  # Zähler hat aktuelle Daten
 
-        return alerts[:10]
+            days_since = (now - last_ts).days if last_ts else None
+            alerts.append({
+                "type": "no_data",
+                "severity": "warnung",
+                "meter_id": str(row.id),
+                "meter_name": row.name,
+                "meter_display_name": row.display_name,
+                "last_reading_at": last_ts.isoformat() if last_ts else None,
+                "days_since": days_since,
+                "message": f"Zähler '{row.name}' hat seit >7 Tagen keine Daten",  # Backward-Compat
+            })
+
+        # Sortierung: längste Stille zuerst, Zähler ohne Reading ganz oben
+        alerts.sort(key=lambda a: (a["days_since"] is None, -(a["days_since"] or 0)), reverse=True)
+        return alerts
 
     async def get_enpi_overview(
         self,
@@ -1399,10 +1416,10 @@ class DashboardService:
             if frozen_days < threshold:
                 continue
 
-            name = r.display_name or r.name
             warnings.append({
                 "warning_type": "frozen_meter",
-                "meter_name": name,
+                "meter_name": r.name,
+                "meter_display_name": r.display_name,
                 "meter_id": str(r.meter_id),
                 "energy_type": r.energy_type,
                 "frozen_since": last_change_ts.date().isoformat(),
@@ -1487,10 +1504,10 @@ class DashboardService:
                 continue
             diff_pct = abs(1 - sub_sum / main_val) * 100
             if diff_pct > 15:
-                name = p.display_name or p.name
                 warnings.append({
                     "warning_type": "sub_meter_mismatch",
-                    "meter_name": name,
+                    "meter_name": p.name,
+                    "meter_display_name": p.display_name,
                     "meter_id": str(p.id),
                     "energy_type": p.energy_type,
                     "main_value": round(main_val, 1),
