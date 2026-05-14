@@ -100,3 +100,125 @@ async def test_get_dashboard_empty(db_session: AsyncSession):
     assert "previous_year" in dashboard
     assert "monthly_trend" in dashboard
     assert len(dashboard["monthly_trend"]) == 12
+
+
+# ── UPSERT + Backfill ──────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_calculate_emissions_upsert(db_session: AsyncSession):
+    """Zweimaliger Aufruf für gleiche Period erzeugt nur einen Eintrag (UPSERT)."""
+    from datetime import date, datetime, timezone
+    from decimal import Decimal
+    from sqlalchemy import func, select
+
+    from app.models.emission import CO2Calculation, EmissionFactor, EmissionFactorSource
+    from app.models.meter import Meter
+    from app.models.reading import MeterReading
+
+    src = EmissionFactorSource(id=uuid.uuid4(), name="Test", source_type="bafa")
+    db_session.add(src)
+    await db_session.flush()
+    factor = EmissionFactor(
+        id=uuid.uuid4(), energy_type="electricity", year=2024,
+        co2_g_per_kwh=Decimal("400"), region="DE", source_id=src.id,
+    )
+    m = Meter(
+        id=uuid.uuid4(), name="Test-Z", energy_type="electricity", unit="kWh",
+        data_source="manual", is_active=True,
+    )
+    db_session.add_all([factor, m])
+    await db_session.flush()
+    db_session.add(MeterReading(
+        meter_id=m.id, timestamp=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        value=Decimal("1000"), consumption=Decimal("1000"), source="manual",
+    ))
+    await db_session.commit()
+
+    svc = CO2Service(db_session)
+    c1 = await svc.calculate_emissions(m.id, date(2024, 1, 1), date(2024, 1, 31))
+    assert c1 is not None
+    assert c1.co2_kg == Decimal("400.0000")
+    # Faktor ändern und nochmal berechnen
+    factor.co2_g_per_kwh = Decimal("100")
+    await db_session.commit()
+    c2 = await svc.calculate_emissions(m.id, date(2024, 1, 1), date(2024, 1, 31))
+    assert c2 is not None
+    assert c2.id == c1.id  # gleicher Eintrag aktualisiert
+    assert c2.co2_kg == Decimal("100.0000")
+    # Nur ein Eintrag in DB
+    n = (await db_session.execute(
+        select(func.count(CO2Calculation.id)).where(CO2Calculation.meter_id == m.id)
+    )).scalar()
+    assert n == 1
+
+
+@pytest.mark.asyncio
+async def test_backfill_all_multiple_months(db_session: AsyncSession):
+    """Backfill über 3 Monate erzeugt 3 Calcs pro Zähler."""
+    from datetime import date, datetime, timezone
+    from decimal import Decimal
+    from sqlalchemy import func, select
+
+    from app.models.emission import CO2Calculation, EmissionFactor, EmissionFactorSource
+    from app.models.meter import Meter
+    from app.models.reading import MeterReading
+
+    src = EmissionFactorSource(id=uuid.uuid4(), name="Test", source_type="bafa")
+    db_session.add(src)
+    await db_session.flush()
+    factor = EmissionFactor(
+        id=uuid.uuid4(), energy_type="district_heating", year=2024,
+        co2_g_per_kwh=Decimal("64"), region="DE", source_id=src.id,
+    )
+    m = Meter(
+        id=uuid.uuid4(), name="FW-Z", energy_type="district_heating", unit="kWh",
+        data_source="manual", is_active=True,
+    )
+    db_session.add_all([factor, m])
+    await db_session.flush()
+    # Pro Monat einen Reading
+    for month in [1, 2, 3]:
+        db_session.add(MeterReading(
+            meter_id=m.id, timestamp=datetime(2024, month, 15, tzinfo=timezone.utc),
+            value=Decimal("500"), consumption=Decimal("500"), source="manual",
+        ))
+    await db_session.commit()
+
+    svc = CO2Service(db_session)
+    result = await svc.backfill_all(date(2024, 1, 1), date(2024, 3, 31), ["district_heating"])
+    assert result["months"] == 3
+    assert result["calculated"] == 3
+    n = (await db_session.execute(
+        select(func.count(CO2Calculation.id)).where(CO2Calculation.meter_id == m.id)
+    )).scalar()
+    assert n == 3
+
+
+@pytest.mark.asyncio
+async def test_find_oldest_reading_date(db_session: AsyncSession):
+    """find_oldest_reading_date liefert ältestes Reading-Datum."""
+    from datetime import date, datetime, timezone
+    from decimal import Decimal
+
+    from app.models.meter import Meter
+    from app.models.reading import MeterReading
+
+    m = Meter(
+        id=uuid.uuid4(), name="X", energy_type="electricity", unit="kWh",
+        data_source="manual", is_active=True,
+    )
+    db_session.add(m)
+    await db_session.flush()
+    db_session.add(MeterReading(
+        meter_id=m.id, timestamp=datetime(2022, 6, 1, tzinfo=timezone.utc),
+        value=Decimal("0"), consumption=Decimal("100"), source="manual",
+    ))
+    db_session.add(MeterReading(
+        meter_id=m.id, timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        value=Decimal("0"), consumption=Decimal("100"), source="manual",
+    ))
+    await db_session.commit()
+
+    svc = CO2Service(db_session)
+    oldest = await svc.find_oldest_reading_date()
+    assert oldest == date(2022, 6, 1)

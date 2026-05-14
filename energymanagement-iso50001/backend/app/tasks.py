@@ -135,16 +135,38 @@ def fetch_weather_data():
 
 @celery_app.task(name="app.tasks.recalculate_co2")
 def recalculate_co2():
-    """CO₂-Emissionen für den aktuellen Monat neu berechnen."""
+    """CO₂-Emissionen für die letzten 3 Monate neu berechnen (rolling, UPSERT).
+
+    Erfasst aktuellen Monat plus 2 Vormonate. Damit werden nachträgliche
+    Faktor-Korrekturen oder verspätet importierte Readings automatisch
+    in die CO₂-Bilanz übernommen.
+    """
+    from calendar import monthrange
+
     async def _run():
         from app.services.co2_service import CO2Service
 
         today = date.today()
-        start = date(today.year, today.month, 1)
+        # Liste der letzten 3 Monate aufbauen (ältester zuerst)
+        months: list[tuple[int, int]] = []
+        y, m = today.year, today.month
+        for _ in range(3):
+            months.append((y, m))
+            m -= 1
+            if m < 1:
+                m = 12
+                y -= 1
+        months.reverse()
 
         async with _task_db_session() as db:
             service = CO2Service(db)
-            return await service.calculate_all_meters(start, today)
+            results = []
+            for y_, m_ in months:
+                last_day = monthrange(y_, m_)[1]
+                end = min(date(y_, m_, last_day), today)
+                r = await service.calculate_all_meters(date(y_, m_, 1), end)
+                results.append({"year": y_, "month": m_, **r})
+            return {"months": results}
 
     return _run_async(_run())
 

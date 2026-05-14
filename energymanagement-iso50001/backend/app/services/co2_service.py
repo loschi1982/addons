@@ -216,42 +216,142 @@ class CO2Service:
             else None
         )
 
-        calc = CO2Calculation(
-            meter_id=meter_id,
-            period_start=start_date,
-            period_end=end_date,
-            consumption_kwh=consumption_kwh,
-            emission_factor_id=factor.id,
-            co2_kg=Decimal(str(round(float(co2_kg), 4))),
-            co2eq_kg=Decimal(str(round(float(co2eq_kg), 4))) if co2eq_kg else None,
-            calculation_method="annual_avg",
-        )
-        self.db.add(calc)
+        # UPSERT: existierenden Eintrag für (meter, period) updaten, sonst neu anlegen
+        existing = (await self.db.execute(
+            select(CO2Calculation).where(
+                CO2Calculation.meter_id == meter_id,
+                CO2Calculation.period_start == start_date,
+                CO2Calculation.period_end == end_date,
+            )
+        )).scalar_one_or_none()
+
+        new_co2_kg = Decimal(str(round(float(co2_kg), 4)))
+        new_co2eq_kg = Decimal(str(round(float(co2eq_kg), 4))) if co2eq_kg else None
+
+        if existing is not None:
+            existing.consumption_kwh = consumption_kwh
+            existing.emission_factor_id = factor.id
+            existing.co2_kg = new_co2_kg
+            existing.co2eq_kg = new_co2eq_kg
+            existing.calculation_method = "annual_avg"
+            calc = existing
+        else:
+            calc = CO2Calculation(
+                meter_id=meter_id,
+                period_start=start_date,
+                period_end=end_date,
+                consumption_kwh=consumption_kwh,
+                emission_factor_id=factor.id,
+                co2_kg=new_co2_kg,
+                co2eq_kg=new_co2eq_kg,
+                calculation_method="annual_avg",
+            )
+            self.db.add(calc)
         await self.db.commit()
         await self.db.refresh(calc)
         return calc
 
     async def calculate_all_meters(
-        self, start_date: date, end_date: date
+        self,
+        start_date: date,
+        end_date: date,
+        energy_types: list[str] | None = None,
     ) -> dict:
-        """CO₂-Emissionen für alle aktiven Zähler berechnen."""
-        result = await self.db.execute(
-            select(Meter).where(Meter.is_active == True)  # noqa: E712
-        )
-        meters = result.scalars().all()
+        """CO₂-Emissionen für alle aktiven Zähler berechnen.
+
+        Optional auf bestimmte Energiearten begrenzen. Nur IDs werden vorab
+        geladen, um Expired-Attribute-Probleme nach commit() zu vermeiden.
+        """
+        q = select(Meter.id).where(Meter.is_active == True)  # noqa: E712
+        if energy_types:
+            q = q.where(Meter.energy_type.in_(energy_types))
+        result = await self.db.execute(q)
+        meter_ids = [row[0] for row in result.all()]
 
         calculated = 0
+        skipped = 0
         errors = 0
-        for meter in meters:
+        for mid in meter_ids:
             try:
-                calc = await self.calculate_emissions(meter.id, start_date, end_date)
+                calc = await self.calculate_emissions(mid, start_date, end_date)
                 if calc:
                     calculated += 1
+                else:
+                    skipped += 1
             except Exception as e:
                 errors += 1
-                logger.error("co2_calc_failed", meter_id=str(meter.id), error=str(e))
+                logger.error("co2_calc_failed", meter_id=str(mid), error=str(e))
 
-        return {"calculated": calculated, "errors": errors}
+        return {"calculated": calculated, "skipped": skipped, "errors": errors}
+
+    async def find_oldest_reading_date(
+        self, energy_types: list[str] | None = None
+    ) -> date | None:
+        """Ältestes Reading-Datum für aktive Zähler (optional gefiltert)."""
+        q = (
+            select(func.min(MeterReading.timestamp))
+            .join(Meter, Meter.id == MeterReading.meter_id)
+            .where(Meter.is_active == True)  # noqa: E712
+        )
+        if energy_types:
+            q = q.where(Meter.energy_type.in_(energy_types))
+        ts = (await self.db.execute(q)).scalar()
+        return ts.date() if ts else None
+
+    async def backfill_all(
+        self,
+        period_start: date,
+        period_end: date,
+        energy_types: list[str] | None = None,
+    ) -> dict:
+        """CO₂-Berechnungen monatsweise für den gesamten Zeitraum nachholen.
+
+        Iteriert pro Kalendermonat von period_start bis period_end. Nutzt
+        die idempotente `calculate_emissions` (UPSERT) — sicher mehrfach
+        ausführbar.
+        """
+        from calendar import monthrange
+
+        months: list[tuple[int, int]] = []
+        y, m = period_start.year, period_start.month
+        while (y, m) <= (period_end.year, period_end.month):
+            months.append((y, m))
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+
+        per_month: list[dict] = []
+        total_calculated = 0
+        total_skipped = 0
+        total_errors = 0
+        for y, m in months:
+            month_start = date(y, m, 1)
+            last_day = monthrange(y, m)[1]
+            month_end = date(y, m, last_day)
+            # Beschneide auf angeforderten Zeitraum
+            if month_start < period_start:
+                month_start = period_start
+            if month_end > period_end:
+                month_end = period_end
+            r = await self.calculate_all_meters(month_start, month_end, energy_types)
+            per_month.append({"year": y, "month": m, **r})
+            total_calculated += r.get("calculated", 0)
+            total_skipped += r.get("skipped", 0)
+            total_errors += r.get("errors", 0)
+            logger.info(
+                "co2_backfill_month",
+                year=y, month=m,
+                calculated=r.get("calculated"), skipped=r.get("skipped"), errors=r.get("errors"),
+            )
+
+        return {
+            "months": len(months),
+            "calculated": total_calculated,
+            "skipped": total_skipped,
+            "errors": total_errors,
+            "per_month": per_month,
+        }
 
     # ── Dashboard & Zusammenfassung ──
 

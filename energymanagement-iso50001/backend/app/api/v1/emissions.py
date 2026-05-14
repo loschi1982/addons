@@ -179,6 +179,40 @@ async def trigger_calculation(
         }
 
 
+@router.post("/recalculate")
+async def trigger_backfill(
+    period_start: date | None = Query(None, description="Default: ältestes Reading"),
+    period_end: date | None = Query(None, description="Default: heute"),
+    energy_types: str | None = Query(None, description="Komma-Liste, z.B. 'district_heating,gas'"),
+    current_user: User = Depends(require_permission("emissions", "calculate")),
+    db: AsyncSession = Depends(get_db),
+):
+    """CO₂-Berechnungen für längeren Zeitraum monatsweise nachholen (Backfill).
+
+    Idempotent (UPSERT): mehrfach aufrufen ist sicher und überschreibt
+    bestehende Werte mit aktuell gültigen Faktoren.
+    """
+    service = CO2Service(db)
+    et_filter = [t.strip() for t in energy_types.split(",")] if energy_types else None
+
+    if not period_start:
+        oldest = await service.find_oldest_reading_date(et_filter)
+        if not oldest:
+            return {"message": "Keine Readings gefunden, nichts zu tun.", "months": 0}
+        period_start = oldest
+    if not period_end:
+        period_end = date.today()
+
+    result = await service.backfill_all(period_start, period_end, et_filter)
+    return {
+        "message": f"{result['calculated']} Berechnungen über {result['months']} Monate ({result['errors']} Fehler)",
+        "period_start": period_start.isoformat(),
+        "period_end": period_end.isoformat(),
+        "energy_types": et_filter,
+        **result,
+    }
+
+
 # ── Fernwärmeversorger ──
 
 @router.get(
