@@ -1,0 +1,41 @@
+<h1>10. Ursachenanalyse</h1>
+<div class="section">
+    {% if rca and rca.summary_findings %}
+    <h2>Befunde-Übersicht</h2>
+    <ul class="rca-summary">
+        {% for f in rca.summary_findings %}
+        <li class="finding {{ f.severity|default('info') }}">
+            <strong>{{ f.title }}:</strong> {{ f.description }}
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if rca %}
+    {% for key in ['weather', 'consumer_anomalies', 'peak_load', 'cost_drivers', 'enpi', 'benchmark', 'climate'] %}
+        {% set b = rca[key] %}
+        {% if b %}
+        <div class="rca-block" id="rca-{{ key }}">
+            <h2>{{ b.title }}</h2>
+            {% if b.available %}
+                <p>{{ b.description }}</p>
+                {% if b.chart_svg %}
+                <div class="chart">{{ b.chart_svg|safe }}</div>
+                {% endif %}
+                {% if b.metrics %}
+                <table class="rca-metrics">
+                    {% for k, v in b.metrics.items() %}
+                    <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+                    {% endfor %}
+                </table>
+                {% endif %}
+            {% else %}
+                <p class="text-secondary">ℹ️ {{ b.hint }}</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    {% endfor %}
+    {% else %}
+    <p class="text-secondary">Ursachenanalyse für diesen Bericht nicht verfügbar.</p>
+    {% endif %}
+</div>

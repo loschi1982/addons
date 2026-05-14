@@ -1083,3 +1083,391 @@ def render_multi_year_trend_svg(
     except Exception as e:
         logger.warning("render_multi_year_trend_failed", error=str(e))
         return _fallback_svg(f"Mehrjahrestrend nicht verfügbar: {e}", width, height)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Renderer für Ursachenanalyse (root_cause_analyzer)
+# ═══════════════════════════════════════════════════════════════════
+
+
+def render_weather_normalized_trend_svg(months: list[dict], width: int = 520, height: int = 240) -> str:
+    """Roher vs. witterungsbereinigter Verbrauch pro Monat (Doppel-Balken)."""
+    try:
+        if not months:
+            return _fallback_svg("Keine Witterungsdaten vorhanden", width, height)
+        margin_left, margin_top, margin_bottom, margin_right = 55, 25, 50, 15
+        chart_w = width - margin_left - margin_right
+        chart_h = height - margin_top - margin_bottom
+
+        max_val = max(max(m["raw"], m["corrected"]) for m in months) or 1
+        bar_w = chart_w / len(months) / 2.5
+
+        parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+                 f'style="width:{width}px;height:{height}px;font-family:Arial,sans-serif;font-size:9px">']
+
+        for i in range(5):
+            y = margin_top + chart_h * (1 - i / 4)
+            parts.append(f'<line x1="{margin_left}" y1="{y:.1f}" x2="{width - margin_right}" y2="{y:.1f}" stroke="#E5E7EB" stroke-dasharray="3,3"/>')
+            parts.append(f'<text x="{margin_left - 5}" y="{y + 3:.1f}" text-anchor="end" fill="#6B7280">{int(max_val * i / 4):,}</text>')
+
+        for idx, m in enumerate(months):
+            group_x = margin_left + idx * (chart_w / len(months))
+            mid = group_x + chart_w / len(months) / 2
+
+            for j, (key, color, label) in enumerate([("raw", "#94A3B8", "Roh"), ("corrected", "#1B5E7B", "Korrigiert")]):
+                val = m.get(key, 0)
+                h = (val / max_val) * chart_h
+                bar_x = mid - bar_w + j * bar_w
+                bar_y = margin_top + chart_h - h
+                parts.append(f'<rect x="{bar_x:.1f}" y="{bar_y:.1f}" width="{bar_w * 0.85:.1f}" height="{h:.1f}" fill="{color}" rx="2"/>')
+
+            parts.append(f'<text x="{mid:.1f}" y="{height - margin_bottom + 14}" text-anchor="middle" fill="#374151" font-size="8">{m["month"][-2:]}</text>')
+
+        # Legend
+        ly = height - 12
+        parts.append(f'<rect x="{margin_left}" y="{ly - 8}" width="10" height="10" fill="#94A3B8"/>')
+        parts.append(f'<text x="{margin_left + 14}" y="{ly}" fill="#374151">Roh</text>')
+        parts.append(f'<rect x="{margin_left + 65}" y="{ly - 8}" width="10" height="10" fill="#1B5E7B"/>')
+        parts.append(f'<text x="{margin_left + 79}" y="{ly}" fill="#374151">Witterungsbereinigt</text>')
+        parts.append(f'<text x="{margin_left}" y="{margin_top - 5}" fill="#6B7280" font-size="8">kWh</text>')
+
+        parts.append("</svg>")
+        return "\n".join(parts)
+    except Exception as e:
+        logger.warning("render_weather_normalized_failed", error=str(e))
+        return _fallback_svg(f"Witterungskorrektur-Chart fehlgeschlagen: {e}", width, height)
+
+
+def render_submeter_changes_svg(top_meters: list[dict], width: int = 520, height: int = 280) -> str:
+    """Horizontale Balken: prozentuale Veränderung pro Zähler vs. Vorjahr."""
+    try:
+        rows = [m for m in top_meters if m.get("delta_pct") is not None][:10]
+        if not rows:
+            return _fallback_svg("Keine vergleichbaren Vorjahresdaten", width, height)
+
+        margin_left, margin_top, margin_bottom, margin_right = 200, 15, 30, 50
+        chart_w = width - margin_left - margin_right
+        row_h = (height - margin_top - margin_bottom) / max(len(rows), 1)
+
+        max_abs = max((abs(r["delta_pct"]) for r in rows), default=20)
+        max_abs = max(max_abs, 20)
+
+        parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+                 f'style="width:{width}px;height:{height}px;font-family:Arial,sans-serif;font-size:9px">']
+
+        center_x = margin_left + chart_w / 2
+        parts.append(f'<line x1="{center_x:.1f}" y1="{margin_top}" x2="{center_x:.1f}" y2="{height - margin_bottom}" stroke="#9CA3AF" stroke-width="1"/>')
+
+        for idx, r in enumerate(rows):
+            y = margin_top + idx * row_h + row_h / 2
+            label = (r.get("display_name") or r.get("name") or "")[:32]
+            parts.append(f'<text x="{margin_left - 5}" y="{y + 3:.1f}" text-anchor="end" fill="#374151" font-size="8">{label}</text>')
+
+            delta = r["delta_pct"]
+            bar_len = abs(delta) / max_abs * (chart_w / 2 - 4)
+            color = "#DC2626" if delta > 0 else "#16A34A"
+            if delta >= 0:
+                bx, bw = center_x, bar_len
+            else:
+                bx, bw = center_x - bar_len, bar_len
+            parts.append(f'<rect x="{bx:.1f}" y="{y - 7:.1f}" width="{bw:.1f}" height="14" fill="{color}" rx="2" fill-opacity="0.85"/>')
+            txt_x = bx + bw + 4 if delta >= 0 else bx - 4
+            anchor = "start" if delta >= 0 else "end"
+            parts.append(f'<text x="{txt_x:.1f}" y="{y + 3:.1f}" text-anchor="{anchor}" fill="#374151" font-size="9">{delta:+.1f}%</text>')
+
+        parts.append(f'<text x="{center_x:.1f}" y="{height - 5}" text-anchor="middle" fill="#6B7280" font-size="8">Veränderung vs. Vorjahr (%)</text>')
+        parts.append("</svg>")
+        return "\n".join(parts)
+    except Exception as e:
+        logger.warning("render_submeter_changes_failed", error=str(e))
+        return _fallback_svg(f"Veränderungs-Chart fehlgeschlagen: {e}", width, height)
+
+
+def render_peak_profile_svg(peak_hours: dict[int, int], width: int = 520, height: int = 200) -> str:
+    """Histogramm: Häufigkeit der Tagespeaks pro Stunde des Tages."""
+    try:
+        if not peak_hours:
+            return _fallback_svg("Keine Spitzenlast-Daten verfügbar", width, height)
+
+        margin_left, margin_top, margin_bottom, margin_right = 35, 20, 40, 15
+        chart_w = width - margin_left - margin_right
+        chart_h = height - margin_top - margin_bottom
+
+        counts = [peak_hours.get(h, 0) for h in range(24)]
+        max_count = max(counts) or 1
+        bar_w = chart_w / 24
+
+        parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+                 f'style="width:{width}px;height:{height}px;font-family:Arial,sans-serif;font-size:9px">']
+
+        for h in range(24):
+            count = counts[h]
+            bh = (count / max_count) * chart_h if count else 0
+            x = margin_left + h * bar_w + bar_w * 0.1
+            y = margin_top + chart_h - bh
+            color = "#1B5E7B" if count == max_count else "#2A8CB5"
+            parts.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w * 0.8:.1f}" height="{bh:.1f}" fill="{color}" rx="1"/>')
+            if count > 0:
+                parts.append(f'<text x="{x + bar_w * 0.4:.1f}" y="{y - 2:.1f}" text-anchor="middle" fill="#374151" font-size="7">{count}</text>')
+            if h % 3 == 0:
+                parts.append(f'<text x="{x + bar_w * 0.4:.1f}" y="{height - margin_bottom + 14}" text-anchor="middle" fill="#6B7280" font-size="8">{h:02d}h</text>')
+
+        parts.append(f'<text x="{width // 2}" y="{height - 5}" text-anchor="middle" fill="#6B7280" font-size="8">Stunde des Tages – Häufigkeit der Tagespeaks</text>')
+        parts.append("</svg>")
+        return "\n".join(parts)
+    except Exception as e:
+        logger.warning("render_peak_profile_failed", error=str(e))
+        return _fallback_svg(f"Peak-Profil-Chart fehlgeschlagen: {e}", width, height)
+
+
+def render_cost_attribution_svg(data: dict, width: int = 520, height: int = 220) -> str:
+    """Waterfall: Vorjahr → Mengeneffekt → Preiseffekt → Aktuell."""
+    try:
+        prev = float(data.get("prev") or 0)
+        vol = float(data.get("volume_effect") or 0)
+        prc = float(data.get("price_effect") or 0)
+        curr = float(data.get("curr") or 0)
+        if prev <= 0 and curr <= 0:
+            return _fallback_svg("Keine Kostendaten", width, height)
+
+        bars = [
+            {"label": "Vorjahr", "value": prev, "start": 0, "color": "#94A3B8"},
+            {"label": "Mengen-\neffekt", "value": vol, "start": prev, "color": "#DC2626" if vol > 0 else "#16A34A"},
+            {"label": "Preis-\neffekt", "value": prc, "start": prev + vol, "color": "#DC2626" if prc > 0 else "#16A34A"},
+            {"label": "Aktuell", "value": curr, "start": 0, "color": "#1B5E7B"},
+        ]
+
+        margin_left, margin_top, margin_bottom, margin_right = 70, 15, 50, 15
+        chart_w = width - margin_left - margin_right
+        chart_h = height - margin_top - margin_bottom
+
+        max_y = max(prev, curr, prev + max(vol + prc, 0)) * 1.05 or 1
+        bar_w = chart_w / 4.5
+
+        parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+                 f'style="width:{width}px;height:{height}px;font-family:Arial,sans-serif;font-size:9px">']
+
+        for i in range(5):
+            y = margin_top + chart_h * (1 - i / 4)
+            parts.append(f'<line x1="{margin_left}" y1="{y:.1f}" x2="{width - margin_right}" y2="{y:.1f}" stroke="#E5E7EB" stroke-dasharray="3,3"/>')
+            parts.append(f'<text x="{margin_left - 5}" y="{y + 3:.1f}" text-anchor="end" fill="#6B7280">{int(max_y * i / 4):,} €</text>')
+
+        for i, b in enumerate(bars):
+            x = margin_left + i * (chart_w / 4) + (chart_w / 4 - bar_w) / 2
+            val = b["value"]
+            start = b["start"]
+            if val < 0:
+                bar_top_val = start
+                bar_bot_val = start + val
+            else:
+                bar_top_val = start + val
+                bar_bot_val = start
+            y_top = margin_top + chart_h * (1 - bar_top_val / max_y)
+            y_bot = margin_top + chart_h * (1 - bar_bot_val / max_y)
+            parts.append(f'<rect x="{x:.1f}" y="{min(y_top, y_bot):.1f}" width="{bar_w:.1f}" height="{abs(y_bot - y_top):.1f}" fill="{b["color"]}" rx="2" fill-opacity="0.9"/>')
+
+            # Label
+            parts.append(f'<text x="{x + bar_w / 2:.1f}" y="{height - margin_bottom + 14}" text-anchor="middle" fill="#374151" font-size="8">{b["label"]}</text>')
+            # Wert
+            label_y = min(y_top, y_bot) - 4
+            sign = "+" if val > 0 else ""
+            display_val = val if i != 0 and i != 3 else val
+            parts.append(f'<text x="{x + bar_w / 2:.1f}" y="{label_y:.1f}" text-anchor="middle" fill="#374151" font-size="8">{sign}{display_val:,.0f} €</text>')
+
+        parts.append("</svg>")
+        return "\n".join(parts)
+    except Exception as e:
+        logger.warning("render_cost_attribution_failed", error=str(e))
+        return _fallback_svg(f"Kosten-Zerlegungs-Chart fehlgeschlagen: {e}", width, height)
+
+
+def render_enpi_trend_svg(enpis: list[dict], width: int = 520, height: int = 240) -> str:
+    """Mehrere EnPI-Verläufe als Liniendiagramm, mit Baseline/Ziel als Referenzlinien."""
+    try:
+        if not enpis:
+            return _fallback_svg("Keine EnPIs definiert", width, height)
+
+        # Nur EnPIs mit Verlauf
+        active = [e for e in enpis if e.get("history")]
+        if not active:
+            return _fallback_svg("Keine EnPI-Messwerte im Verlauf", width, height)
+
+        margin_left, margin_top, margin_bottom, margin_right = 50, 30, 40, 100
+        chart_w = width - margin_left - margin_right
+        chart_h = height - margin_top - margin_bottom
+
+        # Wir zeigen den ersten EnPI vereinfacht (bei mehreren wird's eng)
+        first = active[0]
+        history = first["history"]
+        if not history:
+            return _fallback_svg("Keine Verlaufsdaten", width, height)
+
+        values = [p["value"] for p in history]
+        target = first.get("target")
+        baseline = first.get("baseline")
+
+        min_v = min([v for v in values + ([target] if target else []) + ([baseline] if baseline else []) if v is not None])
+        max_v = max([v for v in values + ([target] if target else []) + ([baseline] if baseline else []) if v is not None])
+        range_v = max_v - min_v or 1
+        min_v -= range_v * 0.1
+        max_v += range_v * 0.1
+        range_v = max_v - min_v or 1
+
+        def y_for(v):
+            return margin_top + chart_h * (1 - (v - min_v) / range_v)
+
+        parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+                 f'style="width:{width}px;height:{height}px;font-family:Arial,sans-serif;font-size:9px">']
+
+        # Y-Achse
+        for i in range(5):
+            y = margin_top + chart_h * (1 - i / 4)
+            val = min_v + range_v * i / 4
+            parts.append(f'<line x1="{margin_left}" y1="{y:.1f}" x2="{margin_left + chart_w}" y2="{y:.1f}" stroke="#E5E7EB" stroke-dasharray="3,3"/>')
+            parts.append(f'<text x="{margin_left - 5}" y="{y + 3:.1f}" text-anchor="end" fill="#6B7280">{val:.1f}</text>')
+
+        # Baseline-Linie
+        if baseline is not None:
+            yb = y_for(baseline)
+            parts.append(f'<line x1="{margin_left}" y1="{yb:.1f}" x2="{margin_left + chart_w}" y2="{yb:.1f}" stroke="#94A3B8" stroke-width="1.5"/>')
+            parts.append(f'<text x="{margin_left + chart_w + 5}" y="{yb + 3:.1f}" fill="#94A3B8">Baseline</text>')
+
+        # Ziel-Linie
+        if target is not None:
+            yt = y_for(target)
+            parts.append(f'<line x1="{margin_left}" y1="{yt:.1f}" x2="{margin_left + chart_w}" y2="{yt:.1f}" stroke="#16A34A" stroke-width="1.5" stroke-dasharray="4,2"/>')
+            parts.append(f'<text x="{margin_left + chart_w + 5}" y="{yt + 3:.1f}" fill="#16A34A">Ziel</text>')
+
+        # Datenpunkte
+        n = len(history)
+        if n > 1:
+            pts = []
+            for i, p in enumerate(history):
+                x = margin_left + (chart_w * i / (n - 1))
+                y = y_for(p["value"])
+                pts.append(f"{x:.1f},{y:.1f}")
+            parts.append(f'<polyline points="{" ".join(pts)}" fill="none" stroke="#1B5E7B" stroke-width="2"/>')
+            for pt in pts:
+                xx, yy = pt.split(",")
+                parts.append(f'<circle cx="{xx}" cy="{yy}" r="2.5" fill="#1B5E7B"/>')
+
+        # Title
+        parts.append(f'<text x="{margin_left}" y="{margin_top - 8}" fill="#374151" font-size="10" font-weight="bold">{first["name"]} ({first.get("unit","")})</text>')
+        if len(active) > 1:
+            parts.append(f'<text x="{width - margin_right}" y="{margin_top - 8}" text-anchor="end" fill="#9CA3AF" font-size="8">+{len(active)-1} weitere EnPI(s)</text>')
+
+        parts.append("</svg>")
+        return "\n".join(parts)
+    except Exception as e:
+        logger.warning("render_enpi_trend_failed", error=str(e))
+        return _fallback_svg(f"EnPI-Chart fehlgeschlagen: {e}", width, height)
+
+
+def render_benchmark_svg(items: list[dict], width: int = 520, height: int = 60) -> str:
+    """Pro Energieart eine Skalen-Linie mit good/medium/poor-Bereichen + Markierung."""
+    try:
+        if not items:
+            return _fallback_svg("Keine Benchmark-Daten", width, height)
+
+        row_h = 50
+        total_h = row_h * len(items) + 20
+        parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {total_h}" '
+                 f'style="width:{width}px;height:{total_h}px;font-family:Arial,sans-serif;font-size:9px">']
+
+        margin_left, margin_right = 130, 50
+        bar_w = width - margin_left - margin_right
+
+        for i, it in enumerate(items):
+            y = 20 + i * row_h
+            max_scale = max(it["poor"] * 1.2, it["value"] * 1.1, 1)
+            # Bereiche
+            g_end = it["medium"] / max_scale * bar_w
+            m_end = it["poor"] / max_scale * bar_w
+            parts.append(f'<rect x="{margin_left}" y="{y}" width="{g_end:.1f}" height="14" fill="#16A34A" fill-opacity="0.6"/>')
+            parts.append(f'<rect x="{margin_left + g_end:.1f}" y="{y}" width="{m_end - g_end:.1f}" height="14" fill="#F59E0B" fill-opacity="0.6"/>')
+            parts.append(f'<rect x="{margin_left + m_end:.1f}" y="{y}" width="{bar_w - m_end:.1f}" height="14" fill="#DC2626" fill-opacity="0.6"/>')
+
+            # Eigene Marke
+            mark_x = margin_left + min(it["value"] / max_scale, 1.0) * bar_w
+            parts.append(f'<line x1="{mark_x:.1f}" y1="{y - 4}" x2="{mark_x:.1f}" y2="{y + 18}" stroke="#1B5E7B" stroke-width="2.5"/>')
+            parts.append(f'<text x="{mark_x:.1f}" y="{y - 6}" text-anchor="middle" fill="#1B5E7B" font-weight="bold">{it["value"]:.0f}</text>')
+
+            # Label
+            parts.append(f'<text x="{margin_left - 5}" y="{y + 10}" text-anchor="end" fill="#374151">{it["energy_type"]} ({it.get("unit","")})</text>')
+
+            # Schwellen-Labels
+            parts.append(f'<text x="{margin_left}" y="{y + 30}" fill="#16A34A" font-size="7">gut &lt;{it["medium"]:.0f}</text>')
+            parts.append(f'<text x="{margin_left + bar_w:.1f}" y="{y + 30}" text-anchor="end" fill="#DC2626" font-size="7">schlecht &gt;{it["poor"]:.0f}</text>')
+
+        parts.append("</svg>")
+        return "\n".join(parts)
+    except Exception as e:
+        logger.warning("render_benchmark_failed", error=str(e))
+        return _fallback_svg(f"Benchmark-Chart fehlgeschlagen: {e}", width, height)
+
+
+def render_climate_overlay_svg(zones: list[dict], width: int = 520, height: int = 220) -> str:
+    """Pro Zone: durchschnittliche Temperatur + Sollwert-Band als Balken."""
+    try:
+        if not zones:
+            return _fallback_svg("Keine Klima-Zonen aktiv", width, height)
+
+        # Nur Zonen mit Sollwerten zeigen
+        zones = [z for z in zones if z.get("avg_temperature") is not None][:8]
+        if not zones:
+            return _fallback_svg("Keine Temperatur-Daten in Zonen", width, height)
+
+        margin_left, margin_top, margin_bottom, margin_right = 120, 20, 40, 60
+        chart_w = width - margin_left - margin_right
+        row_h = (height - margin_top - margin_bottom) / max(len(zones), 1)
+
+        all_temps = []
+        for z in zones:
+            for k in ("avg_temperature", "target_temp_min", "target_temp_max"):
+                v = z.get(k)
+                if v is not None:
+                    all_temps.append(float(v))
+        if not all_temps:
+            return _fallback_svg("Keine Temperatur-Werte", width, height)
+        t_min = min(all_temps) - 2
+        t_max = max(all_temps) + 2
+        t_range = t_max - t_min or 1
+
+        def x_for(t):
+            return margin_left + (t - t_min) / t_range * chart_w
+
+        parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+                 f'style="width:{width}px;height:{height}px;font-family:Arial,sans-serif;font-size:9px">']
+
+        # X-Achse
+        for tick in range(int(t_min), int(t_max) + 1, max(1, int(t_range / 5))):
+            x = x_for(tick)
+            parts.append(f'<line x1="{x:.1f}" y1="{margin_top}" x2="{x:.1f}" y2="{height - margin_bottom}" stroke="#E5E7EB"/>')
+            parts.append(f'<text x="{x:.1f}" y="{height - margin_bottom + 12}" text-anchor="middle" fill="#6B7280">{tick}°C</text>')
+
+        for i, z in enumerate(zones):
+            y = margin_top + i * row_h + row_h / 2
+            name = (z.get("zone") or z.get("name") or "")[:18]
+            parts.append(f'<text x="{margin_left - 5}" y="{y + 3:.1f}" text-anchor="end" fill="#374151">{name}</text>')
+
+            # Sollwert-Band
+            t_min_z = z.get("target_temp_min")
+            t_max_z = z.get("target_temp_max")
+            if t_min_z is not None and t_max_z is not None:
+                x1, x2 = x_for(float(t_min_z)), x_for(float(t_max_z))
+                parts.append(f'<rect x="{x1:.1f}" y="{y - 8:.1f}" width="{x2 - x1:.1f}" height="16" fill="#16A34A" fill-opacity="0.25" rx="2"/>')
+
+            # Aktuelle Temperatur
+            avg = float(z.get("avg_temperature"))
+            xa = x_for(avg)
+            out_of_band = (t_min_z is not None and avg < float(t_min_z)) or (t_max_z is not None and avg > float(t_max_z))
+            color = "#DC2626" if out_of_band else "#1B5E7B"
+            parts.append(f'<circle cx="{xa:.1f}" cy="{y:.1f}" r="5" fill="{color}"/>')
+            parts.append(f'<text x="{xa + 8:.1f}" y="{y + 3:.1f}" fill="{color}" font-size="8">{avg:.1f}°C</text>')
+
+        parts.append(f'<text x="{margin_left}" y="{height - 5}" fill="#6B7280" font-size="8">Sollband (grün) + Durchschnitt (Punkt)</text>')
+        parts.append("</svg>")
+        return "\n".join(parts)
+    except Exception as e:
+        logger.warning("render_climate_overlay_failed", error=str(e))
+        return _fallback_svg(f"Klima-Chart fehlgeschlagen: {e}", width, height)

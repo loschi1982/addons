@@ -518,6 +518,25 @@ class ReportService:
         recommendations = await self._generate_recommendations(findings, snapshot)
         summary_text = await self._generate_summary(snapshot, co2_summary)
 
+        # Ursachenanalyse (7 Schwerpunkt-Blöcke + Summary-Findings)
+        try:
+            from app.services.reporting.root_cause_analyzer import RootCauseAnalyzer
+            rca = await RootCauseAnalyzer(
+                self.db, snapshot, period_start, period_end, scope_config,
+            ).analyze()
+            snapshot["root_cause_analysis"] = rca
+            # Top-Findings aus RCA bevorzugen, alte Findings als Ergänzung
+            if rca.get("summary_findings"):
+                rca_findings = [
+                    {"title": f["title"], "severity": f["severity"], "description": f["description"], "category": f.get("anchor")}
+                    for f in rca["summary_findings"]
+                ]
+                # alte Findings (max 2) anhängen, falls Platz
+                findings = (rca_findings + findings)[:7]
+        except Exception as e:
+            import structlog
+            structlog.get_logger().warning("root_cause_analysis_failed", error=str(e))
+
         report = AuditReport(
             **data,
             status="ready",
@@ -1755,8 +1774,40 @@ Es existieren keine standortübergreifenden Abzüge. Bruttoverbrauch = Nettoverb
         n_bewertung = next_sec()
         n_kvp = next_sec()
         n_findings = next_sec()
+        n_rca = next_sec()
         n_reco = next_sec()
         n_fazit = next_sec()
+
+        # ── Ursachenanalyse-HTML aufbauen ──
+        rca = snapshot.get("root_cause_analysis") or {}
+        rca_html_parts: list[str] = []
+        if rca:
+            # Summary-Findings als Bullet-Liste
+            sf = rca.get("summary_findings") or []
+            if sf:
+                rca_html_parts.append('<h3>Befunde-Übersicht</h3><ul class="rca-summary">')
+                for f in sf:
+                    rca_html_parts.append(
+                        f'<li class="finding {f.get("severity","info")}">'
+                        f'<strong>{f.get("title","")}</strong>: {f.get("description","")}'
+                        f'</li>'
+                    )
+                rca_html_parts.append('</ul>')
+
+            for key in ["weather", "consumer_anomalies", "peak_load", "cost_drivers", "enpi", "benchmark", "climate"]:
+                b = rca.get(key)
+                if not b:
+                    continue
+                rca_html_parts.append(f'<div class="rca-block"><h3>{b.get("title", key)}</h3>')
+                if b.get("available"):
+                    desc = b.get("description", "")
+                    rca_html_parts.append(f'<p>{desc}</p>')
+                    if b.get("chart_svg"):
+                        rca_html_parts.append(f'<div class="chart">{b["chart_svg"]}</div>')
+                else:
+                    rca_html_parts.append(f'<p class="text-secondary">ℹ️ {b.get("hint","Keine Daten")}</p>')
+                rca_html_parts.append('</div>')
+        rca_html = "\n".join(rca_html_parts)
 
         generated_str = report.generated_at.strftime("%d.%m.%Y") if report.generated_at else ""
 
@@ -1934,6 +1985,12 @@ p {{ margin: 5pt 0; }}
 <h1>{n_findings}. Erkenntnisse und Befunde</h1>
 <div class="section">
     {findings_html or '<p class="text-secondary">Keine besonderen Befunde.</p>'}
+</div>
+
+<!-- {n_rca}. Ursachenanalyse -->
+<h1>{n_rca}. Ursachenanalyse</h1>
+<div class="section">
+    {rca_html or '<p class="text-secondary">Ursachenanalyse für diesen Bericht nicht verfügbar.</p>'}
 </div>
 
 <!-- {n_reco}. Empfehlungen -->
