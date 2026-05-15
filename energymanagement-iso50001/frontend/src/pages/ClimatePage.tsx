@@ -13,6 +13,9 @@ interface ClimateSensor {
   sensor_type: string;
   location: string | null;
   zone: string | null;
+  site_id: string | null;
+  building_id: string | null;
+  usage_unit_id: string | null;
   ha_entity_id_temp: string | null;
   ha_entity_id_humidity: string | null;
   data_source: string;
@@ -49,6 +52,9 @@ interface SensorForm {
   sensor_type: string;
   location: string;
   zone: string;
+  site_id: string;
+  building_id: string;
+  usage_unit_id: string;
   ha_entity_id_temp: string;
   ha_entity_id_humidity: string;
   data_source: string;
@@ -63,6 +69,9 @@ const emptySensorForm: SensorForm = {
   sensor_type: 'temperature_humidity',
   location: '',
   zone: '',
+  site_id: '',
+  building_id: '',
+  usage_unit_id: '',
   ha_entity_id_temp: '',
   ha_entity_id_humidity: '',
   data_source: 'manual',
@@ -71,6 +80,10 @@ const emptySensorForm: SensorForm = {
   target_humidity_min: '40',
   target_humidity_max: '60',
 };
+
+interface SiteOpt { id: string; name: string }
+interface BuildingOpt { id: string; name: string; site_id: string }
+interface UnitOpt { id: string; name: string; building_id: string }
 
 const SENSOR_TYPES: Record<string, string> = {
   temperature: 'Temperatur',
@@ -144,12 +157,15 @@ function SensorsPanel() {
   const [form, setForm] = useState<SensorForm>(emptySensorForm);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [sites, setSites] = useState<SiteOpt[]>([]);
+  const [buildings, setBuildings] = useState<BuildingOpt[]>([]);
+  const [units, setUnits] = useState<UnitOpt[]>([]);
 
   const loadSensors = useCallback(async () => {
     setLoading(true);
     try {
       const res = await apiClient.get<PaginatedResponse<ClimateSensor>>(
-        '/api/v1/climate/sensors?page_size=50'
+        '/api/v1/climate/sensors?page_size=100'
       );
       setSensors(res.data.items);
       setTotal(res.data.total);
@@ -162,7 +178,35 @@ function SensorsPanel() {
 
   useEffect(() => {
     loadSensors();
+    // Standorte einmalig laden
+    apiClient.get('/api/v1/sites?page_size=100')
+      .then((r) => {
+        const items = r.data.items || r.data;
+        setSites(Array.isArray(items) ? items.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name })) : []);
+      })
+      .catch(() => { /* ignorieren */ });
   }, [loadSensors]);
+
+  // Buildings + Units kaskadierend laden
+  useEffect(() => {
+    if (!form.site_id) { setBuildings([]); return; }
+    apiClient.get(`/api/v1/sites/${form.site_id}/buildings`)
+      .then((r) => {
+        const items = r.data.items || r.data;
+        setBuildings(Array.isArray(items) ? items.map((b: { id: string; name: string }) => ({ id: b.id, name: b.name, site_id: form.site_id })) : []);
+      })
+      .catch(() => setBuildings([]));
+  }, [form.site_id]);
+
+  useEffect(() => {
+    if (!form.building_id || !form.site_id) { setUnits([]); return; }
+    apiClient.get(`/api/v1/sites/${form.site_id}/buildings/${form.building_id}`)
+      .then((r) => {
+        const list = (r.data?.usage_units ?? []) as Array<{ id: string; name: string }>;
+        setUnits(list.map((u) => ({ id: u.id, name: u.name, building_id: form.building_id })));
+      })
+      .catch(() => setUnits([]));
+  }, [form.building_id, form.site_id]);
 
   const handleCreate = () => {
     setForm(emptySensorForm);
@@ -180,6 +224,9 @@ function SensorsPanel() {
         sensor_type: form.sensor_type,
         location: form.location || null,
         zone: form.zone || null,
+        site_id: form.site_id || null,
+        building_id: form.building_id || null,
+        usage_unit_id: form.usage_unit_id || null,
         ha_entity_id_temp: form.ha_entity_id_temp || null,
         ha_entity_id_humidity: form.ha_entity_id_humidity || null,
         data_source: form.data_source,
@@ -229,23 +276,30 @@ function SensorsPanel() {
               <tr>
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Typ</th>
-                <th className="px-4 py-3">Zone</th>
+                <th className="px-4 py-3">Zone / Zuordnung</th>
                 <th className="px-4 py-3">Quelle</th>
                 <th className="px-4 py-3">Sollbereich</th>
                 <th className="px-4 py-3 text-right">Aktionen</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {sensors.map((s) => (
+              {sensors.map((s) => {
+                const siteName = sites.find((x) => x.id === s.site_id)?.name;
+                const bldName = buildings.find((x) => x.id === s.building_id)?.name;
+                const unitName = units.find((x) => x.id === s.usage_unit_id)?.name;
+                const path = [siteName, bldName, unitName].filter(Boolean).join(' › ');
+                return (
                 <tr key={s.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium">{s.name}</td>
                   <td className="px-4 py-3 text-gray-500">{SENSOR_TYPES[s.sensor_type] || s.sensor_type}</td>
                   <td className="px-4 py-3">
-                    {s.zone ? (
+                    {s.zone && (
                       <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
                         {s.zone}
                       </span>
-                    ) : '–'}
+                    )}
+                    {path && <div className="mt-0.5 text-xs text-gray-500">{path}</div>}
+                    {!s.zone && !path && '–'}
                   </td>
                   <td className="px-4 py-3 text-gray-500">{DATA_SOURCES[s.data_source] || s.data_source}</td>
                   <td className="px-4 py-3 text-gray-500 text-xs font-mono">
@@ -262,7 +316,8 @@ function SensorsPanel() {
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -309,7 +364,7 @@ function SensorsPanel() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="label">Standort</label>
+                  <label className="label">Position (Freitext)</label>
                   <input type="text" className="input" placeholder="z.B. Büro EG"
                     value={form.location}
                     onChange={(e) => setForm({ ...form, location: e.target.value })} />
@@ -319,6 +374,39 @@ function SensorsPanel() {
                   <input type="text" className="input" placeholder="z.B. Heizzone 1"
                     value={form.zone}
                     onChange={(e) => setForm({ ...form, zone: e.target.value })} />
+                </div>
+              </div>
+
+              {/* Strukturelle Zuordnung: Standort → Gebäude → Nutzungseinheit */}
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <p className="text-xs font-medium text-gray-600 mb-2">Strukturelle Zuordnung (optional, für Auswertungen)</p>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="label">Standort</label>
+                    <select className="input" value={form.site_id}
+                      onChange={(e) => setForm({ ...form, site_id: e.target.value, building_id: '', usage_unit_id: '' })}>
+                      <option value="">— nicht zugeordnet —</option>
+                      {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Gebäude</label>
+                    <select className="input" value={form.building_id}
+                      disabled={!form.site_id || buildings.length === 0}
+                      onChange={(e) => setForm({ ...form, building_id: e.target.value, usage_unit_id: '' })}>
+                      <option value="">{form.site_id ? (buildings.length ? '— wählen —' : 'keine') : 'erst Standort'}</option>
+                      {buildings.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Nutzungseinheit</label>
+                    <select className="input" value={form.usage_unit_id}
+                      disabled={!form.building_id || units.length === 0}
+                      onChange={(e) => setForm({ ...form, usage_unit_id: e.target.value })}>
+                      <option value="">{form.building_id ? (units.length ? '— wählen —' : 'keine') : 'erst Gebäude'}</option>
+                      {units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select>
+                  </div>
                 </div>
               </div>
 

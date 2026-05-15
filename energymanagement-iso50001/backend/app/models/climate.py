@@ -25,8 +25,14 @@ class ClimateSensor(Base, UUIDMixin, TimestampMixin):
     sensor_type: Mapped[str] = mapped_column(String(50))
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
     zone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    site_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("sites.id"), nullable=True, index=True
+    )
+    building_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("buildings.id"), nullable=True, index=True
+    )
     usage_unit_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("usage_units.id"), nullable=True
+        ForeignKey("usage_units.id"), nullable=True, index=True
     )
     ha_entity_id_temp: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ha_entity_id_humidity: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -39,6 +45,8 @@ class ClimateSensor(Base, UUIDMixin, TimestampMixin):
     associated_meter_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    site = relationship("Site")
+    building = relationship("Building")
     usage_unit = relationship("UsageUnit", back_populates="climate_sensors")
     readings = relationship("ClimateReading", back_populates="sensor", cascade="all, delete-orphan")
 

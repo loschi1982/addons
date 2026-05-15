@@ -80,15 +80,24 @@ class ClimateService:
         self,
         zone: str | None = None,
         is_active: bool | None = True,
+        site_id: uuid.UUID | None = None,
+        building_id: uuid.UUID | None = None,
+        usage_unit_id: uuid.UUID | None = None,
         page: int = 1,
         page_size: int = 25,
     ) -> dict:
-        """Klimasensoren auflisten."""
+        """Klimasensoren auflisten (optional gefiltert nach Hierarchie)."""
         query = select(ClimateSensor)
         if zone:
             query = query.where(ClimateSensor.zone == zone)
         if is_active is not None:
             query = query.where(ClimateSensor.is_active == is_active)
+        if site_id is not None:
+            query = query.where(ClimateSensor.site_id == site_id)
+        if building_id is not None:
+            query = query.where(ClimateSensor.building_id == building_id)
+        if usage_unit_id is not None:
+            query = query.where(ClimateSensor.usage_unit_id == usage_unit_id)
 
         # Total
         count_query = select(func.count()).select_from(query.subquery())

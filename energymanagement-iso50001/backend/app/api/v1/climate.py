@@ -38,6 +38,8 @@ def _sensor_to_response(s) -> ClimateSensorResponse:
         sensor_type=s.sensor_type,
         location=s.location,
         zone=s.zone,
+        site_id=s.site_id,
+        building_id=s.building_id,
         usage_unit_id=s.usage_unit_id,
         ha_entity_id_temp=s.ha_entity_id_temp,
         ha_entity_id_humidity=s.ha_entity_id_humidity,
@@ -73,13 +75,18 @@ async def list_sensors(
     page_size: int = Query(25, ge=1, le=100),
     zone: str | None = None,
     is_active: bool | None = True,
+    site_id: uuid.UUID | None = None,
+    building_id: uuid.UUID | None = None,
+    usage_unit_id: uuid.UUID | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Alle Klimasensoren auflisten."""
+    """Alle Klimasensoren auflisten (optional gefiltert nach Hierarchie)."""
     service = ClimateService(db)
     result = await service.list_sensors(
-        zone=zone, is_active=is_active, page=page, page_size=page_size
+        zone=zone, is_active=is_active,
+        site_id=site_id, building_id=building_id, usage_unit_id=usage_unit_id,
+        page=page, page_size=page_size,
     )
     total = result["total"]
     return PaginatedResponse(

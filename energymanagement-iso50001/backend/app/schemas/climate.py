@@ -25,6 +25,8 @@ class ClimateSensorBase(BaseModel):
     sensor_type: str = Field(..., max_length=50)
     location: str | None = Field(None, max_length=255)
     zone: str | None = Field(None, max_length=100)
+    site_id: uuid.UUID | None = None
+    building_id: uuid.UUID | None = None
     usage_unit_id: uuid.UUID | None = None
     ha_entity_id_temp: str | None = Field(None, max_length=255)
     ha_entity_id_humidity: str | None = Field(None, max_length=255)
@@ -48,6 +50,8 @@ class ClimateSensorUpdate(BaseModel):
     sensor_type: str | None = None
     location: str | None = None
     zone: str | None = None
+    site_id: uuid.UUID | None = None
+    building_id: uuid.UUID | None = None
     usage_unit_id: uuid.UUID | None = None
     ha_entity_id_temp: str | None = None
     ha_entity_id_humidity: str | None = None
