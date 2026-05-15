@@ -53,6 +53,11 @@ temp/
 
 # Generierte PDFs (nicht einchecken)
 backend/reports/*.pdf
+backend/data/reports/*.pdf
 
 # Uploads
 backend/uploads/
+
+# Claude Code lokale Einstellungen (enthält Tokens & Bash-Permissions)
+.claude/settings.local.json
+.claude/projects/

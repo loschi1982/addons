@@ -15,10 +15,14 @@ import argparse
 import requests
 from collections import defaultdict
 
-API_BASE = "http://localhost:8099/api/v1"
-ADMIN_USER = "admin"
-ADMIN_PASS = "REDACTED_ADMIN_PW"
-CSV_FILE = "/opt/gfr-backup/verbrauchsstellen.csv"
+import os
+
+API_BASE = os.environ.get("API_BASE", "http://localhost:8099/api/v1")
+ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
+ADMIN_PASS = os.environ.get("ADMIN_PASS")
+if not ADMIN_PASS:
+    raise SystemExit("ADMIN_PASS-Umgebungsvariable nicht gesetzt. Beispiel: ADMIN_PASS=geheim python import_gfr_structure.py")
+CSV_FILE = os.environ.get("CSV_FILE", "/opt/gfr-backup/verbrauchsstellen.csv")
 
 # Mapping GFR Verbrauchsstelle-Typ → Energiemanagementsystem energy_type
 TYP_TO_ENERGY = {

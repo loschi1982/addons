@@ -29,13 +29,14 @@ import requests
 
 # ── Konfiguration ───────────────────────────────────────────────────────────
 SPIE_BASE = os.environ.get("SPIE_BASE_URL", "https://energy-as-a-service.spie-es.de")
-SPIE_USER = os.environ.get("SPIE_USERNAME", "REDACTED_USERNAME")
-SPIE_PASS = os.environ.get("SPIE_PASSWORD", "REDACTED_SPIE_PW")
+SPIE_USER = os.environ.get("SPIE_USERNAME")
+SPIE_PASS = os.environ.get("SPIE_PASSWORD")
+if not SPIE_USER or not SPIE_PASS:
+    raise SystemExit("SPIE_USERNAME und SPIE_PASSWORD müssen als Env-Variablen gesetzt sein.")
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://energy:energy@192.168.178.142:5432/energy_management"
-)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise SystemExit("DATABASE_URL muss als Env-Variable gesetzt sein (z.B. postgresql://user:pw@host/db).")
 
 DRY_RUN = "--dry-run" in sys.argv
 
