@@ -738,20 +738,36 @@ function AddSchemaRootModal({
   const [schemaLabel, setSchemaLabel] = useState('');
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     (async () => {
-      try {
-        const [metersRes, sitesRes] = await Promise.all([
-          apiClient.get('/api/v1/meters/tree'),
-          apiClient.get('/api/v1/sites?page_size=200'),
-        ]);
-        const mItems = metersRes.data.items || metersRes.data;
+      setLoadError(null);
+      // Endpoints unabhängig laden – ein Fehler darf nicht den ganzen Modal blockieren
+      const [metersRes, sitesRes] = await Promise.allSettled([
+        apiClient.get('/api/v1/meters/tree'),
+        apiClient.get('/api/v1/sites?page_size=100'),
+      ]);
+      const errors: string[] = [];
+
+      if (metersRes.status === 'fulfilled') {
+        const mItems = metersRes.value.data.items || metersRes.value.data;
         setMeters(Array.isArray(mItems) ? mItems : []);
-        const sItems = sitesRes.data.items || sitesRes.data;
+      } else {
+        errors.push('Zähler konnten nicht geladen werden');
+        console.error('meters/tree failed', metersRes.reason);
+      }
+
+      if (sitesRes.status === 'fulfilled') {
+        const sItems = sitesRes.value.data.items || sitesRes.value.data;
         setSites(Array.isArray(sItems) ? sItems.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name })) : []);
-      } catch { /* leer */ }
+      } else {
+        errors.push('Standorte konnten nicht geladen werden');
+        console.error('sites failed', sitesRes.reason);
+      }
+
+      if (errors.length > 0) setLoadError(errors.join(' · '));
       setLoading(false);
     })();
   }, []);
@@ -944,6 +960,18 @@ function AddSchemaRootModal({
             <X className="h-5 w-5" />
           </button>
         </div>
+
+        {loadError && (
+          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            ⚠️ {loadError}. Bitte Seite neu laden.
+          </div>
+        )}
+
+        {loading && (
+          <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500">
+            Lade Standorte, Gebäude und Zähler…
+          </div>
+        )}
 
         {/* Scope-Tabs */}
         <div className="mb-4 flex rounded-lg border border-gray-200 p-1 bg-gray-50">
