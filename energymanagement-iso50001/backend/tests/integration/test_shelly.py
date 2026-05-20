@@ -93,8 +93,16 @@ async def test_get_energy_gen2():
         "current": 0.65,
     }
 
+    async def mock_get(url, **kwargs):
+        # Pro-3EM-Endpunkte (EM/EMData) gibt es bei diesem Gerät nicht
+        if "EM.GetStatus" in url or "EMData.GetStatus" in url:
+            return _mock_response(404)
+        if "Switch.GetStatus" in url:
+            return _mock_response(200, gen2_switch_data)
+        return _mock_response(404)
+
     mock_client = AsyncMock()
-    mock_client.get = AsyncMock(return_value=_mock_response(200, gen2_switch_data))
+    mock_client.get = mock_get
 
     with patch("httpx.AsyncClient") as mock_cls:
         mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -120,8 +128,16 @@ async def test_get_energy_gen1():
         "current": 0.37,
     }
 
+    async def mock_get(url, **kwargs):
+        # Gen2-Endpunkte (EM/EMData/Switch) gibt es bei einem Gen1-Gerät nicht
+        if "/rpc/" in url:
+            return _mock_response(404)
+        if "/meter/" in url:
+            return _mock_response(200, gen1_meter_data)
+        return _mock_response(404)
+
     mock_client = AsyncMock()
-    mock_client.get = AsyncMock(return_value=_mock_response(200, gen1_meter_data))
+    mock_client.get = mock_get
 
     with patch("httpx.AsyncClient") as mock_cls:
         mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -139,10 +155,22 @@ async def test_get_total_energy_kwh():
     client = ShellyClient("192.168.1.42")
     client._gen = 2
 
+    switch_data = {
+        "apower": 0,
+        "aenergy": {"total": 5000},
+        "voltage": 230,
+        "current": 0,
+    }
+
+    async def mock_get(url, **kwargs):
+        if "EM.GetStatus" in url or "EMData.GetStatus" in url:
+            return _mock_response(404)
+        if "Switch.GetStatus" in url:
+            return _mock_response(200, switch_data)
+        return _mock_response(404)
+
     mock_client = AsyncMock()
-    mock_client.get = AsyncMock(return_value=_mock_response(200, {
-        "apower": 0, "aenergy": {"total": 5000}, "voltage": 230, "current": 0,
-    }))
+    mock_client.get = mock_get
 
     with patch("httpx.AsyncClient") as mock_cls:
         mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)

@@ -28,7 +28,8 @@ def _mock_settings():
     """Erstellt gemockte Settings."""
     settings = type("Settings", (), {
         "ha_base_url": "http://supervisor/core",
-        "ha_supervisor_token": "test-token",
+        "ha_access_token": "test-token",
+        "ha_supervisor_token": "",
     })()
     return settings
 

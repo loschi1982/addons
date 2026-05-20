@@ -21,7 +21,7 @@ async def test_consumer_crud_workflow(client: AsyncClient, auth_headers: dict):
             "category": "hvac",
             "rated_power_kw": 150.0,
             "operating_hours_per_year": 4000,
-            "priority": "3",
+            "priority": "critical",
             "description": "Hauptheizkessel für das Verwaltungsgebäude",
         },
         headers=auth_headers,
@@ -31,7 +31,7 @@ async def test_consumer_crud_workflow(client: AsyncClient, auth_headers: dict):
     consumer1_id = consumer1["id"]
     assert consumer1["name"] == "Heizkessel Erdgas"
     assert consumer1["category"] == "hvac"
-    assert consumer1["priority"] == "3"
+    assert consumer1["priority"] == "critical"
 
     # ── 2. Zweiter Verbraucher: Lüftungsanlage ──
     create2_resp = await client.post(
@@ -41,7 +41,7 @@ async def test_consumer_crud_workflow(client: AsyncClient, auth_headers: dict):
             "category": "hvac",
             "rated_power_kw": 45.0,
             "operating_hours_per_year": 3000,
-            "priority": "2",
+            "priority": "high",
         },
         headers=auth_headers,
     )
@@ -55,7 +55,7 @@ async def test_consumer_crud_workflow(client: AsyncClient, auth_headers: dict):
             "name": "Kompressor Druckluft",
             "category": "compressed_air",
             "rated_power_kw": 75.0,
-            "priority": "2",
+            "priority": "high",
         },
         headers=auth_headers,
     )

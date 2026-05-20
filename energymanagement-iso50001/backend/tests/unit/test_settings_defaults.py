@@ -14,7 +14,16 @@ def test_default_settings_count():
 
 def test_default_settings_keys():
     """Alle erwarteten Einstellungsschlüssel sind vorhanden."""
-    expected = {"organization", "branding", "report_defaults", "enpi_config", "notifications"}
+    expected = {
+        "organization",
+        "branding",
+        "report_defaults",
+        "enpi_config",
+        "notifications",
+        "integrations_ha",
+        "integrations_weather",
+        "integrations_co2",
+    }
     assert set(DEFAULT_SETTINGS.keys()) == expected
 
 
