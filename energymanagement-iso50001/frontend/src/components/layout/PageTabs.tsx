@@ -15,6 +15,7 @@ export const ANALYSIS_TABS: TabItem[] = [
   { path: '/energy-review', label: 'Energiebewertung' },
   { path: '/analytics', label: 'Auswertungen' },
   { path: '/load-profile', label: 'Lastprofil' },
+  { path: '/data-quality', label: 'Datenqualität' },
 ];
 
 export default function PageTabs({ tabs }: { tabs: TabItem[] }) {

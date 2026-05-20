@@ -33,6 +33,7 @@ import BenchmarkingPage from '@/pages/BenchmarkingPage';
 import TrainingsPage from '@/pages/TrainingsPage';
 import ControlStrategiesPage from '@/pages/ControlStrategiesPage';
 import OutliersPage from '@/pages/OutliersPage';
+import DataQualityPage from '@/pages/DataQualityPage';
 
 /**
  * Geschützte Route – leitet auf /login um wenn nicht authentifiziert.
@@ -102,6 +103,7 @@ export default function App() {
         <Route path="control-strategies" element={<ControlStrategiesPage />} />
         <Route path="import" element={<ImportPage />} />
         <Route path="outliers" element={<OutliersPage />} />
+        <Route path="data-quality" element={<DataQualityPage />} />
         <Route path="integrations" element={<Navigate to="/settings" replace />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>

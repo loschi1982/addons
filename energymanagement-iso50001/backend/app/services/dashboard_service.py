@@ -328,25 +328,17 @@ class DashboardService:
             logger.error("dashboard_top_consumers_error", error=str(e))
             top_consumers = []
 
-        try:
-            alerts = await _timed("alerts", self._get_alerts())
-        except Exception as e:
-            logger.error("dashboard_alerts_error", error=str(e))
-            alerts = []
+        # Alerts und Plausibilitätswarnungen werden separat über
+        # /api/v1/dashboard/data-quality geladen (Tab "Datenqualität"),
+        # damit das Hauptdashboard schnell rendert.
+        alerts: list = []
+        plausibility: list = []
 
         try:
             enpi = await _timed("enpi", self._get_enpi_overview(period_start, period_end))
         except Exception as e:
             logger.error("dashboard_enpi_error", error=str(e))
             enpi = []
-
-        try:
-            plausibility = await _timed("plausibility", self._get_plausibility_warnings(
-                period_start, period_end, physical_ids,
-            ))
-        except Exception as e:
-            logger.error("dashboard_plausibility_error", error=str(e))
-            plausibility = []
 
         logger.info(
             "dashboard_timing",
@@ -375,6 +367,48 @@ class DashboardService:
             for k, _ in oldest:
                 self._dashboard_cache.pop(k, None)
         return result
+
+    async def get_data_quality(
+        self,
+        period_start: date | None = None,
+        period_end: date | None = None,
+        site_id: uuid.UUID | None = None,
+    ) -> dict:
+        """Datenqualitätsdaten: Alerts (Zähler ohne aktuelle Daten) und
+        Plausibilitätswarnungen (eingefrorene Zähler, Haupt-/Unterzähler-Abweichung).
+
+        Wird vom separaten Tab "Datenqualität" unter Analyse genutzt –
+        nicht mehr Teil des Haupt-Dashboards (Performance-Grund).
+        """
+        today = date.today()
+        if not period_start:
+            period_start = date(today.year, 1, 1)
+        if not period_end:
+            period_end = today
+
+        meter_set = await self._resolve_meter_set(site_id)
+        physical_ids: list | None = meter_set["physical_ids"] if site_id else None
+
+        try:
+            alerts = await self._get_alerts()
+        except Exception as e:
+            logger.error("data_quality_alerts_error", error=str(e))
+            alerts = []
+
+        try:
+            plausibility = await self._get_plausibility_warnings(
+                period_start, period_end, physical_ids,
+            )
+        except Exception as e:
+            logger.error("data_quality_plausibility_error", error=str(e))
+            plausibility = []
+
+        return {
+            "period_start": period_start,
+            "period_end": period_end,
+            "alerts": alerts,
+            "plausibility_warnings": plausibility,
+        }
 
     async def _consumption_by_energy_type(
         self, start: date, end: date,

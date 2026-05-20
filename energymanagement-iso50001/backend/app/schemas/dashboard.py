@@ -91,6 +91,14 @@ class DashboardResponse(BaseModel):
     plausibility_warnings: list[PlausibilityWarning] = []
 
 
+class DataQualityResponse(BaseModel):
+    """Datenqualitätsdaten – separater Endpunkt für Performance."""
+    period_start: date
+    period_end: date
+    alerts: list[dict] = []
+    plausibility_warnings: list[PlausibilityWarning] = []
+
+
 class EnPIResponse(BaseModel):
     """Energiekennzahl (Energy Performance Indicator)."""
     meter_id: uuid.UUID

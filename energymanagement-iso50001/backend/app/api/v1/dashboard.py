@@ -19,7 +19,7 @@ from app.core.dependencies import get_current_user
 from app.models.meter import Meter
 from app.models.reading import MeterReading
 from app.models.user import User
-from app.schemas.dashboard import DashboardResponse, EnPIResponse
+from app.schemas.dashboard import DashboardResponse, DataQualityResponse, EnPIResponse
 from app.services.dashboard_service import DashboardService
 
 router = APIRouter()
@@ -46,6 +46,23 @@ async def get_dashboard(
         import traceback
         logger.error("dashboard_traceback", tb=traceback.format_exc())
         raise
+
+
+@router.get("/data-quality", response_model=DataQualityResponse)
+async def get_data_quality(
+    period_start: date | None = None,
+    period_end: date | None = None,
+    site_id: uuid.UUID | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Datenqualitätsprüfung: Zähler ohne aktuelle Daten + Plausibilitätswarnungen.
+
+    Eigener Endpunkt, damit das Haupt-Dashboard schnell rendert. Wird vom
+    Tab "Datenqualität" unter Analyse abgefragt.
+    """
+    service = DashboardService(db)
+    return await service.get_data_quality(period_start, period_end, site_id)
 
 
 class AnomalyReading(BaseModel):
