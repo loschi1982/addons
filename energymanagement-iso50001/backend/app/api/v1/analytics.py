@@ -103,12 +103,15 @@ async def get_sankey(
     start_date: date = Query(...),
     end_date: date = Query(...),
     energy_type: str | None = Query(None, description="Filter nach Energieart"),
+    site_id: uuid.UUID | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Sankey-Diagramm: Energiefluss."""
     service = AnalyticsService(db)
-    return await service.get_sankey(start_date, end_date, energy_type=energy_type)
+    return await service.get_sankey(
+        start_date, end_date, energy_type=energy_type, site_id=site_id,
+    )
 
 
 @router.get("/weather-corrected")

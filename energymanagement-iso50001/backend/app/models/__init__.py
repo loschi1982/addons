@@ -38,3 +38,9 @@ from app.models.energy_review import (  # noqa: F401
     EnergyPerformanceIndicator, EnPIValue,
     EnergyBaseline,
 )
+from app.models.snapshot import (  # noqa: F401
+    DashboardSnapshot,
+    DataQualitySnapshot,
+    AnalyticsSnapshot,
+    TariffAggregateSnapshot,
+)

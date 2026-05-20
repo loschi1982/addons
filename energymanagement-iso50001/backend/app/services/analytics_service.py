@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import structlog
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import and_, case, extract, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -21,6 +22,8 @@ from app.models.emission import CO2Calculation, EmissionFactor
 from app.models.meter import Meter
 from app.models.reading import MeterReading
 from app.models.site import Building, Site, UsageUnit
+from app.models.snapshot import AnalyticsSnapshot
+from app.services.snapshot_periods import resolve_period
 
 logger = structlog.get_logger()
 
@@ -44,6 +47,82 @@ class AnalyticsService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    # ── Snapshot-Persistierung ───────────────────────────────────────────
+
+    async def load_snapshot(
+        self, site_id: uuid.UUID | None, period_key: str, kind: str,
+    ) -> dict | None:
+        """Lädt einen vorberechneten Analytics-Snapshot oder None."""
+        stmt = select(AnalyticsSnapshot.payload).where(
+            AnalyticsSnapshot.site_id.is_(None) if site_id is None
+            else AnalyticsSnapshot.site_id == site_id,
+            AnalyticsSnapshot.period_key == period_key,
+            AnalyticsSnapshot.kind == kind,
+        )
+        return (await self.db.execute(stmt)).scalar_one_or_none()
+
+    async def compute_and_persist_snapshot(
+        self, site_id: uuid.UUID | None, period_key: str, kind: str,
+    ) -> None:
+        """Berechnet einen Analytics-Snapshot live und persistiert ihn (UPSERT).
+
+        kind: 'timeseries' | 'comparison' | 'sankey'
+        Die Methode dispatcht intern auf die passende Live-Methode.
+        """
+        start, end = resolve_period(period_key)
+        if kind == "timeseries":
+            payload: dict | list = await self.get_timeseries(
+                start_date=start, end_date=end,
+                granularity="monthly", site_id=site_id,
+            )
+        elif kind == "comparison":
+            # Standardvergleich: aktueller Zeitraum vs. derselbe Zeitraum 1 Jahr vorher
+            prev_start = date(start.year - 1, start.month, start.day)
+            prev_end = date(end.year - 1, end.month, end.day)
+            payload = await self.get_comparison(
+                period1_start=start, period1_end=end,
+                period2_start=prev_start, period2_end=prev_end,
+                granularity="monthly", site_id=site_id,
+            )
+        elif kind == "sankey":
+            meter_ids = await self._meter_ids_for_site(site_id) if site_id else None
+            payload = await self.get_sankey(
+                start_date=start, end_date=end,
+                meter_ids=meter_ids,
+            )
+        else:
+            raise ValueError(f"Unbekanntes Analytics-Kind: {kind}")
+
+        await self._upsert_snapshot(site_id, period_key, kind, payload)
+
+    async def _upsert_snapshot(
+        self, site_id: uuid.UUID | None, period_key: str, kind: str, payload,
+    ) -> None:
+        json_payload = jsonable_encoder(payload)
+        now = datetime.now(timezone.utc)
+
+        existing = (await self.db.execute(
+            select(AnalyticsSnapshot).where(
+                AnalyticsSnapshot.site_id.is_(None) if site_id is None
+                else AnalyticsSnapshot.site_id == site_id,
+                AnalyticsSnapshot.period_key == period_key,
+                AnalyticsSnapshot.kind == kind,
+            )
+        )).scalar_one_or_none()
+
+        if existing:
+            existing.payload = json_payload
+            existing.generated_at = now
+        else:
+            self.db.add(AnalyticsSnapshot(
+                site_id=site_id,
+                period_key=period_key,
+                kind=kind,
+                payload=json_payload,
+                generated_at=now,
+            ))
+        await self.db.commit()
 
     @staticmethod
     def _meter_label(meter: "Meter") -> str:  # type: ignore[name-defined]
@@ -306,6 +385,21 @@ class AnalyticsService:
 
         Granularity: hourly, daily, weekly, monthly, yearly
         """
+        # Snapshot-Lookup für Standardperioden ohne zusätzliche Filter
+        if (
+            not meter_ids
+            and not energy_type
+            and granularity == "monthly"
+            and start_date is not None
+            and end_date is not None
+        ):
+            from app.services.snapshot_periods import match_period_key
+            period_key = match_period_key(start_date, end_date)
+            if period_key:
+                snap = await self.load_snapshot(site_id, period_key, "timeseries")
+                if snap is not None:
+                    return snap
+
         # Standortfilter → Zähler-IDs auflösen
         if site_id and not meter_ids:
             meter_ids = await self._meter_ids_for_site(site_id)
@@ -426,6 +520,22 @@ class AnalyticsService:
         site_id: uuid.UUID | None = None,
     ) -> dict:
         """Zwei Zeiträume vergleichen (z.B. Jahr-zu-Jahr)."""
+        # Snapshot-Lookup für Standardvergleich (period1 vs period1 - 1 Jahr)
+        if (
+            not meter_ids
+            and not energy_type
+            and granularity == "monthly"
+            and all([period1_start, period1_end, period2_start, period2_end])
+        ):
+            from app.services.snapshot_periods import match_period_key
+            period_key = match_period_key(period1_start, period1_end)
+            expected_p2_start = date(period1_start.year - 1, period1_start.month, period1_start.day)
+            expected_p2_end = date(period1_end.year - 1, period1_end.month, period1_end.day)
+            if period_key and period2_start == expected_p2_start and period2_end == expected_p2_end:
+                snap = await self.load_snapshot(site_id, period_key, "comparison")
+                if snap is not None:
+                    return snap
+
         # Standortfilter → Zähler-IDs auflösen
         if site_id and not meter_ids:
             meter_ids = await self._meter_ids_for_site(site_id)
@@ -628,6 +738,7 @@ class AnalyticsService:
         end_date: date,
         energy_type: str | None = None,
         meter_ids: list[uuid.UUID] | None = None,
+        site_id: uuid.UUID | None = None,
     ) -> dict:
         """
         Sankey-Daten: Energiefluss von Hauptzählern → Unterzähler → Verbraucher.
@@ -635,6 +746,14 @@ class AnalyticsService:
         Generiert Knoten (nodes) und Verbindungen (links).
         Optional nach Energieart oder Zähler-IDs filtern (für Standort-Berichte).
         """
+        # Snapshot-Lookup für Standardperioden ohne zusätzliche Filter
+        if not meter_ids and not energy_type:
+            from app.services.snapshot_periods import match_period_key
+            period_key = match_period_key(start_date, end_date)
+            if period_key:
+                snap = await self.load_snapshot(site_id, period_key, "sankey")
+                if snap is not None:
+                    return snap
         # Alle aktiven Zähler mit Hierarchie laden
         query = (
             select(Meter)

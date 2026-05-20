@@ -19,6 +19,12 @@ from app.core.dependencies import get_current_user
 from app.models.meter import Meter
 from app.models.reading import MeterReading
 from app.models.user import User
+from app.models.snapshot import (
+    AnalyticsSnapshot,
+    DashboardSnapshot,
+    DataQualitySnapshot,
+    TariffAggregateSnapshot,
+)
 from app.schemas.dashboard import DashboardResponse, DataQualityResponse, EnPIResponse
 from app.services.dashboard_service import DashboardService
 
@@ -260,3 +266,37 @@ async def get_enpi_overview(
     """Energiekennzahlen (EnPI) Übersicht abrufen."""
     service = DashboardService(db)
     return await service.get_enpi_overview(period, start_date, end_date)
+
+
+@router.get("/snapshots/status")
+async def get_snapshots_status(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Diagnose: Zeigt für jede Snapshot-Domäne, wann zuletzt befüllt wurde.
+
+    Hilft bei Beat-Hängern – wenn ein generated_at-Wert sehr alt ist,
+    läuft der zugehörige Celery-Task vermutlich nicht (mehr).
+    """
+    from sqlalchemy import func, select as sa_select
+
+    def _latest(model):
+        return sa_select(
+            func.count().label("count"),
+            func.max(model.generated_at).label("latest"),
+        )
+
+    domains = {
+        "dashboard": DashboardSnapshot,
+        "data_quality": DataQualitySnapshot,
+        "analytics": AnalyticsSnapshot,
+        "tariff_aggregates": TariffAggregateSnapshot,
+    }
+    result: dict[str, dict] = {}
+    for name, model in domains.items():
+        row = (await db.execute(_latest(model))).one()
+        result[name] = {
+            "snapshot_count": int(row.count or 0),
+            "latest_generated_at": row.latest.isoformat() if row.latest else None,
+        }
+    return result

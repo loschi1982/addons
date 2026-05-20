@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from datetime import date, timedelta
 
 from celery import Celery
+from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import get_settings
@@ -71,6 +72,22 @@ celery_app.conf.update(
         "spie-auto-import-every-3-days": {
             "task": "app.tasks.spie_auto_import",
             "schedule": 259200.0,  # alle 3 Tage
+        },
+        "precompute-dashboard-snapshots": {
+            "task": "app.tasks.precompute_dashboard_snapshots",
+            "schedule": 900.0,  # alle 15 Minuten
+        },
+        "precompute-data-quality-snapshots": {
+            "task": "app.tasks.precompute_data_quality_snapshots",
+            "schedule": 1800.0,  # alle 30 Minuten
+        },
+        "precompute-analytics-snapshots": {
+            "task": "app.tasks.precompute_analytics_snapshots",
+            "schedule": 3600.0,  # stündlich
+        },
+        "precompute-tariff-aggregates": {
+            "task": "app.tasks.precompute_tariff_aggregates",
+            "schedule": 86400.0,  # täglich
         },
     },
 )
@@ -444,5 +461,155 @@ def spie_auto_import():
                 return {"skipped": True, "reason": "nicht aktiviert"}
             job_id = str(_uuid.uuid4())
             return await svc.run_import(job_id=job_id)
+
+    return _run_async(_run())
+
+
+# ── Pre-Computation: Dashboard/Analytics/Datenqualität/Tarife ─────────────
+#
+# Statt teure Aggregationen bei jedem Seitenaufruf live aus der DB zu ziehen,
+# werden für Standardzeiträume (current_ytd, current_month, last_month,
+# last_year, year_before) periodisch Snapshots berechnet und in den
+# `*_snapshots`-Tabellen abgelegt. Services lesen primär aus diesen Tabellen.
+
+
+async def _iter_site_targets(db):
+    """Liefert (None, "Gesamt") + (uuid, name) für jeden aktiven Standort."""
+    from app.models.site import Site
+
+    yield None, "Gesamt"
+    sites = (await db.execute(
+        sa_select(Site.id, Site.name).where(Site.is_active == True)  # noqa: E712
+    )).all()
+    for s in sites:
+        yield s.id, s.name
+
+
+@celery_app.task(name="app.tasks.precompute_dashboard_snapshots")
+def precompute_dashboard_snapshots():
+    """Dashboard-Snapshots für alle (site, period_key, granularity)-Kombis
+    vorberechnen. Läuft alle 15 Minuten."""
+    async def _run():
+        from app.services.dashboard_service import DashboardService
+        from app.services.snapshot_periods import GRANULARITIES, PERIOD_KEYS
+
+        async with _task_db_session() as db:
+            service = DashboardService(db)
+            count = 0
+            errors = 0
+            async for site_id, _name in _iter_site_targets(db):
+                for period_key in PERIOD_KEYS:
+                    for gran in GRANULARITIES:
+                        try:
+                            await service.compute_and_persist_dashboard_snapshot(
+                                site_id, period_key, gran,
+                            )
+                            count += 1
+                        except Exception as exc:  # pragma: no cover
+                            errors += 1
+                            import structlog
+                            structlog.get_logger().warning(
+                                "dashboard_snapshot_failed",
+                                site_id=str(site_id) if site_id else None,
+                                period_key=period_key, granularity=gran,
+                                error=str(exc),
+                            )
+            return {"snapshots_written": count, "errors": errors}
+
+    return _run_async(_run())
+
+
+@celery_app.task(name="app.tasks.precompute_data_quality_snapshots")
+def precompute_data_quality_snapshots():
+    """Datenqualitäts-Snapshots (Alerts + Plausibilität) pro Standort
+    vorberechnen. Läuft alle 30 Minuten."""
+    async def _run():
+        from app.services.dashboard_service import DashboardService
+
+        async with _task_db_session() as db:
+            service = DashboardService(db)
+            count = 0
+            errors = 0
+            async for site_id, _name in _iter_site_targets(db):
+                try:
+                    await service.compute_and_persist_data_quality_snapshot(site_id)
+                    count += 1
+                except Exception as exc:  # pragma: no cover
+                    errors += 1
+                    import structlog
+                    structlog.get_logger().warning(
+                        "data_quality_snapshot_failed",
+                        site_id=str(site_id) if site_id else None,
+                        error=str(exc),
+                    )
+            return {"snapshots_written": count, "errors": errors}
+
+    return _run_async(_run())
+
+
+@celery_app.task(name="app.tasks.precompute_analytics_snapshots")
+def precompute_analytics_snapshots():
+    """Analytics-Snapshots (timeseries, comparison, sankey, weather_corrected)
+    pro Standort und Standardperiode vorberechnen. Läuft stündlich."""
+    async def _run():
+        from app.services.analytics_service import AnalyticsService
+        from app.services.snapshot_periods import PERIOD_KEYS
+
+        # weather_corrected ist per-meter und passt nicht ins per-site-Snapshot-
+        # Schema → bleibt on-demand
+        ANALYTICS_KINDS = ("timeseries", "comparison", "sankey")
+
+        async with _task_db_session() as db:
+            service = AnalyticsService(db)
+            count = 0
+            errors = 0
+            async for site_id, _name in _iter_site_targets(db):
+                for period_key in PERIOD_KEYS:
+                    for kind in ANALYTICS_KINDS:
+                        try:
+                            await service.compute_and_persist_snapshot(
+                                site_id, period_key, kind,
+                            )
+                            count += 1
+                        except Exception as exc:  # pragma: no cover
+                            errors += 1
+                            import structlog
+                            structlog.get_logger().warning(
+                                "analytics_snapshot_failed",
+                                site_id=str(site_id) if site_id else None,
+                                period_key=period_key, kind=kind,
+                                error=str(exc),
+                            )
+            return {"snapshots_written": count, "errors": errors}
+
+    return _run_async(_run())
+
+
+@celery_app.task(name="app.tasks.precompute_tariff_aggregates")
+def precompute_tariff_aggregates():
+    """Tarif-Aggregate (effektive €/kWh aus energy_invoices) je Site und
+    Periode vorberechnen. Läuft täglich."""
+    async def _run():
+        from app.services.tariff_aggregate_service import TariffAggregateService
+        from app.services.snapshot_periods import PERIOD_KEYS
+
+        async with _task_db_session() as db:
+            service = TariffAggregateService(db)
+            count = 0
+            errors = 0
+            async for site_id, _name in _iter_site_targets(db):
+                for period_key in PERIOD_KEYS:
+                    try:
+                        await service.compute_and_persist_snapshot(site_id, period_key)
+                        count += 1
+                    except Exception as exc:  # pragma: no cover
+                        errors += 1
+                        import structlog
+                        structlog.get_logger().warning(
+                            "tariff_aggregate_snapshot_failed",
+                            site_id=str(site_id) if site_id else None,
+                            period_key=period_key, error=str(exc),
+                        )
+            return {"snapshots_written": count, "errors": errors}
 
     return _run_async(_run())

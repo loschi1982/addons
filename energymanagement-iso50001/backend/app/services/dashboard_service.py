@@ -10,6 +10,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
 import structlog
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +19,8 @@ from app.models.emission import CO2Calculation, EmissionFactor
 from app.models.meter import Meter
 from app.models.reading import MeterReading
 from app.models.settings import AppSetting
+from app.models.snapshot import DashboardSnapshot, DataQualitySnapshot
+from app.services.snapshot_periods import match_period_key, resolve_period
 
 logger = structlog.get_logger()
 
@@ -260,13 +263,46 @@ class DashboardService:
         granularity: str = "monthly",
         site_id: uuid.UUID | None = None,
     ) -> dict:
-        """Komplette Dashboard-Daten zusammenstellen."""
+        """Komplette Dashboard-Daten zusammenstellen.
+
+        Lookup-Reihenfolge:
+        1. Persistenter Snapshot (DB) – wenn der angefragte Zeitraum einem
+           Standard-Period-Key entspricht
+        2. 60 s In-Memory-Cache – für wiederholte Custom-Aufrufe
+        3. Live-Berechnung als Fallback
+        """
         today = date.today()
         if not period_start:
             period_start = date(today.year, 1, 1)
         if not period_end:
             period_end = today
 
+        # 1. Snapshot-Lookup für Standardperioden
+        period_key = match_period_key(period_start, period_end, today)
+        if period_key:
+            snap = await self._load_dashboard_snapshot(site_id, period_key, granularity)
+            if snap is not None:
+                logger.info(
+                    "dashboard_snapshot_hit",
+                    site=str(site_id) if site_id else None,
+                    period_key=period_key,
+                    granularity=granularity,
+                )
+                return snap
+
+        # 2. Live-Berechnung (mit 60 s Memory-Cache als zweite Stufe)
+        return await self._compute_dashboard_live(
+            period_start, period_end, granularity, site_id,
+        )
+
+    async def _compute_dashboard_live(
+        self,
+        period_start: date,
+        period_end: date,
+        granularity: str,
+        site_id: uuid.UUID | None,
+    ) -> dict:
+        """Live-Berechnung der Dashboard-Daten (Fallback bei Snapshot-Miss)."""
         import time as _time
 
         # Cache-Lookup (60 s TTL)
@@ -368,6 +404,61 @@ class DashboardService:
                 self._dashboard_cache.pop(k, None)
         return result
 
+    # ── Snapshot-Persistierung ───────────────────────────────────────────
+
+    async def _load_dashboard_snapshot(
+        self, site_id: uuid.UUID | None, period_key: str, granularity: str,
+    ) -> dict | None:
+        """Lädt einen vorberechneten Dashboard-Snapshot oder None."""
+        stmt = select(DashboardSnapshot.payload).where(
+            DashboardSnapshot.site_id.is_(None) if site_id is None
+            else DashboardSnapshot.site_id == site_id,
+            DashboardSnapshot.period_key == period_key,
+            DashboardSnapshot.granularity == granularity,
+        )
+        return (await self.db.execute(stmt)).scalar_one_or_none()
+
+    async def compute_and_persist_dashboard_snapshot(
+        self, site_id: uuid.UUID | None, period_key: str, granularity: str,
+    ) -> None:
+        """Berechnet einen Dashboard-Snapshot live und persistiert ihn (UPSERT).
+
+        Wird vom Celery-Task `precompute_dashboard_snapshots` aufgerufen.
+        """
+        start, end = resolve_period(period_key)
+        payload = await self._compute_dashboard_live(start, end, granularity, site_id)
+        await self._upsert_dashboard_snapshot(site_id, period_key, granularity, payload)
+
+    async def _upsert_dashboard_snapshot(
+        self, site_id: uuid.UUID | None, period_key: str, granularity: str, payload: dict,
+    ) -> None:
+        """Manuelles Upsert. UNIQUE-Constraints behandeln NULL als ungleich,
+        deshalb hier explizit auf bestehenden Eintrag prüfen."""
+        json_payload = jsonable_encoder(payload)
+        now = datetime.now(timezone.utc)
+
+        existing = (await self.db.execute(
+            select(DashboardSnapshot).where(
+                DashboardSnapshot.site_id.is_(None) if site_id is None
+                else DashboardSnapshot.site_id == site_id,
+                DashboardSnapshot.period_key == period_key,
+                DashboardSnapshot.granularity == granularity,
+            )
+        )).scalar_one_or_none()
+
+        if existing:
+            existing.payload = json_payload
+            existing.generated_at = now
+        else:
+            self.db.add(DashboardSnapshot(
+                site_id=site_id,
+                period_key=period_key,
+                granularity=granularity,
+                payload=json_payload,
+                generated_at=now,
+            ))
+        await self.db.commit()
+
     async def get_data_quality(
         self,
         period_start: date | None = None,
@@ -377,9 +468,23 @@ class DashboardService:
         """Datenqualitätsdaten: Alerts (Zähler ohne aktuelle Daten) und
         Plausibilitätswarnungen (eingefrorene Zähler, Haupt-/Unterzähler-Abweichung).
 
-        Wird vom separaten Tab "Datenqualität" unter Analyse genutzt –
-        nicht mehr Teil des Haupt-Dashboards (Performance-Grund).
+        Bevorzugt persistenten Snapshot, fällt auf Live-Berechnung zurück.
         """
+        snap = await self._load_data_quality_snapshot(site_id)
+        if snap is not None:
+            logger.info(
+                "data_quality_snapshot_hit",
+                site=str(site_id) if site_id else None,
+            )
+            return snap
+        return await self._compute_data_quality_live(period_start, period_end, site_id)
+
+    async def _compute_data_quality_live(
+        self,
+        period_start: date | None,
+        period_end: date | None,
+        site_id: uuid.UUID | None,
+    ) -> dict:
         today = date.today()
         if not period_start:
             period_start = date(today.year, 1, 1)
@@ -409,6 +514,42 @@ class DashboardService:
             "alerts": alerts,
             "plausibility_warnings": plausibility,
         }
+
+    async def _load_data_quality_snapshot(
+        self, site_id: uuid.UUID | None,
+    ) -> dict | None:
+        stmt = select(DataQualitySnapshot.payload).where(
+            DataQualitySnapshot.site_id.is_(None) if site_id is None
+            else DataQualitySnapshot.site_id == site_id,
+        )
+        return (await self.db.execute(stmt)).scalar_one_or_none()
+
+    async def compute_and_persist_data_quality_snapshot(
+        self, site_id: uuid.UUID | None,
+    ) -> None:
+        """Berechnet einen Datenqualitäts-Snapshot live und persistiert ihn.
+        Wird vom Celery-Task `precompute_data_quality_snapshots` aufgerufen."""
+        payload = await self._compute_data_quality_live(None, None, site_id)
+        json_payload = jsonable_encoder(payload)
+        now = datetime.now(timezone.utc)
+
+        existing = (await self.db.execute(
+            select(DataQualitySnapshot).where(
+                DataQualitySnapshot.site_id.is_(None) if site_id is None
+                else DataQualitySnapshot.site_id == site_id,
+            )
+        )).scalar_one_or_none()
+
+        if existing:
+            existing.payload = json_payload
+            existing.generated_at = now
+        else:
+            self.db.add(DataQualitySnapshot(
+                site_id=site_id,
+                payload=json_payload,
+                generated_at=now,
+            ))
+        await self.db.commit()
 
     async def _consumption_by_energy_type(
         self, start: date, end: date,
