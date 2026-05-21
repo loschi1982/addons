@@ -174,6 +174,7 @@ class SpieService:
         result = await self.db.execute(
             select(Meter).where(
                 Meter.is_active == True,  # noqa: E712
+                Meter.spie_import_excluded == False,  # noqa: E712
                 (Meter.data_source == "spie")
                 | (Meter.source_config["spie_nav_id"].as_string() != None),  # noqa: E711
             )

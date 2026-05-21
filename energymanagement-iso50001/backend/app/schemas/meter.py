@@ -48,6 +48,7 @@ class MeterBase(BaseModel):
     installation_date: date | None = None
     removal_date: date | None = None
     calibration_date: date | None = None
+    spie_import_excluded: bool = False
 
 
 class MeterCreate(MeterBase):
@@ -84,6 +85,7 @@ class MeterUpdate(BaseModel):
     installation_date: date | None = None
     removal_date: date | None = None
     calibration_date: date | None = None
+    spie_import_excluded: bool | None = None
 
 
 class MeterResponse(MeterBase, BaseSchema):

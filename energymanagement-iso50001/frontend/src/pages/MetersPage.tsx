@@ -27,6 +27,7 @@ interface Meter {
   is_feed_in: boolean;
   is_delivery_based: boolean;
   is_weather_corrected: boolean;
+  spie_import_excluded: boolean;
   source_config: Record<string, unknown> | null;
   virtual_config: Record<string, unknown> | null;
   created_at: string;
@@ -53,6 +54,8 @@ interface MeterForm {
   source_config_bacnet_device: string;
   source_config_bacnet_object_type: string;
   source_config_bacnet_object_instance: string;
+  source_config_spie_nav_id: string;
+  spie_import_excluded: boolean;
   parent_meter_id: string;
   virtual_type: string;
   virtual_source_meter_id: string;
@@ -82,6 +85,8 @@ const emptyForm: MeterForm = {
   source_config_bacnet_device: '',
   source_config_bacnet_object_type: 'analogInput',
   source_config_bacnet_object_instance: '0',
+  source_config_spie_nav_id: '',
+  spie_import_excluded: false,
   virtual_type: 'difference',
   virtual_source_meter_id: '',
   virtual_subtract_meter_ids: [],
@@ -90,6 +95,7 @@ const emptyForm: MeterForm = {
 
 const DATA_SOURCES: Record<string, string> = {
   manual: 'Manuell',
+  spie: 'SPIE (automatisch)',
   shelly: 'Shelly',
   modbus: 'Modbus',
   knx: 'KNX',
@@ -158,6 +164,8 @@ export default function MetersPage() {
       source_config_bacnet_device: (cfg.device_address as string) || '',
       source_config_bacnet_object_type: (cfg.object_type as string) || 'analogInput',
       source_config_bacnet_object_instance: (cfg.object_instance?.toString()) || '0',
+      source_config_spie_nav_id: (cfg.spie_nav_id as string) || '',
+      spie_import_excluded: meter.spie_import_excluded,
       virtual_type: (vcfg.type as string) || 'difference',
       virtual_source_meter_id: (vcfg.source_meter_id as string) || '',
       virtual_subtract_meter_ids: (vcfg.subtract_meter_ids as string[]) || [],
@@ -204,6 +212,8 @@ export default function MetersPage() {
       if (form.source_config_bacnet_device) source_config.device_address = form.source_config_bacnet_device;
       source_config.object_type = form.source_config_bacnet_object_type;
       source_config.object_instance = parseInt(form.source_config_bacnet_object_instance) || 0;
+    } else if (form.data_source === 'spie') {
+      if (form.source_config_spie_nav_id) source_config.spie_nav_id = form.source_config_spie_nav_id;
     }
 
     let virtual_config: Record<string, unknown> | null = null;
@@ -238,6 +248,7 @@ export default function MetersPage() {
       usage_unit_id: hierarchy.unitId || null,
       source_config: Object.keys(source_config).length > 0 ? source_config : null,
       virtual_config,
+      spie_import_excluded: form.spie_import_excluded,
     };
 
     try {
@@ -748,6 +759,9 @@ function NetworkRow({
           {node.is_virtual
             ? (node.virtual_config?.type === 'parallel' ? 'Doppelzähler' : 'Virtuell')
             : (DATA_SOURCES[node.data_source] || node.data_source)}
+          {node.data_source === 'spie' && node.spie_import_excluded && (
+            <span className="ml-1 text-xs text-amber-600">(ausgeschlossen)</span>
+          )}
           {node.is_feed_in && <span className="ml-1 inline-flex rounded-full bg-green-50 px-1.5 py-0.5 text-xs text-green-700">PV</span>}
         </td>
         <td className="px-3 py-2 text-right space-x-2 text-xs">
@@ -893,7 +907,14 @@ function MeterModal({
               <select
                 className="input"
                 value={form.data_source}
-                onChange={(e) => setForm({ ...form, data_source: e.target.value })}
+                onChange={(e) => {
+                  const newSource = e.target.value;
+                  if (newSource !== 'spie' && form.data_source === 'spie') {
+                    setForm({ ...form, data_source: newSource, spie_import_excluded: true });
+                  } else {
+                    setForm({ ...form, data_source: newSource });
+                  }
+                }}
               >
                 {Object.entries(DATA_SOURCES).map(([key, label]) => (
                   <option key={key} value={key}>{label}</option>
@@ -1015,6 +1036,23 @@ function MeterModal({
                     placeholder="0" />
                 </div>
               </div>
+            </div>
+          )}
+
+          {form.data_source === 'spie' && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+              <p className="text-sm font-medium text-gray-700 mb-3">SPIE-Konfiguration</p>
+              <div>
+                <label className="label">SPIE Nav-ID</label>
+                <input type="text" className="input" value={form.source_config_spie_nav_id}
+                  onChange={(e) => setForm({ ...form, source_config_spie_nav_id: e.target.value })}
+                  placeholder="z-123-456" />
+              </div>
+              <label className="flex items-center gap-2 mt-3 cursor-pointer">
+                <input type="checkbox" checked={form.spie_import_excluded}
+                  onChange={(e) => setForm({ ...form, spie_import_excluded: e.target.checked })} />
+                <span className="text-sm text-gray-700">Vom automatischen Import ausschließen</span>
+              </label>
             </div>
           )}
 

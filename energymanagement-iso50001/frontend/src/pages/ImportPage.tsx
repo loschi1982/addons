@@ -876,6 +876,16 @@ interface SpieProgress {
   error?: string;
 }
 
+interface SpieMeter {
+  id: string;
+  name: string;
+  display_name: string | null;
+  location: string | null;
+  energy_type: string;
+  data_source: string;
+  spie_import_excluded: boolean;
+}
+
 function SpiePanel() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -886,6 +896,9 @@ function SpiePanel() {
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [lastSync, setLastSync] = useState<{ synced_at: string | null; imported: number; errors: number; meters_processed: number } | null>(null);
   const [syncProgress, setSyncProgress] = useState<SpieProgress | null>(null);
+  const [spieMeters, setSpieMeters] = useState<SpieMeter[]>([]);
+  const [metersExpanded, setMetersExpanded] = useState(false);
+  const [metersLoading, setMetersLoading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadConfig = async () => {
@@ -899,6 +912,40 @@ function SpiePanel() {
       setEnabled(cfg.enabled || false);
       setPasswordSet(cfg.password_set || false);
       setLastSync(statusRes.data);
+      if (cfg.username) loadSpieMeters();
+    } catch { /* ignorieren */ }
+  };
+
+  const loadSpieMeters = async () => {
+    setMetersLoading(true);
+    try {
+      const res = await apiClient.get<{ items: SpieMeter[] }>(
+        '/api/v1/meters?data_source=spie&page_size=500'
+      );
+      setSpieMeters(res.data.items);
+    } catch { /* ignorieren */ } finally { setMetersLoading(false); }
+  };
+
+  const toggleExclude = async (meter: SpieMeter) => {
+    try {
+      await apiClient.put(`/api/v1/meters/${meter.id}`, {
+        spie_import_excluded: !meter.spie_import_excluded,
+      });
+      setSpieMeters(prev => prev.map(m =>
+        m.id === meter.id ? { ...m, spie_import_excluded: !m.spie_import_excluded } : m
+      ));
+    } catch { /* ignorieren */ }
+  };
+
+  const changeToManual = async (meter: SpieMeter) => {
+    try {
+      await apiClient.put(`/api/v1/meters/${meter.id}`, {
+        data_source: 'manual',
+        spie_import_excluded: true,
+      });
+      setSpieMeters(prev => prev.map(m =>
+        m.id === meter.id ? { ...m, data_source: 'manual', spie_import_excluded: true } : m
+      ));
     } catch { /* ignorieren */ }
   };
 
@@ -1109,6 +1156,67 @@ function SpiePanel() {
           )}
         </div>
       )}
+
+      {/* SPIE-Zähler verwalten */}
+      <div className="border-t border-gray-100 pt-4">
+        <button
+          className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900"
+          onClick={() => {
+            const next = !metersExpanded;
+            setMetersExpanded(next);
+            if (next) loadSpieMeters();
+          }}
+        >
+          <span>{metersExpanded ? '▾' : '▸'}</span>
+          SPIE-Zähler verwalten ({spieMeters.length})
+        </button>
+
+        {metersExpanded && (
+          <div className="mt-3 space-y-1">
+            {metersLoading && <p className="text-sm text-gray-400">Lade Zähler…</p>}
+            {!metersLoading && spieMeters.length === 0 && (
+              <p className="text-sm text-gray-400">Keine SPIE-Zähler gefunden.</p>
+            )}
+            {spieMeters.map(meter => (
+              <div
+                key={meter.id}
+                className="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2 text-sm"
+              >
+                <div className="min-w-0 flex-1">
+                  <span className="font-medium text-gray-800 truncate">
+                    {meter.display_name || meter.name}
+                  </span>
+                  {meter.location && (
+                    <span className="ml-2 text-gray-400 text-xs">{meter.location}</span>
+                  )}
+                  {meter.data_source !== 'spie' && (
+                    <span className="ml-2 text-xs text-blue-600">Quelle: Manuell</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 flex-shrink-0 ml-3">
+                  {!meter.spie_import_excluded && meter.data_source === 'spie' && (
+                    <button
+                      onClick={() => changeToManual(meter)}
+                      className="text-xs text-blue-600 hover:underline"
+                      title="Zähler auf Manuell umstellen und vom Import ausschließen"
+                    >
+                      → Manuell
+                    </button>
+                  )}
+                  <label className="flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={meter.spie_import_excluded}
+                      onChange={() => toggleExclude(meter)}
+                    />
+                    <span className="text-xs text-gray-600">Import aus</span>
+                  </label>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

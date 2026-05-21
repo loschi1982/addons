@@ -58,6 +58,7 @@ def _meter_to_response(meter, latest=None, site_name: str | None = None) -> Mete
         notes=getattr(meter, 'notes', None),
         schema_label=getattr(meter, 'schema_label', None),
         is_active=meter.is_active,
+        spie_import_excluded=getattr(meter, 'spie_import_excluded', False),
         created_at=meter.created_at,
         latest_reading=latest_value,
         latest_reading_date=latest_ts,
@@ -149,6 +150,7 @@ async def list_meters_tree(
             _Meter.is_feed_in,
             _Meter.is_delivery_based,
             _Meter.is_weather_corrected,
+            _Meter.spie_import_excluded,
             _Meter.source_config,
             _Meter.virtual_config,
         )
@@ -185,6 +187,7 @@ async def list_meters_tree(
                 "is_feed_in": m["is_feed_in"],
                 "is_delivery_based": m["is_delivery_based"],
                 "is_weather_corrected": m["is_weather_corrected"],
+                "spie_import_excluded": m["spie_import_excluded"],
                 "source_config": m["source_config"],
                 "virtual_config": m["virtual_config"],
             }

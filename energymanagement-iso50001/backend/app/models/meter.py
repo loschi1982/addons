@@ -93,6 +93,7 @@ class Meter(Base, UUIDMixin, TimestampMixin):
     virtual_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    spie_import_excluded: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Betrachtungspunkt: Wenn gesetzt, ist dieser Zähler ein Schema-Einstiegspunkt
     # Der Unterbaum ab diesem Zähler wird als Energieschema visualisiert
