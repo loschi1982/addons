@@ -41,7 +41,7 @@
 
     function handleSuccess(jwt, role) {
       saveSession(jwt, role);
-      window.AR.qr.stopQrScanner();
+      stopQrLogin();
       screen.classList.add('hidden');
       hideError();
       onSuccess(role);
@@ -56,11 +56,11 @@
         if (tab.dataset.tab === 'qr') {
           tabPin.classList.add('hidden');
           tabQr.classList.remove('hidden');
-          window.AR.qr.startQrScanner(loginVideo, loginCanvas, handleQrResult);
+          startQrLogin();
         } else {
           tabQr.classList.add('hidden');
           tabPin.classList.remove('hidden');
-          window.AR.qr.stopQrScanner();
+          stopQrLogin();
         }
       });
     });
@@ -74,8 +74,26 @@
         .catch(function ()   { showError('Ungültiger QR-Code oder Token abgelaufen.'); });
     }
 
+    // QR-Login braucht einen aktiven Kamera-Stream auf dem Login-Video.
+    // Ohne startCamera bleibt das Video schwarz und es wird nichts gescannt
+    // (getUserMedia wird nie aufgerufen → keine Berechtigungsabfrage, kein Fehler).
+    async function startQrLogin() {
+      try {
+        await window.AR.camera.startCamera(loginVideo);
+      } catch (e) {
+        showError('Kamera nicht verfügbar – bitte per PIN anmelden.');
+        return;
+      }
+      window.AR.qr.startQrScanner(loginVideo, loginCanvas, handleQrResult);
+    }
+
+    function stopQrLogin() {
+      window.AR.qr.stopQrScanner();
+      window.AR.camera.stopCamera();
+    }
+
     // QR-Scanner direkt starten (erster Tab)
-    window.AR.qr.startQrScanner(loginVideo, loginCanvas, handleQrResult);
+    startQrLogin();
 
     // PIN-Setup-Screen (erster Login / nach Reset)
     var pinSetupScreen = document.getElementById('pin-setup-screen');
@@ -105,7 +123,7 @@
           .then(function () {
             pinSetupScreen.classList.add('hidden');
             saveSession(jwt, role);
-            window.AR.qr.stopQrScanner();
+            stopQrLogin();
             hideError();
             onSuccess(role);
           })
