@@ -5,12 +5,8 @@ Stellt eine Test-Datenbank, einen FastAPI-TestClient und
 vorbereitete Testdaten (Benutzer, Zähler, etc.) bereit.
 """
 
-import asyncio
 import uuid
-from datetime import date, datetime, timezone
-from decimal import Decimal
 
-import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -35,6 +31,15 @@ import app.models.weather  # noqa: F401
 import app.models.climate  # noqa: F401
 import app.models.correction  # noqa: F401
 import app.models.allocation  # noqa: F401
+import app.models.benchmark  # noqa: F401
+import app.models.contract  # noqa: F401
+import app.models.control_strategy  # noqa: F401
+import app.models.district_heating_provider  # noqa: F401
+import app.models.energy_review  # noqa: F401
+import app.models.invoice  # noqa: F401
+import app.models.monitoring_point  # noqa: F401
+import app.models.snapshot  # noqa: F401
+import app.models.training  # noqa: F401
 
 
 # ---------------------------------------------------------------------------
@@ -47,12 +52,8 @@ test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 TestSessionLocal = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Erstellt einen Event-Loop für die gesamte Test-Session."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+# Kein manuelles event_loop-Fixture – pytest-asyncio 0.23+ verwaltet
+# Event-Loops automatisch bei asyncio_mode = auto (pytest.ini).
 
 
 @pytest_asyncio.fixture(autouse=True)

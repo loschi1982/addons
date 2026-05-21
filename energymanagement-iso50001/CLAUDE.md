@@ -75,7 +75,7 @@ docker-compose -f docker-compose.dev.yml up
 - [x] Seed-Daten (Rollen, Emissionsfaktoren, DWD-Stationen)
 - [x] Service-Implementierungen (17/17 Services implementiert)
 - [x] Alembic-Migrationen (initiale Migration für alle 40+ Tabellen)
-- [x] Backend-Tests (291 Tests, 285 grün, 6 API-Fixture-Konflikte)
+- [x] Backend-Tests (291 Tests, fixes: event_loop-Fixture entfernt + 9 fehlende Model-Imports ergänzt)
 - [x] Docker-Build verifiziert (Dockerfile, docker-compose, entrypoint.sh)
 - [x] Frontend-Komponenten implementieren (17/17 Seiten, TypeScript fehlerfrei, Production-Build OK)
 - [x] E2E-Tests (11 Tests: Auth, Sites, Meters, Consumers, ISO 50001)
