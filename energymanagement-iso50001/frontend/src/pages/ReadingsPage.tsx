@@ -60,6 +60,10 @@ const SOURCE_LABELS: Record<string, string> = {
   homeassistant: 'Home Assistant',
 };
 
+// Zähler dieser Quellen liefern ihre Werte über Live-Integrationen automatisch
+// und werden auf der Ablesungen-Seite (manuelle Eingabe) nicht angeboten.
+const LIVE_INTEGRATION_SOURCES = new Set(['shelly', 'modbus', 'knx', 'home_assistant']);
+
 // ── Komponente ──
 
 export default function ReadingsPage() {
@@ -113,7 +117,9 @@ export default function ReadingsPage() {
     (async () => {
       const metersPromise = apiClient
         .get<PaginatedResponse<Meter>>('/api/v1/meters?page_size=500')
-        .then((res) => setMeters(res.data.items.filter((m) => m.is_active)))
+        .then((res) => setMeters(res.data.items.filter(
+          (m) => m.is_active && !LIVE_INTEGRATION_SOURCES.has(m.data_source),
+        )))
         .catch(() => { /* Interceptor handled */ });
 
       if (highlightReadingId) {
