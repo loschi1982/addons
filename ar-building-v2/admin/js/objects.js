@@ -364,8 +364,10 @@ export async function openObjectModal(objectId = null) {
 
   quillObj = new Quill('#o-quill-wrap', {
     theme: 'snow', placeholder: 'Ausführliche Beschreibung des Objekts…',
-    modules: { toolbar: [['bold','italic','underline'],[{list:'ordered'},{list:'bullet'}],['link'],['clean']] }
+    modules: { toolbar: [['bold','italic','underline'],[{list:'ordered'},{list:'bullet'}],['link','image'],['clean']] }
   });
+  // Bild-Werkzeuge (Größe/Ausrichtung/Reihenfolge) für diesen Editor aktivieren.
+  if (window.ARQuillImageTools) window.ARQuillImageTools.attach(quillObj);
 
   document.getElementById('o-insert-sensor').addEventListener('click', () => insertSensorPlaceholder(quillObj));
   document.getElementById('o-sensor-add').addEventListener('click', (e) => {

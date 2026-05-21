@@ -381,7 +381,7 @@ html, body {
 }
 
 .detail-panel__inner {
-  max-width: 560px;
+  max-width: 760px;
   margin: 0 auto;
   width: 100%;
   /* Scrollbarer Bereich liegt hier – nicht am Panel selbst.
@@ -389,6 +389,10 @@ html, body {
      keinen Stacking-Context der den Drawer blockiert. */
   height: 100%;
   overflow-y: auto;
+  /* Horizontaler Überlauf (z.B. zu breite Bilder) wird abgeschnitten statt
+     einen Scrollbalken zu erzeugen – Bilder werden zusätzlich per
+     max-width:100% begrenzt (siehe .detail-panel__text img). */
+  overflow-x: hidden;
   padding: 3.5rem 1.2rem 3rem;
   display: flex;
   flex-direction: column;
@@ -412,6 +416,43 @@ html, body {
 .detail-panel__text p   { margin-bottom: 0.5rem; }
 .detail-panel__text ul,
 .detail-panel__text ol  { padding-left: 1.2rem; }
+
+/* Eingebettete Medien nie breiter als die Spalte – verhindert den
+   horizontalen Überlauf/Scrollbalken bei großen Bildern. */
+.detail-panel__text img,
+.detail-panel__text video,
+.detail-panel__text iframe {
+  max-width: 100%;
+  /* überschreibt eine evtl. inline gesetzte Höhe → Seitenverhältnis bleibt
+     erhalten, wenn die Breite per max-width geklammert wird. */
+  height: auto !important;
+  border-radius: 8px;
+}
+
+/* Lange Wörter/URLs umbrechen statt die Spalte zu sprengen. */
+.detail-panel__text { overflow-wrap: anywhere; }
+
+/* Gefloatete (ausgerichtete) Bilder clearen, damit der Container nicht
+   kollabiert. */
+.detail-panel__text::after { content: ""; display: block; clear: both; }
+
+/* Gemeinsamer Ausrichtungs-Vertrag mit dem Editor (Klassen werden vom
+   quill-image-tools-Modul am <img> gesetzt). */
+.detail-panel__text img.img-left   { float: left;  margin: 0.25rem 1rem 0.5rem 0; }
+.detail-panel__text img.img-right  { float: right; margin: 0.25rem 0 0.5rem 1rem; }
+.detail-panel__text img.img-center { display: block; float: none; margin: 0.5rem auto; }
+
+/* Auf schmalen Displays gefloatete Bilder voll-breit stapeln statt den
+   Text daneben zu quetschen. */
+@media (max-width: 520px) {
+  .detail-panel__text img.img-left,
+  .detail-panel__text img.img-right {
+    float: none;
+    display: block;
+    margin: 0.5rem auto;
+    width: 100% !important;
+  }
+}
 
 .detail-panel__sensors {
   display: flex;

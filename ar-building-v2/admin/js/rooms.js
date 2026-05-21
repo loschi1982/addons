@@ -408,8 +408,10 @@ export async function openRoomModal(roomId = null) {
   quillRoom = new Quill('#r-quill-wrap', {
     theme: 'snow',
     placeholder: 'Ausführliche Beschreibung des Raums…',
-    modules: { toolbar: [['bold','italic','underline'],[{list:'ordered'},{list:'bullet'}],['link'],['clean']] }
+    modules: { toolbar: [['bold','italic','underline'],[{list:'ordered'},{list:'bullet'}],['link','image'],['clean']] }
   });
+  // Bild-Werkzeuge (Größe/Ausrichtung/Reihenfolge) für diesen Editor aktivieren.
+  if (window.ARQuillImageTools) window.ARQuillImageTools.attach(quillRoom);
 
   if (roomId) {
     try {
