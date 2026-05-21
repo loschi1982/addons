@@ -31,6 +31,24 @@ async def lifespan(app: FastAPI):
     """Wird beim Start und Stop der Anwendung ausgeführt.
     Beim Start: Tabellen anlegen + Standard-Admin erstellen falls noch nicht vorhanden."""
 
+    # Race-Schutz: Ingress- (Port 8099) und HTTPS-Server (Port 8444) laufen als
+    # zwei getrennte Prozesse auf derselben SQLite-Datei. Ohne Serialisierung
+    # führen beide gleichzeitig create_all + Migrationen aus → Crash
+    # "table ... already exists". Ein exklusiver Datei-Lock stellt sicher, dass
+    # nur ein Prozess initialisiert; der zweite wartet und findet danach alles
+    # bereits vorhanden (create_all/Migrationen/Seeds werden zu No-ops).
+    # Best-effort: scheitert das Lock-Setup (z. B. Dev ohne /data), läuft die
+    # Initialisierung wie bisher unsynchronisiert weiter (Single-Prozess = ok).
+    _init_lock = None
+    try:
+        import fcntl
+        os.makedirs("/data/db", exist_ok=True)
+        _init_lock = open("/data/db/.init.lock", "w")
+        fcntl.flock(_init_lock, fcntl.LOCK_EX)
+    except Exception as _lock_err:
+        print(f"WARNUNG:  Init-Lock nicht verfügbar ({_lock_err}) – fahre ohne Serialisierung fort.")
+        _init_lock = None
+
     # Alle Tabellen in der SQLite-DB anlegen (falls sie noch nicht existieren).
     async with engine.begin() as conn:
         import sqlalchemy as _sa
@@ -146,6 +164,14 @@ async def lifespan(app: FastAPI):
             print("INFO:     ObjectType 'Technische Anlagen' angelegt.")
         else:
             print("INFO:     ObjectType 'Technische Anlagen' vorhanden.")
+
+    # Init abgeschlossen – Lock freigeben, damit der zweite Server-Prozess seine
+    # (jetzt No-op-)Initialisierung durchläuft. Bei einem Startup-Crash gibt das
+    # OS den Lock ohnehin automatisch mit dem Prozess frei.
+    if _init_lock is not None:
+        import fcntl
+        fcntl.flock(_init_lock, fcntl.LOCK_UN)
+        _init_lock.close()
 
     yield  # Hier läuft die Anwendung.
     # Beim Stopp: Datenbankverbindung sauber schließen.
