@@ -60,9 +60,10 @@ const SOURCE_LABELS: Record<string, string> = {
   homeassistant: 'Home Assistant',
 };
 
-// Zähler dieser Quellen liefern ihre Werte über Live-Integrationen automatisch
-// und werden auf der Ablesungen-Seite (manuelle Eingabe) nicht angeboten.
-const LIVE_INTEGRATION_SOURCES = new Set(['shelly', 'modbus', 'knx', 'home_assistant']);
+// Nur Zähler dieser Quellen werden auf der Ablesungen-Seite (manuelle Eingabe)
+// angeboten. Whitelist statt Sperrliste: automatische Quellen (Shelly, Modbus,
+// KNX, Home Assistant, SPIE, API …) fallen automatisch raus.
+const MANUAL_ENTRY_SOURCES = new Set(['manual', 'csv_import']);
 
 // ── Komponente ──
 
@@ -118,7 +119,7 @@ export default function ReadingsPage() {
       const metersPromise = apiClient
         .get<PaginatedResponse<Meter>>('/api/v1/meters?page_size=500')
         .then((res) => setMeters(res.data.items.filter(
-          (m) => m.is_active && !LIVE_INTEGRATION_SOURCES.has(m.data_source),
+          (m) => m.is_active && MANUAL_ENTRY_SOURCES.has(m.data_source),
         )))
         .catch(() => { /* Interceptor handled */ });
 
