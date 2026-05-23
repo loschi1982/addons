@@ -318,6 +318,23 @@ async def fetch_list_field_key(
     return None
 
 
+def _typed_values_reference(ticket: dict, entry_uuid: str) -> bool:
+    """True, wenn irgendein typed-values-Feld des Tickets den Listeneintrag
+    (entry_uuid) referenziert. PlanRadar legt Listenwerte als UUID-String oder
+    – bei Mehrfachauswahl – als Liste bzw. kommaseparierten String ab.
+    Unabhängig vom (oft nicht ermittelbaren) field_key, da entry_uuids eindeutig
+    sind und daher keine Fehltreffer in anderen Feldern verursachen."""
+    typed = ticket.get("attributes", {}).get("typed-values", {}) or {}
+    for val in typed.values():
+        if val == entry_uuid:
+            return True
+        if isinstance(val, list) and entry_uuid in val:
+            return True
+        if isinstance(val, str) and entry_uuid in [p.strip() for p in val.split(",")]:
+            return True
+    return False
+
+
 # ─── 1. Projekte abrufen ──────────────────────────────────────────────────────
 
 @router.get("/projects", response_model=list[PlanRadarProject])
@@ -856,16 +873,27 @@ async def get_tickets(
         items = data.get("data", data) if isinstance(data, dict) else data
 
         # Schritt 5: Clientseitig nach Listeneintrag filtern.
-        if field_key and mapping.planradar_entry_uuid:
-            # Nur Tickets zurückgeben, bei denen typed-values[field_key] == planradar_entry_uuid.
-            # PlanRadar speichert den Listeneintrag als UUID-String im typed-values-Objekt.
-            filtered = []
-            for t in items:
-                typed = t.get("attributes", {}).get("typed-values", {})
-                if typed.get(field_key) == mapping.planradar_entry_uuid:
-                    filtered.append(t)
-            items = filtered
-        # Kein field_key gefunden → Fallback: alle Tickets des Projekts zurückgeben (kein Filter)
+        # Robust: NICHT auf den field_key aus ticket_types/lists verlassen – der
+        # ließ sich in der Praxis oft nicht ermitteln (None), wodurch der Filter
+        # übersprungen wurde und ALLE Projekt-Tickets erschienen. Stattdessen in
+        # allen typed-values prüfen, ob das Ticket den gemappten Eintrag
+        # referenziert (entry_uuids sind eindeutig → keine Fehltreffer).
+        all_items = items
+        eid = mapping.planradar_entry_uuid
+        if eid:
+            items = [t for t in all_items if _typed_values_reference(t, eid)]
+
+        print(
+            f"INFO:     PlanRadar-Filter marker={marker_id!r} "
+            f"list_id={mapping.planradar_list_id!r} entry_uuid={eid!r} "
+            f"field_key={field_key!r} → {len(items)}/{len(all_items)} Tickets"
+        )
+        if eid and not items and all_items:
+            # Diagnose: typed-values des ersten Tickets zeigen, falls nichts passte
+            # (z.B. wenn PlanRadar den Eintrag unter einem anderen Identifier ablegt).
+            first_typed = all_items[0].get("attributes", {}).get("typed-values", {})
+            print(f"WARNUNG:  Kein Ticket referenziert entry_uuid {eid!r}; "
+                  f"typed-values[0]={first_typed}")
 
         pid = mapping.planradar_project_id
         result = [normalize_ticket(t, project_id=pid, field_config=active_fields) for t in items]
