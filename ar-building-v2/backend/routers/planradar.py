@@ -19,7 +19,6 @@ import json
 import pathlib
 
 import aiohttp
-import aiohttp.resolver
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -51,9 +50,12 @@ _ticket_project_cache: dict[str, str] = {}
 PLANRADAR_API_V1 = "https://planradar.com/api/v1"
 PLANRADAR_API_V2 = "https://planradar.com/api/v2"
 
-# Eigener DNS-Resolver mit externem DNS (Google + Cloudflare).
-_resolver = aiohttp.resolver.AsyncResolver(nameservers=["8.8.8.8", "1.1.1.1"])
-_connector = aiohttp.TCPConnector(resolver=_resolver, force_close=False)
+# DNS-Auflösung über den System-Resolver (/etc/resolv.conf des HA-Hosts).
+# Früher war hier fest externes DNS (8.8.8.8/1.1.1.1) verdrahtet – das läuft in
+# Netzen, die ausgehendes DNS zu externen Servern blockieren (z. B. gemanagte
+# Firmennetze), in einen Connection-Timeout zu planradar.com. Der System-Resolver
+# nutzt die DNS-Wege, die auch der HA-Host selbst verwendet.
+_connector = aiohttp.TCPConnector(force_close=False)
 _TIMEOUT = aiohttp.ClientTimeout(connect=10, total=30)
 
 
