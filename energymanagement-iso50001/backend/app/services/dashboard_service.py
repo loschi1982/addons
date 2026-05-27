@@ -282,13 +282,25 @@ class DashboardService:
         if period_key:
             snap = await self._load_dashboard_snapshot(site_id, period_key, granularity)
             if snap is not None:
+                # Dynamische Perioden (current_ytd, current_month) verschieben ihren
+                # period_end täglich. Ein gestriger Snapshot hätte period_end="gestern"
+                # und würde heutige Daten verschweigen → nur nutzen wenn period_end passt.
+                snap_end = snap.get("period_end")
+                if snap_end == period_end.isoformat():
+                    logger.info(
+                        "dashboard_snapshot_hit",
+                        site=str(site_id) if site_id else None,
+                        period_key=period_key,
+                        granularity=granularity,
+                    )
+                    return snap
                 logger.info(
-                    "dashboard_snapshot_hit",
+                    "dashboard_snapshot_stale",
                     site=str(site_id) if site_id else None,
                     period_key=period_key,
-                    granularity=granularity,
+                    snap_end=snap_end,
+                    requested_end=period_end.isoformat(),
                 )
-                return snap
 
         # 2. Live-Berechnung (mit 60 s Memory-Cache als zweite Stufe)
         return await self._compute_dashboard_live(
@@ -1302,6 +1314,7 @@ class DashboardService:
             .where(
                 Meter.is_active == True,  # noqa: E712
                 Meter.is_feed_in != True,
+                MeterReading.consumption.isnot(None),
                 MeterReading.timestamp >= ts_start,
                 MeterReading.timestamp < ts_end,
             )
