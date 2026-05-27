@@ -31,8 +31,6 @@ import {
 import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
 import { toggleSidebar } from '@/store/slices/uiSlice';
 
-/* ── Navigationsstruktur mit Gruppen ── */
-
 interface NavItem {
   path: string;
   labelKey: string;
@@ -102,12 +100,17 @@ const navGroups: NavGroup[] = [
   },
 ];
 
+const SIDEBAR_BG     = '#0E1419';
+const SIDEBAR_LINE   = '#1E252D';
+const SIDEBAR_DIM    = '#8C9097';
+const SIDEBAR_INK    = '#FAFAF7';
+const ACCENT_COLOR   = '#E89A3C';
+
 export default function Sidebar() {
   const dispatch = useAppDispatch();
   const { sidebarOpen, backupLocked } = useAppSelector((state) => state.ui);
   const { t, i18n } = useTranslation();
 
-  // Gruppen auf-/zuklappen – standardmäßig alle offen
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const toggleGroup = (key: string) => {
@@ -128,29 +131,52 @@ export default function Sidebar() {
     <aside
       role="navigation"
       aria-label={t('nav.dashboard')}
-      className={`fixed inset-y-0 left-0 z-30 flex flex-col bg-primary-800 text-white transition-all duration-300 ${
+      style={{ background: SIDEBAR_BG, borderRight: `1px solid #060A0E` }}
+      className={`fixed inset-y-0 left-0 z-30 flex flex-col text-white transition-all duration-300 ${
         sidebarOpen ? 'w-64' : 'w-16'
       }`}
     >
-      {/* Logo */}
-      <div className="flex h-16 items-center justify-between px-4">
+      {/* Brand */}
+      <div
+        style={{ borderBottom: `1px solid ${SIDEBAR_LINE}` }}
+        className="flex h-16 items-center justify-between px-4"
+      >
         {sidebarOpen && (
-          <span className="text-lg font-semibold tracking-tight">EnergieManager</span>
+          <div className="flex items-center gap-2.5">
+            <div
+              style={{
+                width: 22, height: 22,
+                background: 'linear-gradient(135deg, #E89A3C, #F2C94C)',
+                borderRadius: 5,
+                display: 'grid', placeItems: 'center',
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M6 1L10.33 9H1.67L6 1Z" fill="white" fillOpacity="0.9"/>
+              </svg>
+            </div>
+            <span style={{ color: SIDEBAR_INK, fontWeight: 600, fontSize: 14, letterSpacing: '-0.01em' }}>
+              EnergieManager
+            </span>
+          </div>
         )}
         <button
           onClick={() => dispatch(toggleSidebar())}
-          className="rounded p-1 hover:bg-primary-700"
+          style={{ color: SIDEBAR_DIM }}
+          className="rounded p-1 hover:opacity-100 transition-opacity"
           aria-label={sidebarOpen ? 'Sidebar einklappen' : 'Sidebar ausklappen'}
         >
-          {sidebarOpen ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
+          {sidebarOpen ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
         </button>
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-2 relative" aria-label="Hauptnavigation">
-        {/* Backup-Sperre: halbtransparente Überlagerung + Hinweis */}
         {backupLocked && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-primary-900/80 cursor-not-allowed select-none">
+          <div
+            style={{ background: 'rgba(14,20,25,0.85)' }}
+            className="absolute inset-0 z-10 flex flex-col items-center justify-center cursor-not-allowed select-none"
+          >
             <AlertTriangle size={20} className="text-amber-400 mb-2" />
             {sidebarOpen && (
               <p className="text-xs text-amber-300 text-center px-4 leading-snug">
@@ -164,11 +190,11 @@ export default function Sidebar() {
           const isCollapsed = collapsed.has(group.labelKey);
           return (
             <div key={group.labelKey} className="mb-1">
-              {/* Gruppenüberschrift – nur bei offener Sidebar */}
               {sidebarOpen ? (
                 <button
                   onClick={() => !backupLocked && toggleGroup(group.labelKey)}
-                  className="flex w-full items-center justify-between px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-primary-400 hover:text-primary-200 transition-colors"
+                  style={{ color: SIDEBAR_DIM, fontSize: 10, letterSpacing: '0.08em' }}
+                  className="flex w-full items-center justify-between px-4 py-1.5 font-semibold uppercase hover:opacity-100 transition-opacity"
                 >
                   <span>{t(group.labelKey)}</span>
                   <ChevronDown
@@ -177,39 +203,51 @@ export default function Sidebar() {
                   />
                 </button>
               ) : (
-                <div className="mx-3 my-2 border-t border-primary-700" />
+                <div style={{ borderTop: `1px solid ${SIDEBAR_LINE}` }} className="mx-3 my-2" />
               )}
 
-              {/* Einträge */}
-              {(!isCollapsed || !sidebarOpen) && group.items.map(({ path, labelKey, icon: Icon }) => (
-                <NavLink
-                  key={path}
-                  to={path}
-                  aria-label={t(labelKey)}
-                  aria-disabled={backupLocked}
-                  onClick={(e) => { if (backupLocked) e.preventDefault(); }}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-4 py-2 text-sm transition-colors ${
-                      isActive
-                        ? 'bg-primary-700 text-white font-medium'
-                        : 'text-primary-200 hover:bg-primary-700 hover:text-white'
-                    }`
-                  }
-                >
-                  <Icon size={18} aria-hidden="true" />
-                  {sidebarOpen && <span>{t(labelKey)}</span>}
-                </NavLink>
-              ))}
+              {(!isCollapsed || !sidebarOpen) &&
+                group.items.map(({ path, labelKey, icon: Icon }) => (
+                  <NavLink
+                    key={path}
+                    to={path}
+                    aria-label={t(labelKey)}
+                    aria-disabled={backupLocked}
+                    onClick={(e) => { if (backupLocked) e.preventDefault(); }}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-4 py-[7px] text-sm transition-all ${
+                        isActive ? 'font-medium' : ''
+                      }`
+                    }
+                    style={({ isActive }) => isActive
+                      ? {
+                          color: '#FFFFFF',
+                          background: `rgba(232, 154, 60, 0.08)`,
+                          borderLeft: `2px solid ${ACCENT_COLOR}`,
+                          paddingLeft: 14,
+                        }
+                      : {
+                          color: SIDEBAR_INK,
+                          opacity: 0.82,
+                          borderLeft: '2px solid transparent',
+                        }
+                    }
+                  >
+                    <Icon size={16} aria-hidden="true" />
+                    {sidebarOpen && <span style={{ fontSize: 13 }}>{t(labelKey)}</span>}
+                  </NavLink>
+                ))}
             </div>
           );
         })}
       </nav>
 
-      {/* Sprachumschalter + Version */}
-      <div className="border-t border-primary-700 px-4 py-3">
+      {/* Footer */}
+      <div style={{ borderTop: `1px solid ${SIDEBAR_LINE}` }} className="px-4 py-3">
         <button
           onClick={toggleLanguage}
-          className="flex items-center gap-2 text-xs text-primary-300 hover:text-white transition-colors w-full"
+          style={{ color: SIDEBAR_DIM, fontSize: 12 }}
+          className="flex items-center gap-2 hover:opacity-100 transition-opacity w-full"
           aria-label={`Sprache wechseln zu ${i18n.language === 'de' ? 'English' : 'Deutsch'}`}
         >
           <Globe size={14} aria-hidden="true" />
@@ -218,8 +256,8 @@ export default function Sidebar() {
           )}
         </button>
         {sidebarOpen && (
-          <div className="mt-2 text-xs text-primary-400">
-            v1.0.0 &middot; ISO 50001
+          <div style={{ color: SIDEBAR_DIM, fontSize: 11, marginTop: 8 }}>
+            v1.0.0 · ISO 50001
           </div>
         )}
       </div>

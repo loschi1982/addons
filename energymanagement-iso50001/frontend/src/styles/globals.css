@@ -2,6 +2,195 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Dashboard v2 Design-System ── */
+.dash-v2 {
+  --dv-bg:           #F6F4EF;
+  --dv-surface:      #FFFFFF;
+  --dv-surface-2:    #FAF8F2;
+  --dv-line:         #E8E3D8;
+  --dv-line-strong:  #D9D2C3;
+  --dv-ink:          #0F1115;
+  --dv-ink-2:        #3D3D3D;
+  --dv-ink-3:        #6B6B6B;
+  --dv-ink-4:        #9A968B;
+  --dv-good:         #10B981;
+  --dv-warn:         #B45309;
+  --dv-alert:        #B91C1C;
+  --dv-fw-fernwaerme: #E89A3C;
+  --dv-fw-strom:      #F2C94C;
+  --dv-fw-kaelte:     #4FC3F7;
+  --dv-fw-wasser:     #2A6FDB;
+  --dv-font-sans: "Geist", "Inter", -apple-system, sans-serif;
+  --dv-font-mono: "Geist Mono", ui-monospace, monospace;
+  --dv-r-sm: 6px;
+  --dv-r-md: 8px;
+  --dv-r-lg: 12px;
+
+  background: var(--dv-bg);
+  font-family: var(--dv-font-sans);
+  color: var(--dv-ink);
+  font-size: 14px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100%;
+}
+
+/* ── Status Band ── */
+.dv-status-band {
+  background: linear-gradient(180deg, #FFFFFF 0%, #FBF9F3 100%);
+  border: 1px solid var(--dv-line);
+  border-radius: var(--dv-r-lg);
+  padding: 16px 20px;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 2fr auto;
+  align-items: center;
+  gap: 24px;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.02);
+}
+
+.dv-progress-track {
+  position: relative;
+  height: 8px;
+  background: var(--dv-line);
+  border-radius: 99px;
+  overflow: visible;
+  margin-top: 18px;
+}
+.dv-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #10B981, #34D399);
+  border-radius: 99px;
+}
+.dv-progress-marker {
+  position: absolute;
+  top: -2px;
+  transform: translateX(-50%);
+}
+.dv-marker-dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--dv-surface);
+  border: 2px solid var(--dv-ink);
+}
+.dv-marker-label {
+  position: absolute;
+  top: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--dv-ink);
+  white-space: nowrap;
+  background: var(--dv-surface);
+  padding: 1px 5px;
+  border: 1px solid var(--dv-line);
+  border-radius: 3px;
+}
+
+/* ── Hero KPI Grid ── */
+.dv-hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 16px;
+}
+.dv-hero-trio {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  background: var(--dv-surface);
+  border: 1px solid var(--dv-line);
+  border-radius: var(--dv-r-lg);
+  overflow: hidden;
+}
+.dv-hero-card {
+  padding: 18px 20px;
+  border-right: 1px solid var(--dv-line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dv-hero-card:last-child { border-right: none; }
+
+/* ── Energy Type Cards ── */
+.dv-type-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+.dv-type-card {
+  background: var(--dv-surface);
+  border: 1px solid var(--dv-line);
+  border-radius: var(--dv-r-lg);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+  overflow: hidden;
+}
+.dv-type-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+}
+.dv-type-fernwaerme::before { background: var(--dv-fw-fernwaerme); }
+.dv-type-strom::before      { background: var(--dv-fw-strom); }
+.dv-type-kaelte::before     { background: var(--dv-fw-kaelte); }
+.dv-type-wasser::before     { background: var(--dv-fw-wasser); }
+
+/* ── Row 2-col layout ── */
+.dv-row-2col {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+/* ── Card baseline ── */
+.dv-card {
+  background: var(--dv-surface);
+  border: 1px solid var(--dv-line);
+  border-radius: var(--dv-r-lg);
+  padding: 18px;
+}
+
+/* ── Top Consumers table row ── */
+.dv-tc-row {
+  display: grid;
+  grid-template-columns: 2.2fr 1.4fr 70px 1fr 50px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  transition: background 120ms;
+}
+.dv-tc-row:hover {
+  background: var(--dv-surface-2);
+  margin: 0 -8px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 4px;
+}
+
+/* ── Insight item ── */
+.dv-insight-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--dv-line);
+}
+.dv-insight-item:first-child { border-top: none; padding-top: 4px; }
+
+/* ── Responsive ── */
+@media (max-width: 1280px) {
+  .dv-hero-grid { grid-template-columns: 1fr; }
+  .dv-row-2col  { grid-template-columns: 1fr; }
+  .dv-type-cards { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 720px) {
+  .dv-hero-trio { grid-template-columns: 1fr; }
+  .dv-hero-card { border-right: none; border-bottom: 1px solid var(--dv-line); }
+  .dv-type-cards { grid-template-columns: 1fr; }
+}
+
 @layer base {
   body {
     @apply text-gray-900;
