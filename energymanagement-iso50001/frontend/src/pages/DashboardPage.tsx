@@ -242,7 +242,14 @@ function YearComparisonCard({ energyType, siteId }: { energyType: string; siteId
         const agg = new Array(12).fill(0);
         if (p1) {
           for (const series of Object.values(p1)) {
-            series.forEach((pt, i) => { if (i < 12) agg[i] += pt.value || 0; });
+            series.forEach((pt) => {
+              // Monat aus period-String lesen (YYYY-MM-...), nicht Array-Index verwenden,
+              // da das Backend nur Monate mit Daten liefert (Lücken fehlen im Array).
+              if (pt.period) {
+                const month = parseInt(pt.period.slice(5, 7), 10) - 1; // 0-basiert
+                if (month >= 0 && month < 12) agg[month] += pt.value || 0;
+              }
+            });
           }
         }
         return { year: y, agg };
