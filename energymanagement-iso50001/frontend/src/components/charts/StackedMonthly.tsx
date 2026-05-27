@@ -8,26 +8,24 @@ function fmtNum(n: number): string {
 
 interface HoverTooltipProps {
   hover: number;
-  total: number;
   colW: number;
   padL: number;
   data: Record<string, number[]>;
   keys: string[];
   colors: Record<string, string>;
   names: Record<string, string>;
+  units: Record<string, string>;
   chartWidth: number;
 }
 
-function HoverTooltip({ hover, total, colW, padL, data, keys, colors, names, chartWidth }: HoverTooltipProps) {
+function HoverTooltip({ hover, colW, padL, data, keys, colors, names, units, chartWidth }: HoverTooltipProps) {
   const activeKeys = keys.filter((k) => (data[k]?.[hover] ?? 0) > 0);
-  const tooltipW = 160;
-  const lineH = 14;
-  const headerH = 18;
+  const tooltipW = 180;
+  const lineH = 16;
   const paddingV = 8;
-  const tooltipH = headerH + activeKeys.length * lineH + paddingV;
+  const tooltipH = activeKeys.length * lineH + paddingV * 2;
 
   const rawCx = padL + hover * colW + colW / 2;
-  // Tooltip links/rechts begrenzen damit er nicht aus dem SVG rausläuft
   const cx = Math.min(Math.max(rawCx, tooltipW / 2 + 4), chartWidth - tooltipW / 2 - 4);
   const ty = 4;
 
@@ -38,25 +36,10 @@ function HoverTooltip({ hover, total, colW, padL, data, keys, colors, names, cha
         width={tooltipW} height={tooltipH}
         rx={4} fill="#0A0A0B"
       />
-      {/* Gesamt-Zeile */}
-      <text
-        x={cx - tooltipW / 2 + 8} y={ty + 12}
-        fontSize="10" fill="#9A968B"
-        fontFamily="ui-monospace, 'Geist Mono', monospace"
-      >
-        Gesamt
-      </text>
-      <text
-        x={cx + tooltipW / 2 - 8} y={ty + 12}
-        textAnchor="end" fontSize="11" fill="#FFF" fontWeight={600}
-        fontFamily="ui-monospace, 'Geist Mono', monospace"
-      >
-        {fmtNum(total)} kWh
-      </text>
-      {/* Pro-Medium-Zeilen */}
       {activeKeys.map((k, i) => {
         const val = data[k]?.[hover] ?? 0;
-        const ly = ty + headerH + i * lineH + 11;
+        const unit = units[k] ?? 'kWh';
+        const ly = ty + paddingV + i * lineH + lineH / 2 + 2;
         return (
           <g key={k}>
             <rect
@@ -76,7 +59,7 @@ function HoverTooltip({ hover, total, colW, padL, data, keys, colors, names, cha
               textAnchor="end" fontSize="10" fill="#FFF"
               fontFamily="ui-monospace, 'Geist Mono', monospace"
             >
-              {fmtNum(val)}
+              {fmtNum(val)} {unit}
             </text>
           </g>
         );
@@ -90,6 +73,7 @@ interface StackedMonthlyProps {
   months: string[];
   colors: Record<string, string>;
   names?: Record<string, string>;
+  units?: Record<string, string>;
   height?: number;
   currentMonthIdx?: number;
 }
@@ -99,6 +83,7 @@ export default function StackedMonthly({
   months,
   colors,
   names = {},
+  units = {},
   height = 260,
   currentMonthIdx = 4,
 }: StackedMonthlyProps) {
@@ -179,13 +164,13 @@ export default function StackedMonthly({
       {hover != null && totals[hover] > 0 && (
         <HoverTooltip
           hover={hover}
-          total={totals[hover]}
           colW={(svgW - padL - padR) / months.length}
           padL={padL}
           data={data}
           keys={keys}
           colors={colors}
           names={names}
+          units={units}
           chartWidth={svgW}
         />
       )}

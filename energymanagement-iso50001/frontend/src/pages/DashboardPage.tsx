@@ -622,6 +622,7 @@ function MonthlyTrend({
   const activeKeys = ENERGY_DEFS.filter((d) => data[d.key]?.some((v) => v > 0)).map((d) => d.key);
   const title = VIEW_MODES.find((m) => m.apiGranularity === granularity)?.chartTitle ?? 'Verbrauch';
   const names = Object.fromEntries(ENERGY_DEFS.map((d) => [d.key, d.displayName]));
+  const units = Object.fromEntries(ENERGY_DEFS.map((d) => [d.key, d.unit]));
 
   return (
     <div className="dv-card">
@@ -655,6 +656,7 @@ function MonthlyTrend({
           months={displayLabels}
           colors={ENERGY_COLORS}
           names={names}
+          units={units}
           height={240}
           currentMonthIdx={currentSlotIdx}
         />
