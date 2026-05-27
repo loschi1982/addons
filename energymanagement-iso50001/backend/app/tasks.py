@@ -69,9 +69,9 @@ celery_app.conf.update(
             "task": "app.tasks.recalculate_objectives",
             "schedule": 86400.0,  # einmal täglich
         },
-        "spie-auto-import-every-3-days": {
+        "spie-auto-import-daily-check": {
             "task": "app.tasks.spie_auto_import",
-            "schedule": 259200.0,  # alle 3 Tage
+            "schedule": 86400.0,  # täglich prüfen – Import läuft alle 3 Tage
         },
         "precompute-dashboard-snapshots": {
             "task": "app.tasks.precompute_dashboard_snapshots",
@@ -448,8 +448,16 @@ def calculate_weather_correction(meter_id: str, start_date: str, end_date: str):
 
 @celery_app.task(name="app.tasks.spie_auto_import")
 def spie_auto_import():
-    """Automatischer SPIE-Import alle 3 Tage (wenn aktiviert)."""
+    """Automatischer SPIE-Import: täglich geprüft, tatsächlich alle 3 Tage ausgeführt.
+
+    Beat feuert diesen Task täglich. Der Task selbst prüft, ob seit dem letzten
+    erfolgreichen Import mindestens 3 Tage vergangen sind – unabhängig davon, wann
+    Beat den Task zuletzt in die Queue gestellt hat.
+    """
     import uuid as _uuid
+    from datetime import datetime, timezone, timedelta
+
+    IMPORT_INTERVAL = timedelta(days=3)
 
     async def _run():
         from app.services.spie_service import SpieService
@@ -459,6 +467,26 @@ def spie_auto_import():
             cfg = await svc.get_config_raw()
             if not cfg or not cfg.get("enabled"):
                 return {"skipped": True, "reason": "nicht aktiviert"}
+
+            # Prüfen ob 3 Tage seit dem letzten erfolgreichen Import vergangen sind
+            last_sync = await svc.get_last_sync()
+            if last_sync and last_sync.get("synced_at"):
+                last_synced_at = last_sync["synced_at"]
+                last_synced = datetime.fromisoformat(last_synced_at)
+                if last_synced.tzinfo is None:
+                    last_synced = last_synced.replace(tzinfo=timezone.utc)
+                since_last = datetime.now(timezone.utc) - last_synced
+                if since_last < IMPORT_INTERVAL:
+                    remaining = IMPORT_INTERVAL - since_last
+                    remaining_h = int(remaining.total_seconds() // 3600)
+                    return {
+                        "skipped": True,
+                        "reason": (
+                            f"Letzter Import vor {since_last.days} Tag(en) – "
+                            f"nächster frühestens in {remaining_h} Stunden"
+                        ),
+                    }
+
             job_id = str(_uuid.uuid4())
             return await svc.run_import(job_id=job_id)
 
