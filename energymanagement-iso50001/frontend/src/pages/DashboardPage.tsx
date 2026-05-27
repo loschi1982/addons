@@ -119,6 +119,7 @@ const ENERGY_COLORS: Record<string, string> = Object.fromEntries(
 );
 
 const MONTHS_DE = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+const MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /* ── Hilfsfunktionen ── */
 
@@ -154,12 +155,14 @@ function findKPI(cards: KPICard[], label: string): KPICard | undefined {
 }
 
 function parseMonthIndex(label: string): number {
-  // "2026-05" oder "2026-05-01"
+  // ISO: "2026-05" oder "2026-05-01"
   const isoMatch = label.match(/^\d{4}-(\d{2})/);
   if (isoMatch) return parseInt(isoMatch[1], 10) - 1;
-  // "Jan", "Feb" ...
-  const idx = MONTHS_DE.findIndex((m) => label.startsWith(m));
-  return idx;
+  // Englische Abkürzungen (API liefert "Jan 2026", "Mar 2026" etc.)
+  const enIdx = MONTHS_EN.findIndex((m) => label.startsWith(m));
+  if (enIdx >= 0) return enIdx;
+  // Deutsche Abkürzungen als Fallback
+  return MONTHS_DE.findIndex((m) => label.startsWith(m));
 }
 
 function buildMonthlyData(
