@@ -35,7 +35,7 @@ router = APIRouter()
 async def get_dashboard(
     period_start: date | None = None,
     period_end: date | None = None,
-    granularity: str = Query("monthly", pattern="^(daily|weekly|monthly|yearly)$"),
+    granularity: str = Query("monthly", pattern="^(hourly|daily|weekly|monthly|yearly)$"),
     site_id: uuid.UUID | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

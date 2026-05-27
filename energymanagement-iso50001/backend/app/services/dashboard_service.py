@@ -1296,7 +1296,7 @@ class DashboardService:
         self, start: date, end: date, granularity: str, meter_ids: list | None = None
     ) -> list[dict]:
         """Verbrauchszeitreihe nach Energieträger aggregiert (nicht je Zähler)."""
-        trunc_map = {"daily": "day", "weekly": "week", "monthly": "month", "yearly": "year"}
+        trunc_map = {"hourly": "hour", "daily": "day", "weekly": "week", "monthly": "month", "yearly": "year"}
         trunc = trunc_map.get(granularity, "month")
 
         ts_start = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
@@ -1348,8 +1348,19 @@ class DashboardService:
                     "data": [],
                 }
             conv = CONVERSION_FACTORS.get(row.unit, Decimal("1"))
+            if row.period:
+                if granularity == "hourly":
+                    lbl = row.period.strftime("%Y-%m-%d %H:%M:%S")
+                elif granularity == "daily":
+                    lbl = row.period.strftime("%Y-%m-%d")
+                elif granularity == "weekly":
+                    lbl = f"KW{row.period.isocalendar()[1]:02d} {row.period.year}"
+                else:
+                    lbl = row.period.strftime("%b %Y")
+            else:
+                lbl = ""
             charts[et]["data"].append({
-                "label": row.period.strftime("%b %Y") if row.period else "",
+                "label": lbl,
                 "value": round(float((row.consumption or Decimal("0")) * conv), 1),
             })
 
