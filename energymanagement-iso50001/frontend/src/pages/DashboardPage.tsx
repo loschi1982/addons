@@ -121,6 +121,30 @@ const ENERGY_COLORS: Record<string, string> = Object.fromEntries(
 const MONTHS_DE = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
 const MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+/* ── Zeitfenster-Presets ── */
+
+const todayStr = () => new Date().toISOString().slice(0, 10);
+const yearStartStr = () => `${new Date().getFullYear()}-01-01`;
+const weekAgoStr = () => {
+  const d = new Date();
+  d.setDate(d.getDate() - 6);
+  return d.toISOString().slice(0, 10);
+};
+
+type ViewModeKey = 'year' | 'week' | 'day';
+
+const VIEW_MODES: Array<{
+  key: ViewModeKey;
+  label: string;
+  apiGranularity: string;
+  getRange: () => [string, string];
+  chartTitle: string;
+}> = [
+  { key: 'year',  label: 'Jahr',  apiGranularity: 'monthly', getRange: () => [yearStartStr(), todayStr()], chartTitle: 'Jahresverlauf' },
+  { key: 'week',  label: 'Woche', apiGranularity: 'daily',   getRange: () => [weekAgoStr(),  todayStr()], chartTitle: 'Wochenverbrauch' },
+  { key: 'day',   label: 'Tag',   apiGranularity: 'hourly',  getRange: () => [todayStr(),    todayStr()], chartTitle: 'Tagesverbrauch' },
+];
+
 /* ── Hilfsfunktionen ── */
 
 function fmtNum(n: number | null | undefined): string {
@@ -154,57 +178,102 @@ function findKPI(cards: KPICard[], label: string): KPICard | undefined {
   return cards.find((c) => c.label === label);
 }
 
-function parseMonthIndex(label: string): number {
-  // ISO: "2026-05" oder "2026-05-01"
-  const isoMatch = label.match(/^\d{4}-(\d{2})/);
-  if (isoMatch) return parseInt(isoMatch[1], 10) - 1;
-  // Englische Abkürzungen (API liefert "Jan 2026", "Mar 2026" etc.)
-  const enIdx = MONTHS_EN.findIndex((m) => label.startsWith(m));
-  if (enIdx >= 0) return enIdx;
-  // Deutsche Abkürzungen als Fallback
-  return MONTHS_DE.findIndex((m) => label.startsWith(m));
+function formatDisplayLabel(label: string, granularity: string): string {
+  // Monatlich: "Jan 2026" → "Jan"
+  if (granularity === 'monthly') {
+    const enIdx = MONTHS_EN.findIndex((m) => label.startsWith(m));
+    if (enIdx >= 0) return MONTHS_DE[enIdx];
+    const deIdx = MONTHS_DE.findIndex((m) => label.startsWith(m));
+    if (deIdx >= 0) return label.split(' ')[0];
+    const isoMatch = label.match(/^\d{4}-(\d{2})/);
+    if (isoMatch) return MONTHS_DE[parseInt(isoMatch[1], 10) - 1] ?? label;
+    return label;
+  }
+  // Stündlich: "2026-05-27 14:00:00" → "14:00"
+  if (granularity === 'hourly') {
+    const timeMatch = label.match(/(\d{2}:\d{2})/);
+    if (timeMatch) return timeMatch[1];
+    return label.slice(-5);
+  }
+  // Täglich: "2026-05-21" → "21.05." | "21 Jan 2026" → "21.01."
+  const isoDay = label.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoDay) return `${isoDay[3]}.${isoDay[2]}.`;
+  const dayMonthMatch = label.match(/^(\d{1,2})\s+(\w+)/);
+  if (dayMonthMatch) {
+    const day = dayMonthMatch[1].padStart(2, '0');
+    const enIdx = MONTHS_EN.findIndex((m) => dayMonthMatch[2].startsWith(m));
+    const mNum = enIdx >= 0 ? String(enIdx + 1).padStart(2, '0') : '??';
+    return `${day}.${mNum}.`;
+  }
+  return label.length > 6 ? label.slice(0, 6) : label;
 }
 
-function buildMonthlyData(
-  charts: ConsumptionChart[]
-): Record<string, number[]> {
-  const result: Record<string, number[]> = {};
-  for (const def of ENERGY_DEFS) {
-    result[def.key] = new Array(12).fill(0);
+function buildChartData(
+  charts: ConsumptionChart[],
+  granularity: string
+): { data: Record<string, number[]>; displayLabels: string[]; currentSlotIdx: number } {
+  // Alle Labels aus API-Daten sammeln (dedupliziert + sortiert)
+  const labelSet = new Set<string>();
+  for (const chart of charts) {
+    for (const pt of chart.data) labelSet.add(pt.label);
   }
+  const sortedLabels = Array.from(labelSet).sort();
+  const labelIndex = new Map(sortedLabels.map((l, i) => [l, i]));
+  const n = sortedLabels.length || 1;
+
+  const result: Record<string, number[]> = {};
+  for (const def of ENERGY_DEFS) result[def.key] = new Array(n).fill(0);
+
   for (const chart of charts) {
     const def = matchEnergyDef(chart.energy_type);
     if (!def) continue;
     for (const pt of chart.data) {
-      const mIdx = parseMonthIndex(pt.label);
-      if (mIdx >= 0 && mIdx < 12) {
-        result[def.key][mIdx] += pt.value || 0;
-      }
+      const idx = labelIndex.get(pt.label);
+      if (idx !== undefined) result[def.key][idx] += pt.value || 0;
     }
   }
-  return result;
+
+  const displayLabels = sortedLabels.map((l) => formatDisplayLabel(l, granularity));
+
+  // Aktuellen Slot bestimmen
+  const now = new Date();
+  let currentSlotIdx = 0;
+  if (granularity === 'monthly') {
+    const curMonth = now.getMonth(); // 0-based
+    currentSlotIdx = sortedLabels.findIndex((l) => {
+      const enIdx = MONTHS_EN.findIndex((m) => l.startsWith(m));
+      return enIdx === curMonth;
+    });
+  } else if (granularity === 'daily') {
+    const todayIso = now.toISOString().slice(0, 10);
+    currentSlotIdx = sortedLabels.findIndex((l) => l.startsWith(todayIso));
+  } else if (granularity === 'hourly') {
+    const curHour = now.getHours();
+    currentSlotIdx = sortedLabels.findIndex((l) => {
+      const m = l.match(/(\d{2}):\d{2}/);
+      return m ? parseInt(m[1], 10) === curHour : false;
+    });
+  }
+  if (currentSlotIdx < 0) currentSlotIdx = sortedLabels.length - 1;
+
+  return { data: result, displayLabels, currentSlotIdx };
 }
 
 function buildSparkline(charts: ConsumptionChart[], defKey: string): number[] {
   const monthly = new Array(12).fill(0);
-  const def = ENERGY_DEFS.find((d) => d.key === defKey);
-  if (!def) return monthly;
   for (const chart of charts) {
     const chartDef = matchEnergyDef(chart.energy_type);
     if (!chartDef || chartDef.key !== defKey) continue;
     for (const pt of chart.data) {
-      const mIdx = parseMonthIndex(pt.label);
-      if (mIdx >= 0 && mIdx < 12) {
-        monthly[mIdx] += pt.value || 0;
-      }
+      const enIdx = MONTHS_EN.findIndex((m) => pt.label.startsWith(m));
+      const mIdx = enIdx >= 0 ? enIdx : (() => {
+        const iso = pt.label.match(/^\d{4}-(\d{2})/);
+        return iso ? parseInt(iso[1], 10) - 1 : -1;
+      })();
+      if (mIdx >= 0 && mIdx < 12) monthly[mIdx] += pt.value || 0;
     }
   }
-  return monthly.filter((v) => v > 0).length > 0 ? monthly : [];
-}
-
-function currentMonthIndex(periodEnd: string): number {
-  const d = new Date(periodEnd);
-  return isNaN(d.getTime()) ? new Date().getMonth() : d.getMonth();
+  return monthly.some((v) => v > 0) ? monthly : [];
 }
 
 /* ── Sub-Komponenten ── */
@@ -543,23 +612,23 @@ function TypeCards({
 
 function MonthlyTrend({
   charts,
-  periodEnd,
+  granularity,
 }: {
   charts: ConsumptionChart[];
-  periodEnd: string;
+  granularity: string;
 }) {
-  const monthlyData = buildMonthlyData(charts);
-  const curMonth = currentMonthIndex(periodEnd);
-  const hasAnyData = Object.values(monthlyData).some((arr) => arr.some((v) => v > 0));
-
-  const activeKeys = ENERGY_DEFS.filter((d) => monthlyData[d.key]?.some((v) => v > 0)).map((d) => d.key);
+  const { data, displayLabels, currentSlotIdx } = buildChartData(charts, granularity);
+  const hasAnyData = Object.values(data).some((arr) => arr.some((v) => v > 0));
+  const activeKeys = ENERGY_DEFS.filter((d) => data[d.key]?.some((v) => v > 0)).map((d) => d.key);
+  const title = VIEW_MODES.find((m) => m.apiGranularity === granularity)?.chartTitle ?? 'Verbrauch';
+  const names = Object.fromEntries(ENERGY_DEFS.map((d) => [d.key, d.displayName]));
 
   return (
     <div className="dv-card">
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.005em', color: 'var(--dv-ink)' }}>
-            Monatlicher Verbrauch
+            {title}
           </div>
           <div style={{ fontSize: 12, color: 'var(--dv-ink-3)', marginTop: 2 }}>
             Alle Energieträger · kWh
@@ -582,15 +651,16 @@ function MonthlyTrend({
 
       {hasAnyData ? (
         <StackedMonthly
-          data={monthlyData}
-          months={MONTHS_DE}
+          data={data}
+          months={displayLabels}
           colors={ENERGY_COLORS}
+          names={names}
           height={240}
-          currentMonthIdx={curMonth}
+          currentMonthIdx={currentSlotIdx}
         />
       ) : (
         <div style={{ height: 240, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dv-ink-4)', fontSize: 13 }}>
-          Keine Monatsdaten im gewählten Zeitraum
+          Keine Daten im gewählten Zeitraum
         </div>
       )}
     </div>
@@ -891,22 +961,27 @@ function CO2Card({ cards }: { cards: KPICard[] }) {
   );
 }
 
-/* ── Datum-Hilfsfunktionen ── */
-
-const todayStr = () => new Date().toISOString().slice(0, 10);
-const yearStartStr = () => `${new Date().getFullYear()}-01-01`;
-
 /* ── Hauptseite ── */
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [viewMode, setViewMode] = useState<ViewModeKey | null>('year');
   const [granularity, setGranularity] = useState('monthly');
   const [periodStart, setPeriodStart] = useState(yearStartStr);
   const [periodEnd, setPeriodEnd] = useState(todayStr);
   const [selectedSite, setSelectedSite] = useState('');
   const [sites, setSites] = useState<Site[]>([]);
+
+  const applyViewMode = useCallback((key: ViewModeKey) => {
+    const mode = VIEW_MODES.find((m) => m.key === key)!;
+    const [start, end] = mode.getRange();
+    setViewMode(key);
+    setGranularity(mode.apiGranularity);
+    setPeriodStart(start);
+    setPeriodEnd(end);
+  }, []);
 
   useEffect(() => {
     apiClient.get('/api/v1/sites', { params: { page_size: 100 } })
@@ -1024,7 +1099,7 @@ export default function DashboardPage() {
             <span style={{ fontSize: 10, color: 'var(--dv-ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Von</span>
             <input
               type="date" value={periodStart}
-              onChange={(e) => setPeriodStart(e.target.value)}
+              onChange={(e) => { setPeriodStart(e.target.value); setViewMode(null); }}
               style={{
                 border: '1px solid var(--dv-line)', background: 'var(--dv-surface)',
                 padding: '5px 10px', borderRadius: 'var(--dv-r-sm)',
@@ -1038,7 +1113,7 @@ export default function DashboardPage() {
             <span style={{ fontSize: 10, color: 'var(--dv-ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Bis</span>
             <input
               type="date" value={periodEnd}
-              onChange={(e) => setPeriodEnd(e.target.value)}
+              onChange={(e) => { setPeriodEnd(e.target.value); setViewMode(null); }}
               style={{
                 border: '1px solid var(--dv-line)', background: 'var(--dv-surface)',
                 padding: '5px 10px', borderRadius: 'var(--dv-r-sm)',
@@ -1047,25 +1122,25 @@ export default function DashboardPage() {
             />
           </div>
 
-          {/* Granularität */}
+          {/* Zeitfenster-Switcher */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontSize: 10, color: 'var(--dv-ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Ansicht</span>
             <div style={{ display: 'flex', border: '1px solid var(--dv-line)', background: 'var(--dv-surface)', borderRadius: 'var(--dv-r-sm)', overflow: 'hidden' }}>
-              {['monthly', 'weekly', 'daily'].map((g) => (
+              {VIEW_MODES.map((mode, i) => (
                 <button
-                  key={g}
-                  onClick={() => setGranularity(g)}
+                  key={mode.key}
+                  onClick={() => applyViewMode(mode.key)}
                   style={{
                     padding: '5px 10px', fontSize: 12, cursor: 'pointer',
-                    background: granularity === g ? 'var(--dv-ink)' : 'transparent',
-                    color: granularity === g ? '#FFF' : 'var(--dv-ink-3)',
-                    fontWeight: granularity === g ? 500 : 400,
+                    background: viewMode === mode.key ? 'var(--dv-ink)' : 'transparent',
+                    color: viewMode === mode.key ? '#FFF' : 'var(--dv-ink-3)',
+                    fontWeight: viewMode === mode.key ? 500 : 400,
                     border: 'none',
-                    borderRight: g !== 'daily' ? '1px solid var(--dv-line)' : 'none',
+                    borderRight: i < VIEW_MODES.length - 1 ? '1px solid var(--dv-line)' : 'none',
                     transition: 'background 120ms',
                   }}
                 >
-                  {g === 'monthly' ? 'Monat' : g === 'weekly' ? 'Woche' : 'Tag'}
+                  {mode.label}
                 </button>
               ))}
             </div>
@@ -1096,7 +1171,7 @@ export default function DashboardPage() {
 
         {/* Row: Trend + Insights */}
         <div className="dv-row-2col">
-          <MonthlyTrend charts={data.consumption_chart} periodEnd={periodEnd} />
+          <MonthlyTrend charts={data.consumption_chart} granularity={granularity} />
           <InsightsPanel data={data} />
         </div>
 

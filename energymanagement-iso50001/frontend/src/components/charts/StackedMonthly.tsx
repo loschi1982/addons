@@ -1,27 +1,95 @@
 import { useState } from 'react';
 
-function HoverTooltip({ hover, total, colW, padL }: { hover: number; total: number; colW: number; padL: number }) {
-  const cx = padL + hover * colW + colW / 2;
-  return (
-    <g>
-      <rect x={cx - 56} y={6} width={112} height={16} rx={3} fill="#0A0A0B" />
-      <text x={cx} y={17} textAnchor="middle" fontSize="11" fill="#FFF" fontFamily="ui-monospace, 'Geist Mono', monospace">
-        {fmtNum(total)} kWh
-      </text>
-    </g>
-  );
-}
-
 function fmtNum(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + ' Mio.';
   if (n >= 1_000) return (n / 1_000).toFixed(0) + 'k';
   return new Intl.NumberFormat('de-DE').format(Math.round(n));
 }
 
+interface HoverTooltipProps {
+  hover: number;
+  total: number;
+  colW: number;
+  padL: number;
+  data: Record<string, number[]>;
+  keys: string[];
+  colors: Record<string, string>;
+  names: Record<string, string>;
+  chartWidth: number;
+}
+
+function HoverTooltip({ hover, total, colW, padL, data, keys, colors, names, chartWidth }: HoverTooltipProps) {
+  const activeKeys = keys.filter((k) => (data[k]?.[hover] ?? 0) > 0);
+  const tooltipW = 160;
+  const lineH = 14;
+  const headerH = 18;
+  const paddingV = 8;
+  const tooltipH = headerH + activeKeys.length * lineH + paddingV;
+
+  const rawCx = padL + hover * colW + colW / 2;
+  // Tooltip links/rechts begrenzen damit er nicht aus dem SVG rausläuft
+  const cx = Math.min(Math.max(rawCx, tooltipW / 2 + 4), chartWidth - tooltipW / 2 - 4);
+  const ty = 4;
+
+  return (
+    <g style={{ pointerEvents: 'none' }}>
+      <rect
+        x={cx - tooltipW / 2} y={ty}
+        width={tooltipW} height={tooltipH}
+        rx={4} fill="#0A0A0B"
+      />
+      {/* Gesamt-Zeile */}
+      <text
+        x={cx - tooltipW / 2 + 8} y={ty + 12}
+        fontSize="10" fill="#9A968B"
+        fontFamily="ui-monospace, 'Geist Mono', monospace"
+      >
+        Gesamt
+      </text>
+      <text
+        x={cx + tooltipW / 2 - 8} y={ty + 12}
+        textAnchor="end" fontSize="11" fill="#FFF" fontWeight={600}
+        fontFamily="ui-monospace, 'Geist Mono', monospace"
+      >
+        {fmtNum(total)} kWh
+      </text>
+      {/* Pro-Medium-Zeilen */}
+      {activeKeys.map((k, i) => {
+        const val = data[k]?.[hover] ?? 0;
+        const ly = ty + headerH + i * lineH + 11;
+        return (
+          <g key={k}>
+            <rect
+              x={cx - tooltipW / 2 + 8} y={ly - 5}
+              width={6} height={6} rx={1}
+              fill={colors[k] ?? '#888'}
+            />
+            <text
+              x={cx - tooltipW / 2 + 18} y={ly}
+              fontSize="10" fill="#D4D0C8"
+              fontFamily="ui-monospace, 'Geist Mono', monospace"
+            >
+              {names[k] ?? k}
+            </text>
+            <text
+              x={cx + tooltipW / 2 - 8} y={ly}
+              textAnchor="end" fontSize="10" fill="#FFF"
+              fontFamily="ui-monospace, 'Geist Mono', monospace"
+            >
+              {fmtNum(val)}
+            </text>
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
 interface StackedMonthlyProps {
   data: Record<string, number[]>;
   months: string[];
   colors: Record<string, string>;
+  names?: Record<string, string>;
   height?: number;
   currentMonthIdx?: number;
 }
@@ -30,6 +98,7 @@ export default function StackedMonthly({
   data,
   months,
   colors,
+  names = {},
   height = 260,
   currentMonthIdx = 4,
 }: StackedMonthlyProps) {
@@ -37,12 +106,13 @@ export default function StackedMonthly({
   const totals = months.map((_, i) => keys.reduce((a, k) => a + (data[k]?.[i] ?? 0), 0));
   const max = Math.max(...totals, 1);
   const padTop = 24, padBottom = 28, padL = 56, padR = 12;
+  const svgW = 720;
   const innerH = height - padTop - padBottom;
   const [hover, setHover] = useState<number | null>(null);
 
   return (
     <svg
-      viewBox={`0 0 720 ${height}`}
+      viewBox={`0 0 ${svgW} ${height}`}
       preserveAspectRatio="none"
       style={{ width: '100%', height, display: 'block' }}
     >
@@ -50,7 +120,7 @@ export default function StackedMonthly({
         const y = padTop + innerH * (1 - p);
         return (
           <g key={p}>
-            <line x1={padL} x2={720 - padR} y1={y} y2={y} stroke="#EDEAE3" strokeWidth={1} />
+            <line x1={padL} x2={svgW - padR} y1={y} y2={y} stroke="#EDEAE3" strokeWidth={1} />
             <text
               x={padL - 8} y={y + 3}
               textAnchor="end" fontSize="10" fill="#8A8A8A"
@@ -63,7 +133,7 @@ export default function StackedMonthly({
       })}
 
       {months.map((m, i) => {
-        const colW = (720 - padL - padR) / months.length;
+        const colW = (svgW - padL - padR) / months.length;
         const barW = colW * 0.62;
         const x = padL + i * colW + (colW - barW) / 2;
         let yCursor = padTop + innerH;
@@ -106,12 +176,19 @@ export default function StackedMonthly({
         );
       })}
 
-      {hover != null && totals[hover] > 0 && <HoverTooltip
-        hover={hover}
-        total={totals[hover]}
-        colW={(720 - padL - padR) / months.length}
-        padL={padL}
-      />}
+      {hover != null && totals[hover] > 0 && (
+        <HoverTooltip
+          hover={hover}
+          total={totals[hover]}
+          colW={(svgW - padL - padR) / months.length}
+          padL={padL}
+          data={data}
+          keys={keys}
+          colors={colors}
+          names={names}
+          chartWidth={svgW}
+        />
+      )}
     </svg>
   );
 }
