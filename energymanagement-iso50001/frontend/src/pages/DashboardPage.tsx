@@ -217,7 +217,16 @@ function buildChartData(
   for (const chart of charts) {
     for (const pt of chart.data) labelSet.add(pt.label);
   }
-  const sortedLabels = Array.from(labelSet).sort();
+  const parseLabelOrder = (l: string): number => {
+    const iso = l.match(/^(\d{4})-(\d{2})/);
+    if (iso) return parseInt(iso[1]) * 12 + parseInt(iso[2]) - 1;
+    const enIdx = MONTHS_EN.findIndex((m) => l.startsWith(m));
+    const yr = l.match(/(\d{4})/);
+    return (yr ? parseInt(yr[1]) : 0) * 12 + (enIdx >= 0 ? enIdx : 0);
+  };
+  const sortedLabels = granularity === 'monthly'
+    ? Array.from(labelSet).sort((a, b) => parseLabelOrder(a) - parseLabelOrder(b))
+    : Array.from(labelSet).sort();
   const labelIndex = new Map(sortedLabels.map((l, i) => [l, i]));
   const n = sortedLabels.length || 1;
 
