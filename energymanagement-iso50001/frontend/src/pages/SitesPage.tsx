@@ -591,13 +591,6 @@ export default function SitesPage() {
     } finally { setSaving(false); }
   };
 
-  const handleDeleteUnit = async (u: UsageUnit) => {
-    if (!selectedSite || !selectedBuilding || !confirm(`Nutzungseinheit "${u.name}" wirklich deaktivieren?`)) return;
-    try {
-      await apiClient.delete(`/api/v1/sites/${selectedSite.id}/buildings/${selectedBuilding.id}/units/${u.id}`);
-      loadBuildingDetail(selectedSite.id, selectedBuilding.id);
-    } catch { /* Interceptor */ }
-  };
 
   const totalPages = Math.ceil(total / pageSize);
   const breakoutStyle = { margin: '-1.5rem' };
@@ -754,7 +747,7 @@ export default function SitesPage() {
   bldgFlowMap.forEach((cnt, k) => { const [s, t] = k.split('::'); bldgFlows.push({ source: s, target: t, value: cnt }); });
 
   const panelBuilding = selectedNode.type === 'building' ? siteBuildings.find(b => b.id === selectedNode.id) ?? null : null;
-  const panelBuildingUnits = (selectedBuilding?.id === selectedNode.id) ? (selectedBuilding?.usage_units ?? []) : [];
+  const panelBuildingUnits = (selectedNode.type === 'building' && selectedBuilding?.id === selectedNode.id) ? (selectedBuilding?.usage_units ?? []) : [];
 
   const getEnergyColor = (k: string) => (SITE_ENERGY_DEFS.find(d => d.key === k)?.color ?? '#9A968B');
   const fmtKwh = (v: number) => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' kWh';
