@@ -144,6 +144,54 @@ class SiteConsumptionService:
             "exit_points": exit_points,
         }
 
+    async def get_sites_consumption_by_energy(
+        self,
+        period_start: date,
+        period_end: date,
+    ) -> list[dict]:
+        """
+        Verbrauch aller Standorte nach Energieträger in einem Zeitraum.
+
+        Verwendet nur PhysicalRoot-Zähler (parent_meter_id IS NULL, is_virtual=False)
+        um Doppelzählung durch Unterzähler zu vermeiden.
+        Gibt eine Liste von {site_id, site_name, by_energy: {energy_type: kwh}} zurück.
+        """
+        from app.models.site import Site as SiteModel
+
+        start_dt = datetime.combine(period_start, datetime.min.time()).replace(tzinfo=timezone.utc)
+        end_dt = datetime.combine(period_end, datetime.max.time()).replace(tzinfo=timezone.utc)
+
+        result = await self.db.execute(
+            select(
+                Meter.site_id,
+                SiteModel.name.label("site_name"),
+                Meter.energy_type,
+                func.sum(MeterReading.consumption).label("kwh"),
+            )
+            .join(MeterReading, MeterReading.meter_id == Meter.id)
+            .join(SiteModel, SiteModel.id == Meter.site_id)
+            .where(
+                Meter.is_active == True,  # noqa: E712
+                Meter.is_virtual == False,  # noqa: E712
+                Meter.parent_meter_id.is_(None),
+                Meter.site_id.is_not(None),
+                MeterReading.timestamp >= start_dt,
+                MeterReading.timestamp <= end_dt,
+                MeterReading.consumption.is_not(None),
+            )
+            .group_by(Meter.site_id, SiteModel.name, Meter.energy_type)
+        )
+        rows = result.all()
+
+        sites: dict[str, dict] = {}
+        for row in rows:
+            sid = str(row.site_id)
+            if sid not in sites:
+                sites[sid] = {"site_id": sid, "site_name": row.site_name, "by_energy": {}}
+            sites[sid]["by_energy"][row.energy_type] = float(row.kwh or 0)
+
+        return list(sites.values())
+
     async def _sum_consumption(
         self,
         meter_ids: list[uuid.UUID],

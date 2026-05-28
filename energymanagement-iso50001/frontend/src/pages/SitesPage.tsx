@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { ChevronRight, Zap, Building2, Settings, Trash2, Activity, Wifi, Plus, Search } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type PaginatedResponse } from '@/types';
@@ -39,6 +39,9 @@ interface SiteConsumption {
   site_id: string; site_name: string; period_start: string; period_end: string;
   gross_consumption_kwh: number; cross_site_exit_kwh: number; net_consumption_kwh: number;
   exit_points: Array<{ meter_id: string; meter_name: string; owner_site_id: string | null; owner_site_name: string; consumption_kwh: number; }>;
+}
+interface SiteConsumptionSummary {
+  site_id: string; site_name: string; by_energy: Record<string, number>;
 }
 
 type SelectedNode = { type: 'site' } | { type: 'building'; id: string };
@@ -290,6 +293,7 @@ function MeterModal({ form, setForm, editingId, onSubmit, onClose, error, saving
 // ── Hauptkomponente ──
 export default function SitesPage() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   // Liste
   const [sites, setSites] = useState<Site[]>([]);
@@ -298,6 +302,7 @@ export default function SitesPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [consumptionSummary, setConsumptionSummary] = useState<Record<string, SiteConsumptionSummary>>({});
 
   // Navigation
   const [selectedSite, setSelectedSite] = useState<Site | null>(null);
@@ -354,11 +359,20 @@ export default function SitesPage() {
   const loadSites = useCallback(async () => {
     setLoading(true);
     try {
+      const year = new Date().getFullYear() - 1;
       const params = new URLSearchParams({ page: page.toString(), page_size: pageSize.toString() });
       if (search) params.append('search', search);
-      const res = await apiClient.get<PaginatedResponse<Site>>(`/api/v1/sites?${params}`);
+      const [res, summaryRes] = await Promise.all([
+        apiClient.get<PaginatedResponse<Site>>(`/api/v1/sites?${params}`),
+        apiClient.get<SiteConsumptionSummary[]>(
+          `/api/v1/sites/consumption-summary?period_start=${year}-01-01&period_end=${year}-12-31`
+        ).catch(() => ({ data: [] as SiteConsumptionSummary[] })),
+      ]);
       setSites(res.data.items);
       setTotal(res.data.total);
+      const map: Record<string, SiteConsumptionSummary> = {};
+      summaryRes.data.forEach(s => { map[s.site_id] = s; });
+      setConsumptionSummary(map);
     } catch { /* Interceptor */ } finally { setLoading(false); }
   }, [page, search]);
 
@@ -659,6 +673,29 @@ export default function SitesPage() {
                     <div className="struct-label">Zähler</div>
                   </div>
                 </div>
+                {(() => {
+                  const summary = consumptionSummary[site.id];
+                  if (!summary) return null;
+                  const entries = SITE_ENERGY_DEFS.filter(d => summary.by_energy[d.key] != null);
+                  if (entries.length === 0) return null;
+                  const fmtMwh = (kwh: number) => kwh >= 1000
+                    ? `${(kwh / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })} MWh`
+                    : `${Math.round(kwh).toLocaleString('de-DE')} kWh`;
+                  return (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '8px 14px 4px', borderTop: '1px solid var(--line)' }}>
+                      {entries.map(d => (
+                        <span key={d.key} style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                          background: d.color + '18', border: `1px solid ${d.color}44`,
+                          borderRadius: 4, padding: '2px 7px', fontSize: 10.5, color: '#3D3D3D',
+                        }}>
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: d.color, display: 'inline-block', flexShrink: 0 }} />
+                          {d.label}: {fmtMwh(summary.by_energy[d.key])}
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })()}
                 <div className="standort-card-foot">
                   <span style={{ fontSize: 11 }}>{site.timezone}</span>
                   <span className="open-cta">Öffnen <ChevronRight size={12} /></span>
@@ -1099,7 +1136,7 @@ export default function SitesPage() {
 
             <div className="banner" style={{ margin: '12px 18px 0' }}>
               <span>Zähler-Hierarchie unter</span>
-              <a href="/meters" onClick={e => { e.preventDefault(); window.location.href = '/meters'; }}>
+              <a href="/meters" onClick={e => { e.preventDefault(); navigate('/meters'); }}>
                 Zähler → Physikalisches Netzwerk
               </a>
             </div>
@@ -1139,7 +1176,7 @@ export default function SitesPage() {
                           </>
                         )}
                         <a href={`/readings?meter_id=${m.id}`}
-                          onClick={e => { e.preventDefault(); window.location.href = `/readings?meter_id=${m.id}`; }}
+                          onClick={e => { e.preventDefault(); navigate(`/readings?meter_id=${m.id}`); }}
                           style={{ fontSize: 11, color: 'var(--ink-3)', textDecoration: 'underline', paddingLeft: 2 }}>
                           Werte
                         </a>

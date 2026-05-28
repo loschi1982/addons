@@ -153,6 +153,18 @@ async def list_sites(
     )
 
 
+@router.get("/consumption-summary")
+async def get_sites_consumption_summary(
+    period_start: date = Query(...),
+    period_end: date = Query(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Verbrauch aller Standorte nach Energieträger – für die Listenansicht."""
+    service = SiteConsumptionService(db)
+    return await service.get_sites_consumption_by_energy(period_start, period_end)
+
+
 @router.post("", response_model=SiteResponse, status_code=201)
 async def create_site(
     request: SiteCreate,
