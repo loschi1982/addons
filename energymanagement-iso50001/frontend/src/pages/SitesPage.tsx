@@ -1,136 +1,67 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ChevronRight, Zap, Building2, Home, Settings, Trash2, Activity, Wifi, Plus } from 'lucide-react';
+import { ChevronRight, Zap, Building2, Settings, Trash2, Activity, Wifi, Plus, Search } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type PaginatedResponse } from '@/types';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import Sankey from '@/components/charts/Sankey';
 
 // ── Typen ──
 
 interface Site {
-  id: string;
-  name: string;
-  street: string | null;
-  zip_code: string | null;
-  city: string | null;
-  country: string;
-  latitude: number | null;
-  longitude: number | null;
-  co2_region: string | null;
-  timezone: string;
-  building_count: number;
-  meter_count: number;
+  id: string; name: string; street: string | null; zip_code: string | null;
+  city: string | null; country: string; latitude: number | null; longitude: number | null;
+  co2_region: string | null; timezone: string; building_count: number; meter_count: number;
   created_at: string;
 }
-
 interface Building {
-  id: string;
-  name: string;
-  site_id: string;
-  building_type: string | null;
-  building_year: number | null;
-  total_area_m2: number | null;
-  heated_area_m2: number | null;
-  cooled_area_m2: number | null;
-  floors: number | null;
-  energy_certificate_class: string | null;
-  usage_unit_count: number;
-  created_at: string;
+  id: string; name: string; site_id: string; building_type: string | null;
+  building_year: number | null; total_area_m2: number | null; heated_area_m2: number | null;
+  cooled_area_m2: number | null; floors: number | null; energy_certificate_class: string | null;
+  usage_unit_count: number; created_at: string;
 }
-
 interface UsageUnit {
-  id: string;
-  name: string;
-  building_id: string;
-  usage_type: string;
-  floor: string | null;
-  area_m2: number | null;
-  occupants: number | null;
-  tenant_name: string | null;
-  created_at: string;
+  id: string; name: string; building_id: string; usage_type: string; floor: string | null;
+  area_m2: number | null; occupants: number | null; tenant_name: string | null; created_at: string;
 }
-
 interface AnnotatedMeterNode {
-  id: string;
-  name: string;
-  meter_number: string | null;
-  energy_type: string;
-  unit: string;
-  data_source: string;
-  parent_meter_id: string | null;
-  is_active: boolean;
-  is_virtual: boolean;
-  is_feed_in: boolean;
-  is_submeter: boolean;
-  is_delivery_based: boolean;
-  is_weather_corrected: boolean;
-  site_id: string | null;
-  building_id: string | null;
-  usage_unit_id: string | null;
-  source_config: Record<string, unknown> | null;
-  virtual_config: Record<string, unknown> | null;
-  schema_label: string | null;
-  notes: string | null;
-  display_name?: string | null;
-  serial_number?: string | null;
-  installation_date?: string | null;
-  removal_date?: string | null;
-  calibration_date?: string | null;
-  cross_site_boundary: boolean;
-  owner_site_name: string | null;
-  children: AnnotatedMeterNode[];
+  id: string; name: string; meter_number: string | null; energy_type: string; unit: string;
+  data_source: string; parent_meter_id: string | null; is_active: boolean; is_virtual: boolean;
+  is_feed_in: boolean; is_submeter: boolean; is_delivery_based: boolean; is_weather_corrected: boolean;
+  site_id: string | null; building_id: string | null; usage_unit_id: string | null;
+  source_config: Record<string, unknown> | null; virtual_config: Record<string, unknown> | null;
+  schema_label: string | null; notes: string | null; display_name?: string | null;
+  serial_number?: string | null; installation_date?: string | null;
+  removal_date?: string | null; calibration_date?: string | null;
+  cross_site_boundary: boolean; owner_site_name: string | null; children: AnnotatedMeterNode[];
+}
+interface SiteConsumption {
+  site_id: string; site_name: string; period_start: string; period_end: string;
+  gross_consumption_kwh: number; cross_site_exit_kwh: number; net_consumption_kwh: number;
+  exit_points: Array<{ meter_id: string; meter_name: string; owner_site_id: string | null; owner_site_name: string; consumption_kwh: number; }>;
 }
 
-interface SiteConsumption {
-  site_id: string;
-  site_name: string;
-  period_start: string;
-  period_end: string;
-  gross_consumption_kwh: number;
-  cross_site_exit_kwh: number;
-  net_consumption_kwh: number;
-  exit_points: Array<{
-    meter_id: string;
-    meter_name: string;
-    owner_site_id: string | null;
-    owner_site_name: string;
-    consumption_kwh: number;
-  }>;
-}
+type SelectedNode = { type: 'site' } | { type: 'building'; id: string };
 
 // ── Forms ──
-
-interface SiteForm {
-  name: string; street: string; zip_code: string;
-  city: string; country: string; latitude: string; longitude: string;
-}
-interface BuildingForm {
-  name: string; building_type: string; building_year: string;
-  total_area_m2: string; heated_area_m2: string; cooled_area_m2: string;
-  floors: string; energy_certificate_class: string;
-}
-interface UnitForm {
-  name: string; usage_type: string; floor: string;
-  area_m2: string; occupants: string; tenant_name: string;
-}
+interface SiteForm { name: string; street: string; zip_code: string; city: string; country: string; latitude: string; longitude: string; }
+interface BuildingForm { name: string; building_type: string; building_year: string; total_area_m2: string; heated_area_m2: string; cooled_area_m2: string; floors: string; energy_certificate_class: string; }
+interface UnitForm { name: string; usage_type: string; floor: string; area_m2: string; occupants: string; tenant_name: string; }
 interface MeterForm {
-  name: string; meter_number: string; energy_type: string; unit: string;
-  data_source: string; location: string;
+  name: string; meter_number: string; energy_type: string; unit: string; data_source: string; location: string;
   site_id: string; building_id: string; usage_unit_id: string; parent_meter_id: string;
   is_virtual: boolean; is_feed_in: boolean; is_delivery_based: boolean; is_weather_corrected: boolean;
   schema_label: string; notes: string;
   source_host: string; source_channel: string; source_entity_id: string;
   source_register: string; source_topic: string; source_broker: string;
-  display_name: string; serial_number: string;
-  installation_date: string; removal_date: string; calibration_date: string;
+  display_name: string; serial_number: string; installation_date: string; removal_date: string; calibration_date: string;
 }
 
 const emptySiteForm: SiteForm = { name: '', street: '', zip_code: '', city: '', country: 'DE', latitude: '', longitude: '' };
 const emptyBuildingForm: BuildingForm = { name: '', building_type: '', building_year: '', total_area_m2: '', heated_area_m2: '', cooled_area_m2: '', floors: '', energy_certificate_class: '' };
 const emptyUnitForm: UnitForm = { name: '', usage_type: 'office', floor: '', area_m2: '', occupants: '', tenant_name: '' };
 const emptyMeterForm: MeterForm = {
-  name: '', meter_number: '', energy_type: 'electricity', unit: 'kWh',
-  data_source: 'manual', location: '',
+  name: '', meter_number: '', energy_type: 'electricity', unit: 'kWh', data_source: 'manual', location: '',
   site_id: '', building_id: '', usage_unit_id: '', parent_meter_id: '',
   is_virtual: false, is_feed_in: false, is_delivery_based: false, is_weather_corrected: false,
   schema_label: '', notes: '',
@@ -139,77 +70,53 @@ const emptyMeterForm: MeterForm = {
 };
 
 // ── Konstanten ──
-
-const ENERGY_COLORS: Record<string, string> = {
-  electricity: 'bg-yellow-100 text-yellow-800',
-  gas: 'bg-blue-100 text-blue-800',
-  district_heating: 'bg-red-100 text-red-800',
-  district_cooling: 'bg-cyan-100 text-cyan-800',
-  water: 'bg-teal-100 text-teal-800',
-};
-
 const DATA_SOURCE_LABELS: Record<string, string> = {
   manual: 'Manuell', csv_import: 'CSV', shelly: 'Shelly', modbus: 'Modbus',
   knx: 'KNX', homeassistant: 'Home Assistant', spie: 'SPIE', mqtt: 'MQTT',
   bacnet: 'BACnet', virtual: 'Virtuell',
 };
-
 const ENERGY_TYPE_OPTIONS = [
-  { value: 'electricity', label: 'Strom' },
-  { value: 'gas', label: 'Gas' },
-  { value: 'water', label: 'Wasser' },
-  { value: 'district_heating', label: 'Fernwärme' },
-  { value: 'district_cooling', label: 'Fernkälte' },
-  { value: 'oil', label: 'Heizöl' },
-  { value: 'pellets', label: 'Pellets' },
-  { value: 'solar_thermal', label: 'Solarthermie' },
+  { value: 'electricity', label: 'Strom' }, { value: 'gas', label: 'Gas' },
+  { value: 'water', label: 'Wasser' }, { value: 'district_heating', label: 'Fernwärme' },
+  { value: 'district_cooling', label: 'Fernkälte' }, { value: 'oil', label: 'Heizöl' },
+  { value: 'pellets', label: 'Pellets' }, { value: 'solar_thermal', label: 'Solarthermie' },
   { value: 'biomass', label: 'Biomasse' },
 ];
-
 const UNIT_OPTIONS: Record<string, string[]> = {
-  electricity: ['kWh', 'MWh'],
-  gas: ['m³', 'kWh', 'MWh'],
-  water: ['m³', 'l'],
-  district_heating: ['kWh', 'MWh'],
-  district_cooling: ['kWh', 'MWh'],
+  electricity: ['kWh', 'MWh'], gas: ['m³', 'kWh', 'MWh'], water: ['m³', 'l'],
+  district_heating: ['kWh', 'MWh'], district_cooling: ['kWh', 'MWh'],
   default: ['kWh', 'MWh', 'm³', 'l', 'kg', 'Stk'],
 };
-
 const DATA_SOURCE_OPTIONS = [
-  { value: 'manual', label: 'Manuell' },
-  { value: 'shelly', label: 'Shelly' },
-  { value: 'modbus', label: 'Modbus' },
-  { value: 'knx', label: 'KNX' },
-  { value: 'homeassistant', label: 'Home Assistant' },
-  { value: 'mqtt', label: 'MQTT' },
-  { value: 'bacnet', label: 'BACnet' },
-  { value: 'csv_import', label: 'CSV-Import' },
-  { value: 'spie', label: 'SPIE' },
-  { value: 'virtual', label: 'Virtuell' },
+  { value: 'manual', label: 'Manuell' }, { value: 'shelly', label: 'Shelly' },
+  { value: 'modbus', label: 'Modbus' }, { value: 'knx', label: 'KNX' },
+  { value: 'homeassistant', label: 'Home Assistant' }, { value: 'mqtt', label: 'MQTT' },
+  { value: 'bacnet', label: 'BACnet' }, { value: 'csv_import', label: 'CSV-Import' },
+  { value: 'spie', label: 'SPIE' }, { value: 'virtual', label: 'Virtuell' },
 ];
-
 const BUILDING_TYPES: Record<string, string> = {
-  office: 'Büro', residential: 'Wohnen', production: 'Produktion',
-  retail: 'Einzelhandel', warehouse: 'Lager', school: 'Schule',
-  hospital: 'Krankenhaus', hotel: 'Hotel', other: 'Sonstige',
+  office: 'Büro', residential: 'Wohnen', production: 'Produktion', retail: 'Einzelhandel',
+  warehouse: 'Lager', school: 'Schule', hospital: 'Krankenhaus', hotel: 'Hotel', other: 'Sonstige',
 };
-
 const USAGE_TYPES: Record<string, string> = {
-  office: 'Büro', server_room: 'Serverraum', workshop: 'Werkstatt',
-  apartment: 'Wohnung', retail: 'Verkaufsfläche', storage: 'Lager',
-  common_area: 'Allgemeinfläche', parking: 'Parkhaus/TG', other: 'Sonstige',
+  office: 'Büro', server_room: 'Serverraum', workshop: 'Werkstatt', apartment: 'Wohnung',
+  retail: 'Verkaufsfläche', storage: 'Lager', common_area: 'Allgemeinfläche',
+  parking: 'Parkhaus/TG', other: 'Sonstige',
 };
+const SITE_ENERGY_DEFS = [
+  { key: 'district_heating', label: 'Fernwärme',  color: '#E89A3C' },
+  { key: 'electricity',      label: 'Strom',      color: '#F2C94C' },
+  { key: 'district_cooling', label: 'Fernkälte',  color: '#4FC3F7' },
+  { key: 'water',            label: 'Wasser',     color: '#2A6FDB' },
+] as const;
 
 // ── Hilfsfunktionen ──
-
 function cleanFormData(data: Record<string, string>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data)) {
     if (value === '') continue;
-    if (['latitude', 'longitude', 'total_area_m2', 'heated_area_m2', 'cooled_area_m2', 'area_m2'].includes(key))
-      result[key] = parseFloat(value);
-    else if (['building_year', 'floors', 'occupants'].includes(key))
-      result[key] = parseInt(value, 10);
+    if (['latitude', 'longitude', 'total_area_m2', 'heated_area_m2', 'cooled_area_m2', 'area_m2'].includes(key)) result[key] = parseFloat(value);
+    else if (['building_year', 'floors', 'occupants'].includes(key)) result[key] = parseInt(value, 10);
     else result[key] = value;
   }
   return result;
@@ -217,14 +124,9 @@ function cleanFormData(data: Record<string, string>): Record<string, unknown> {
 
 function buildMeterPayload(form: MeterForm): Record<string, unknown> {
   const payload: Record<string, unknown> = {
-    name: form.name,
-    energy_type: form.energy_type,
-    unit: form.unit,
-    data_source: form.data_source,
-    is_virtual: form.is_virtual,
-    is_feed_in: form.is_feed_in,
-    is_delivery_based: form.is_delivery_based,
-    is_weather_corrected: form.is_weather_corrected,
+    name: form.name, energy_type: form.energy_type, unit: form.unit, data_source: form.data_source,
+    is_virtual: form.is_virtual, is_feed_in: form.is_feed_in,
+    is_delivery_based: form.is_delivery_based, is_weather_corrected: form.is_weather_corrected,
   };
   if (form.meter_number) payload.meter_number = form.meter_number;
   if (form.location) payload.location = form.location;
@@ -239,273 +141,55 @@ function buildMeterPayload(form: MeterForm): Record<string, unknown> {
   if (form.installation_date) payload.installation_date = form.installation_date;
   if (form.removal_date) payload.removal_date = form.removal_date;
   if (form.calibration_date) payload.calibration_date = form.calibration_date;
-
-  // source_config je nach Datenquelle
-  if (form.data_source === 'shelly' && form.source_host) {
+  if (form.data_source === 'shelly' && form.source_host)
     payload.source_config = { shelly_host: form.source_host, channel: parseInt(form.source_channel) || 0 };
-  } else if (form.data_source === 'modbus' && form.source_host) {
+  else if (form.data_source === 'modbus' && form.source_host)
     payload.source_config = { ip: form.source_host, register: parseInt(form.source_register) || 0 };
-  } else if (form.data_source === 'homeassistant' && form.source_entity_id) {
+  else if (form.data_source === 'homeassistant' && form.source_entity_id)
     payload.source_config = { entity_id: form.source_entity_id };
-  } else if (form.data_source === 'mqtt' && form.source_topic) {
+  else if (form.data_source === 'mqtt' && form.source_topic)
     payload.source_config = { broker_host: form.source_broker, topic: form.source_topic, port: 1883 };
-  }
-
   return payload;
 }
 
-
-function filterTree(nodes: AnnotatedMeterNode[], energyType: string): AnnotatedMeterNode[] {
-  const filtered: AnnotatedMeterNode[] = [];
-  for (const node of nodes) {
-    const filteredChildren = filterTree(node.children, energyType);
-    if (node.energy_type === energyType || filteredChildren.length > 0) {
-      filtered.push({ ...node, children: filteredChildren });
-    }
-  }
-  return filtered;
-}
-
-function countNodes(nodes: AnnotatedMeterNode[]): number {
-  return nodes.reduce((sum, n) => sum + 1 + countNodes(n.children), 0);
-}
-
-// ── MeterTreeRow ──
-
-function MeterTreeRow({
-  node, depth = 0, onEdit, onDelete, onPoll, onTestConnection,
-}: {
-  node: AnnotatedMeterNode;
-  depth?: number;
-  onEdit: (node: AnnotatedMeterNode) => void;
-  onDelete: (node: AnnotatedMeterNode) => void;
-  onPoll: (node: AnnotatedMeterNode) => void;
-  onTestConnection: (node: AnnotatedMeterNode) => void;
-}) {
-  const [open, setOpen] = useState(depth < 1);
-  const hasChildren = node.children.length > 0;
-
-  return (
-    <>
-      <tr className="group hover:bg-gray-50">
-        {/* Name */}
-        <td className="px-3 py-2">
-          <div className="flex items-center min-w-0" style={{ paddingLeft: `${depth * 18}px` }}>
-            <span className="w-4 flex-shrink-0" />
-            {hasChildren
-              ? <button onClick={() => setOpen(!open)} className="mr-1 text-gray-400 hover:text-gray-600 flex-shrink-0">
-                  <ChevronRight className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-90' : ''}`} />
-                </button>
-              : <span className="mr-1 w-3.5 inline-block flex-shrink-0" />}
-            <span className={`font-medium truncate text-sm ${node.cross_site_boundary ? 'text-amber-800' : 'text-gray-900'}`}
-              title={node.display_name ? `${node.name}\n${node.display_name}` : node.name}>
-              {node.name}
-              {node.display_name && (
-                <span className="block text-xs font-normal text-gray-400 truncate">{node.display_name}</span>
-              )}
-            </span>
-            {node.cross_site_boundary && (
-              <span className="ml-1.5 flex-shrink-0 inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 border border-amber-200">
-                ↗ {node.owner_site_name ?? 'Anderer Standort'}
-              </span>
-            )}
-            {node.meter_number && (
-              <span className="ml-1.5 text-xs text-gray-400 font-mono flex-shrink-0">{node.meter_number}</span>
-            )}
-          </div>
-        </td>
-        {/* Energieart */}
-        <td className="px-3 py-2 flex-shrink-0">
-          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${ENERGY_COLORS[node.energy_type] || 'bg-gray-100 text-gray-700'}`}>
-            {ENERGY_TYPE_LABELS[node.energy_type as keyof typeof ENERGY_TYPE_LABELS] || node.energy_type}
-          </span>
-        </td>
-        {/* Datenquelle */}
-        <td className="px-3 py-2 text-xs text-gray-500">
-          {DATA_SOURCE_LABELS[node.data_source] || node.data_source}
-          {node.is_virtual && <span className="ml-1 text-purple-600">(V)</span>}
-          {node.is_feed_in && <span className="ml-1 text-green-600">(E)</span>}
-        </td>
-        {/* Info */}
-        <td className="px-3 py-2 text-xs text-gray-400 text-right">
-          {hasChildren && `${node.children.length} Sub`}
-        </td>
-        {/* Aktionen – via CSS group-hover sichtbar, kein JS-State */}
-        <td className="px-3 py-2 text-right">
-          <div className="inline-flex items-center gap-1 transition-opacity opacity-0 group-hover:opacity-100">
-            {!node.cross_site_boundary && (
-              <>
-                <button
-                  onClick={() => onEdit(node)}
-                  title="Bearbeiten"
-                  className="p-1 text-gray-400 hover:text-primary-600 rounded"
-                >
-                  <Settings className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => onPoll(node)}
-                  title="Messwert abfragen"
-                  className="p-1 text-gray-400 hover:text-blue-600 rounded"
-                >
-                  <Activity className="w-3.5 h-3.5" />
-                </button>
-                {node.data_source === 'shelly' && (
-                  <button
-                    onClick={() => onTestConnection(node)}
-                    title="Verbindung testen"
-                    className="p-1 text-gray-400 hover:text-green-600 rounded"
-                  >
-                    <Wifi className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                <button
-                  onClick={() => onDelete(node)}
-                  title="Löschen"
-                  className="p-1 text-gray-400 hover:text-red-600 rounded"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </>
-            )}
-            <a
-              href={`/readings?meter_id=${node.id}`}
-              onClick={e => { e.preventDefault(); window.location.href = `/readings?meter_id=${node.id}`; }}
-              className="text-xs text-primary-600 hover:text-primary-800 px-1"
-            >
-              Werte
-            </a>
-          </div>
-        </td>
-      </tr>
-      {open && node.children.map(child => (
-        <MeterTreeRow
-          key={child.id} node={child} depth={depth + 1}
-          onEdit={onEdit} onDelete={onDelete} onPoll={onPoll} onTestConnection={onTestConnection}
-        />
-      ))}
-    </>
-  );
-}
-
-// ── MeterTreeTable ──
-
-function MeterTreeTable({
-  nodes, loading, emptyMessage, onEdit, onDelete, onPoll, onTestConnection,
-}: {
-  nodes: AnnotatedMeterNode[];
-  loading?: boolean;
-  emptyMessage?: string;
-  onEdit: (node: AnnotatedMeterNode) => void;
-  onDelete: (node: AnnotatedMeterNode) => void;
-  onPoll: (node: AnnotatedMeterNode) => void;
-  onTestConnection: (node: AnnotatedMeterNode) => void;
-}) {
-  const [colWidths, setColWidths] = useState([280, 120, 130, 80, 120]);
-  const resizingRef = useRef<{ colIdx: number; startX: number; startWidth: number } | null>(null);
-
-  const startResize = (colIdx: number, e: React.MouseEvent) => {
-    e.preventDefault();
-    resizingRef.current = { colIdx, startX: e.clientX, startWidth: colWidths[colIdx] };
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!resizingRef.current) return;
-      const { colIdx: ci, startX, startWidth } = resizingRef.current;
-      setColWidths(prev => { const next = [...prev]; next[ci] = Math.max(60, startWidth + ev.clientX - startX); return next; });
-    };
-    const onMouseUp = () => { resizingRef.current = null; document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp); };
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  };
-
-  const resizeHandle = (i: number) => (
-    <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 5, cursor: 'col-resize', zIndex: 1 }}
-      onMouseDown={e => startResize(i, e)} onClick={e => e.stopPropagation()} />
-  );
-
-  if (loading) return <LoadingSpinner text="Zähler werden geladen" />;
-  if (nodes.length === 0) return <div className="p-8 text-center text-gray-400">{emptyMessage || 'Keine Zähler.'}</div>;
-
-  return (
-    <div>
-      <div className="mb-2 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
-        <span>Die Zähler-Hierarchie (Haupt-/Unterzähler) wird im Menü</span>
-        <a href="/meters" className="font-medium underline hover:text-blue-900">Zähler → Physikalisches Netzwerk</a>
-        <span>festgelegt.</span>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
-          <colgroup>{colWidths.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
-          <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-            <tr>
-              {['Name / Zählernummer', 'Energieart', 'Datenquelle', 'Info', ''].map((label, i) => (
-                <th key={i} className={`px-3 py-2.5 ${i > 2 ? 'text-right' : 'text-left'}`}
-                  style={{ width: colWidths[i], position: 'relative', userSelect: 'none' }}>
-                  {label}{resizeHandle(i)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {nodes.map(node => (
-              <MeterTreeRow key={node.id} node={node} depth={0}
-                onEdit={onEdit} onDelete={onDelete} onPoll={onPoll} onTestConnection={onTestConnection} />
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+function flattenTree(nodes: AnnotatedMeterNode[]): AnnotatedMeterNode[] {
+  const result: AnnotatedMeterNode[] = [];
+  const visit = (n: AnnotatedMeterNode) => { result.push(n); n.children.forEach(visit); };
+  nodes.forEach(visit);
+  return result;
 }
 
 // ── Zähler-Modal ──
-
-function MeterModal({
-  form, setForm, editingId, onSubmit, onClose, error, saving,
-  siteBuildings, siteUnits,
-}: {
-  form: MeterForm;
-  setForm: (f: MeterForm) => void;
-  editingId: string | null;
-  onSubmit: (e: React.FormEvent) => void;
-  onClose: () => void;
-  error: string | null;
-  saving: boolean;
-  siteBuildings: Building[];
-  siteUnits: UsageUnit[];
+function MeterModal({ form, setForm, editingId, onSubmit, onClose, error, saving, siteBuildings, siteUnits }: {
+  form: MeterForm; setForm: (f: MeterForm) => void; editingId: string | null;
+  onSubmit: (e: React.FormEvent) => void; onClose: () => void;
+  error: string | null; saving: boolean; siteBuildings: Building[]; siteUnits: UsageUnit[];
 }) {
   const unitOptions = UNIT_OPTIONS[form.energy_type] || UNIT_OPTIONS.default;
-
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 overflow-y-auto py-8">
       <div className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl mx-4">
         <h2 className="mb-4 text-lg font-bold">{editingId ? 'Zähler bearbeiten' : 'Neuer Zähler'}</h2>
         <form onSubmit={onSubmit} className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}
-
-          {/* Basis */}
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
               <label className="label">Name *</label>
-              <input type="text" className="input" value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })} required autoFocus />
+              <input type="text" className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required autoFocus />
             </div>
             <div>
               <label className="label">Zählernummer</label>
-              <input type="text" className="input" value={form.meter_number}
-                onChange={e => setForm({ ...form, meter_number: e.target.value })} placeholder="z.B. EL-001" />
+              <input type="text" className="input" value={form.meter_number} onChange={e => setForm({ ...form, meter_number: e.target.value })} placeholder="z.B. EL-001" />
             </div>
             <div>
               <label className="label">Standort / Bezeichnung</label>
-              <input type="text" className="input" value={form.location}
-                onChange={e => setForm({ ...form, location: e.target.value })} placeholder="z.B. Technikraum UG" />
+              <input type="text" className="input" value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} placeholder="z.B. Technikraum UG" />
             </div>
           </div>
-
-          {/* Energieart / Einheit */}
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="label">Energieart *</label>
-              <select className="input" value={form.energy_type}
-                onChange={e => setForm({ ...form, energy_type: e.target.value, unit: UNIT_OPTIONS[e.target.value]?.[0] || 'kWh' })}>
+              <select className="input" value={form.energy_type} onChange={e => setForm({ ...form, energy_type: e.target.value, unit: UNIT_OPTIONS[e.target.value]?.[0] || 'kWh' })}>
                 {ENERGY_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
@@ -522,59 +206,30 @@ function MeterModal({
               </select>
             </div>
           </div>
-
-          {/* Datenquellen-Konfiguration */}
-          {(form.data_source === 'shelly') && (
+          {form.data_source === 'shelly' && (
             <div className="rounded-lg bg-gray-50 p-3 grid grid-cols-2 gap-3">
-              <div>
-                <label className="label">IP-Adresse / Hostname</label>
-                <input type="text" className="input" value={form.source_host}
-                  onChange={e => setForm({ ...form, source_host: e.target.value })} placeholder="192.168.1.100" />
-              </div>
-              <div>
-                <label className="label">Kanal</label>
-                <input type="number" className="input" value={form.source_channel}
-                  onChange={e => setForm({ ...form, source_channel: e.target.value })} min="0" max="5" />
-              </div>
+              <div><label className="label">IP-Adresse / Hostname</label><input type="text" className="input" value={form.source_host} onChange={e => setForm({ ...form, source_host: e.target.value })} placeholder="192.168.1.100" /></div>
+              <div><label className="label">Kanal</label><input type="number" className="input" value={form.source_channel} onChange={e => setForm({ ...form, source_channel: e.target.value })} min="0" max="5" /></div>
             </div>
           )}
           {form.data_source === 'modbus' && (
             <div className="rounded-lg bg-gray-50 p-3 grid grid-cols-2 gap-3">
-              <div>
-                <label className="label">IP-Adresse</label>
-                <input type="text" className="input" value={form.source_host}
-                  onChange={e => setForm({ ...form, source_host: e.target.value })} placeholder="192.168.1.100" />
-              </div>
-              <div>
-                <label className="label">Register</label>
-                <input type="number" className="input" value={form.source_register}
-                  onChange={e => setForm({ ...form, source_register: e.target.value })} />
-              </div>
+              <div><label className="label">IP-Adresse</label><input type="text" className="input" value={form.source_host} onChange={e => setForm({ ...form, source_host: e.target.value })} placeholder="192.168.1.100" /></div>
+              <div><label className="label">Register</label><input type="number" className="input" value={form.source_register} onChange={e => setForm({ ...form, source_register: e.target.value })} /></div>
             </div>
           )}
           {form.data_source === 'homeassistant' && (
             <div className="rounded-lg bg-gray-50 p-3">
               <label className="label">Entity-ID</label>
-              <input type="text" className="input" value={form.source_entity_id}
-                onChange={e => setForm({ ...form, source_entity_id: e.target.value })} placeholder="sensor.stromzaehler_kwh" />
+              <input type="text" className="input" value={form.source_entity_id} onChange={e => setForm({ ...form, source_entity_id: e.target.value })} placeholder="sensor.stromzaehler_kwh" />
             </div>
           )}
           {form.data_source === 'mqtt' && (
             <div className="rounded-lg bg-gray-50 p-3 grid grid-cols-2 gap-3">
-              <div>
-                <label className="label">Broker</label>
-                <input type="text" className="input" value={form.source_broker}
-                  onChange={e => setForm({ ...form, source_broker: e.target.value })} placeholder="192.168.1.10" />
-              </div>
-              <div>
-                <label className="label">Topic</label>
-                <input type="text" className="input" value={form.source_topic}
-                  onChange={e => setForm({ ...form, source_topic: e.target.value })} placeholder="energie/strom/kwh" />
-              </div>
+              <div><label className="label">Broker</label><input type="text" className="input" value={form.source_broker} onChange={e => setForm({ ...form, source_broker: e.target.value })} placeholder="192.168.1.10" /></div>
+              <div><label className="label">Topic</label><input type="text" className="input" value={form.source_topic} onChange={e => setForm({ ...form, source_topic: e.target.value })} placeholder="energie/strom/kwh" /></div>
             </div>
           )}
-
-          {/* Hierarchie */}
           <div className="grid grid-cols-2 gap-4">
             {siteBuildings.length > 0 && (
               <div>
@@ -595,18 +250,11 @@ function MeterModal({
               </div>
             )}
             <div className="col-span-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
-              Die Zähler-Hierarchie (Haupt-/Unterzähler) wird unter <a href="/meters" className="font-medium underline">Zähler → Physikalisches Netzwerk</a> festgelegt.
+              Die Zähler-Hierarchie wird unter <a href="/meters" className="font-medium underline">Zähler → Physikalisches Netzwerk</a> festgelegt.
             </div>
           </div>
-
-          {/* Flags */}
           <div className="flex flex-wrap gap-4">
-            {[
-              { key: 'is_feed_in', label: 'Einspeisung (Feed-In)' },
-              { key: 'is_virtual', label: 'Virtueller Zähler' },
-              { key: 'is_delivery_based', label: 'Lieferbasiert (Öl/Pellets)' },
-              { key: 'is_weather_corrected', label: 'Witterungskorrigiert' },
-            ].map(({ key, label }) => (
+            {[{ key: 'is_feed_in', label: 'Einspeisung' }, { key: 'is_virtual', label: 'Virtuell' }, { key: 'is_delivery_based', label: 'Lieferbasiert' }, { key: 'is_weather_corrected', label: 'Witterungskorrigiert' }].map(({ key, label }) => (
               <label key={key} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                 <input type="checkbox" checked={form[key as keyof MeterForm] as boolean}
                   onChange={e => setForm({ ...form, [key]: e.target.checked })}
@@ -615,57 +263,20 @@ function MeterModal({
               </label>
             ))}
           </div>
-
-          {/* Zusatzfelder */}
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label">Schema-Label</label>
-              <input type="text" className="input" value={form.schema_label}
-                onChange={e => setForm({ ...form, schema_label: e.target.value })} placeholder="z.B. Haupteinspeisung" />
-            </div>
-            <div>
-              <label className="label">Notizen</label>
-              <input type="text" className="input" value={form.notes}
-                onChange={e => setForm({ ...form, notes: e.target.value })} />
-            </div>
+            <div><label className="label">Schema-Label</label><input type="text" className="input" value={form.schema_label} onChange={e => setForm({ ...form, schema_label: e.target.value })} /></div>
+            <div><label className="label">Notizen</label><input type="text" className="input" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
           </div>
-
-          {/* Technische Daten */}
           <details className="rounded-lg border border-gray-200">
-            <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg">
-              Technische Daten (Einbau, Eichfrist, Seriennummer)
-            </summary>
+            <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-lg">Technische Daten</summary>
             <div className="px-3 pb-3 pt-2 grid grid-cols-2 gap-4">
-              <div className="col-span-2">
-                <label className="label">Klarname</label>
-                <input type="text" className="input" value={form.display_name}
-                  onChange={e => setForm({ ...form, display_name: e.target.value })}
-                  placeholder="z.B. WC Allgemein EG A-00/81/82" />
-              </div>
-              <div>
-                <label className="label">Seriennummer / akt. Zählernummer</label>
-                <input type="text" className="input" value={form.serial_number}
-                  onChange={e => setForm({ ...form, serial_number: e.target.value })}
-                  placeholder="z.B. 12345678" />
-              </div>
-              <div>
-                <label className="label">Einbaudatum</label>
-                <input type="date" className="input" value={form.installation_date}
-                  onChange={e => setForm({ ...form, installation_date: e.target.value })} />
-              </div>
-              <div>
-                <label className="label">Ausbaudatum / Tausch</label>
-                <input type="date" className="input" value={form.removal_date}
-                  onChange={e => setForm({ ...form, removal_date: e.target.value })} />
-              </div>
-              <div>
-                <label className="label">Eichfrist</label>
-                <input type="date" className="input" value={form.calibration_date}
-                  onChange={e => setForm({ ...form, calibration_date: e.target.value })} />
-              </div>
+              <div className="col-span-2"><label className="label">Klarname</label><input type="text" className="input" value={form.display_name} onChange={e => setForm({ ...form, display_name: e.target.value })} /></div>
+              <div><label className="label">Seriennummer</label><input type="text" className="input" value={form.serial_number} onChange={e => setForm({ ...form, serial_number: e.target.value })} /></div>
+              <div><label className="label">Einbaudatum</label><input type="date" className="input" value={form.installation_date} onChange={e => setForm({ ...form, installation_date: e.target.value })} /></div>
+              <div><label className="label">Ausbaudatum</label><input type="date" className="input" value={form.removal_date} onChange={e => setForm({ ...form, removal_date: e.target.value })} /></div>
+              <div><label className="label">Eichfrist</label><input type="date" className="input" value={form.calibration_date} onChange={e => setForm({ ...form, calibration_date: e.target.value })} /></div>
             </div>
           </details>
-
           <div className="flex justify-end gap-3 pt-2 border-t">
             <button type="button" onClick={onClose} className="btn-secondary">Abbrechen</button>
             <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Speichern...' : editingId ? 'Speichern' : 'Anlegen'}</button>
@@ -677,36 +288,36 @@ function MeterModal({
 }
 
 // ── Hauptkomponente ──
-
 export default function SitesPage() {
   const [searchParams] = useSearchParams();
 
-  // Standort-Liste
+  // Liste
   const [sites, setSites] = useState<Site[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
-  // Hierarchie-Navigation
+  // Navigation
   const [selectedSite, setSelectedSite] = useState<Site | null>(null);
-  const [selectedBuilding, setSelectedBuilding] = useState<(Building & { usage_units: UsageUnit[] }) | null>(null);
+  const [selectedNode, setSelectedNode] = useState<SelectedNode>({ type: 'site' });
+  const [buildingsExpanded, setBuildingsExpanded] = useState(true);
 
-  // Standort-Detail
+  // Detail-Daten
   const [siteBuildings, setSiteBuildings] = useState<Building[]>([]);
   const [siteMeters, setSiteMeters] = useState<AnnotatedMeterNode[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'meters' | 'buildings'>('meters');
-  const [meterEnergyFilter, setMeterEnergyFilter] = useState<string>('');
+  const [meterEnergyFilter, setMeterEnergyFilter] = useState('');
 
-  // Nettoverbrauch
+  // Gebäude-Detail (für usage_units → NE-Sankey)
+  const [selectedBuilding, setSelectedBuilding] = useState<(Building & { usage_units: UsageUnit[] }) | null>(null);
+
+  // Verbrauchsrechnung
   const [siteConsumption, setSiteConsumption] = useState<SiteConsumption | null>(null);
+  const [vbrCollapsed, setVbrCollapsed] = useState(false);
   const currentYear = new Date().getFullYear();
   const [consumptionYear, setConsumptionYear] = useState(currentYear - 1);
-
-  // Gebäude-Detail
-  const [buildingMeters, setBuildingMeters] = useState<AnnotatedMeterNode[]>([]);
-  const [buildingActiveTab, setBuildingActiveTab] = useState<'units' | 'meters'>('meters');
 
   // Zähler-Modal
   const [showMeterModal, setShowMeterModal] = useState(false);
@@ -715,7 +326,7 @@ export default function SitesPage() {
   const [meterFormError, setMeterFormError] = useState<string | null>(null);
   const [meterSaving, setMeterSaving] = useState(false);
 
-  // Poll/Test-Ergebnis-Modal
+  // Aktionsergebnis
   const [actionResult, setActionResult] = useState<{ title: string; message: string } | null>(null);
 
   // Site/Building/Unit Modals
@@ -729,10 +340,10 @@ export default function SitesPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Alle Nutzungseinheiten des Standorts (für Zähler-Modal)
+  // Alle NE des Standorts (für Zähler-Modal)
   const [allSiteUnits, setAllSiteUnits] = useState<UsageUnit[]>([]);
 
-  // Sync virtuelle Netto-Zähler
+  // Sync
   const [syncingNetMeters, setSyncingNetMeters] = useState(false);
   const [syncResult, setSyncResult] = useState<{ name: string; action: string; subtract_count: number }[] | null>(null);
 
@@ -755,12 +366,14 @@ export default function SitesPage() {
 
   const loadSiteDetail = useCallback(async (site: Site) => {
     setSelectedSite(site);
+    setSelectedNode({ type: 'site' });
     setSelectedBuilding(null);
+    setSiteConsumption(null);
     setDetailLoading(true);
     setSiteBuildings([]);
     setSiteMeters([]);
-    setSiteConsumption(null);
     setMeterEnergyFilter('');
+    setSyncResult(null);
     try {
       const [buildingsRes, metersRes] = await Promise.all([
         apiClient.get<Building[]>(`/api/v1/sites/${site.id}/buildings`),
@@ -768,8 +381,6 @@ export default function SitesPage() {
       ]);
       setSiteBuildings(buildingsRes.data);
       setSiteMeters(metersRes.data);
-
-      // Nutzungseinheiten aller Gebäude laden (für Zähler-Modal)
       const units: UsageUnit[] = [];
       for (const b of buildingsRes.data) {
         try {
@@ -794,16 +405,12 @@ export default function SitesPage() {
     if (selectedSite) loadSiteConsumption(selectedSite.id, consumptionYear);
   }, [selectedSite, consumptionYear, loadSiteConsumption]);
 
-  // Auto-Standort aus URL-Parameter öffnen
   const autoSiteParam = searchParams.get('site');
   const autoOpenedRef = useRef(false);
   useEffect(() => {
     if (!autoSiteParam || autoOpenedRef.current || loading || sites.length === 0) return;
     const match = sites.find((s) => s.id === autoSiteParam);
-    if (match) {
-      autoOpenedRef.current = true;
-      loadSiteDetail(match);
-    }
+    if (match) { autoOpenedRef.current = true; loadSiteDetail(match); }
   }, [autoSiteParam, sites, loading, loadSiteDetail]);
 
   const reloadSiteMeters = useCallback(async () => {
@@ -816,71 +423,50 @@ export default function SitesPage() {
 
   const loadBuildingDetail = useCallback(async (siteId: string, buildingId: string) => {
     try {
-      const buildingRes = await apiClient.get(`/api/v1/sites/${siteId}/buildings/${buildingId}`);
-      const building = buildingRes.data;
-      setSelectedBuilding(building);
-
-      const unitIds: string[] = (building.usage_units || []).map((u: UsageUnit) => u.id);
-      const meterRequests = [
-        apiClient.get<PaginatedResponse<AnnotatedMeterNode>>(`/api/v1/meters?building_id=${buildingId}&page_size=500`),
-        ...unitIds.map(uid => apiClient.get<PaginatedResponse<AnnotatedMeterNode>>(`/api/v1/meters?usage_unit_id=${uid}&page_size=500`)),
-      ];
-      const meterResults = await Promise.all(meterRequests);
-      const meterMap = new Map<string, AnnotatedMeterNode>();
-      meterResults.forEach(r => r.data.items.forEach((m: AnnotatedMeterNode) => meterMap.set(m.id, m)));
-      // Flache Liste → Baum aufbauen
-      const flat = [...meterMap.values()];
-      const nodeMap = new Map(flat.map(m => [m.id, { ...m, children: [] as AnnotatedMeterNode[] }]));
-      const roots: AnnotatedMeterNode[] = [];
-      for (const node of nodeMap.values()) {
-        if (node.parent_meter_id && nodeMap.has(node.parent_meter_id)) nodeMap.get(node.parent_meter_id)!.children.push(node);
-        else roots.push(node);
-      }
-      roots.sort((a, b) => a.name.localeCompare(b.name));
-      setBuildingMeters(roots);
+      const res = await apiClient.get(`/api/v1/sites/${siteId}/buildings/${buildingId}`);
+      setSelectedBuilding(res.data);
     } catch { /* Interceptor */ }
   }, []);
 
+  const handleBuildingNodeClick = useCallback((b: Building) => {
+    setSelectedNode({ type: 'building', id: b.id });
+    if (selectedSite && selectedBuilding?.id !== b.id) {
+      loadBuildingDetail(selectedSite.id, b.id);
+    }
+  }, [selectedSite, selectedBuilding, loadBuildingDetail]);
 
   // ── Zähler CRUD ──
 
   const openNewMeter = () => {
     setEditingMeterId(null);
-    setMeterForm({ ...emptyMeterForm, site_id: selectedSite?.id || '' });
+    setMeterForm({
+      ...emptyMeterForm,
+      site_id: selectedSite?.id || '',
+      building_id: selectedNode.type === 'building' ? selectedNode.id : '',
+    });
     setMeterFormError(null);
     setShowMeterModal(true);
   };
 
   const openEditMeter = (node: AnnotatedMeterNode) => {
-    const sourceConfig = node.source_config || {};
+    const sc = node.source_config || {};
     setEditingMeterId(node.id);
     setMeterForm({
-      name: node.name,
-      meter_number: node.meter_number || '',
-      energy_type: node.energy_type,
-      unit: node.unit,
-      data_source: node.data_source,
-      location: '',
-      site_id: node.site_id || selectedSite?.id || '',
-      building_id: node.building_id || '',
-      usage_unit_id: node.usage_unit_id || '',
-      parent_meter_id: node.parent_meter_id || '',
-      is_virtual: node.is_virtual,
-      is_feed_in: node.is_feed_in,
-      is_delivery_based: node.is_delivery_based,
-      is_weather_corrected: node.is_weather_corrected,
-      schema_label: node.schema_label || '',
-      notes: node.notes || '',
-      source_host: (sourceConfig.shelly_host || sourceConfig.ip || '') as string,
-      source_channel: String(sourceConfig.channel ?? '0'),
-      source_entity_id: (sourceConfig.entity_id || '') as string,
-      source_register: String(sourceConfig.register ?? ''),
-      source_topic: (sourceConfig.topic || '') as string,
-      source_broker: (sourceConfig.broker_host || '') as string,
-      display_name: node.display_name || '',
-      serial_number: node.serial_number || '',
-      installation_date: node.installation_date || '',
-      removal_date: node.removal_date || '',
+      name: node.name, meter_number: node.meter_number || '', energy_type: node.energy_type,
+      unit: node.unit, data_source: node.data_source, location: '',
+      site_id: node.site_id || selectedSite?.id || '', building_id: node.building_id || '',
+      usage_unit_id: node.usage_unit_id || '', parent_meter_id: node.parent_meter_id || '',
+      is_virtual: node.is_virtual, is_feed_in: node.is_feed_in,
+      is_delivery_based: node.is_delivery_based, is_weather_corrected: node.is_weather_corrected,
+      schema_label: node.schema_label || '', notes: node.notes || '',
+      source_host: (sc.shelly_host || sc.ip || '') as string,
+      source_channel: String(sc.channel ?? '0'),
+      source_entity_id: (sc.entity_id || '') as string,
+      source_register: String(sc.register ?? ''),
+      source_topic: (sc.topic || '') as string,
+      source_broker: (sc.broker_host || '') as string,
+      display_name: node.display_name || '', serial_number: node.serial_number || '',
+      installation_date: node.installation_date || '', removal_date: node.removal_date || '',
       calibration_date: node.calibration_date || '',
     });
     setMeterFormError(null);
@@ -888,16 +474,11 @@ export default function SitesPage() {
   };
 
   const handleSubmitMeter = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setMeterFormError(null);
-    setMeterSaving(true);
+    e.preventDefault(); setMeterFormError(null); setMeterSaving(true);
     try {
       const payload = buildMeterPayload(meterForm);
-      if (editingMeterId) {
-        await apiClient.put(`/api/v1/meters/${editingMeterId}`, payload);
-      } else {
-        await apiClient.post('/api/v1/meters', payload);
-      }
+      if (editingMeterId) await apiClient.put(`/api/v1/meters/${editingMeterId}`, payload);
+      else await apiClient.post('/api/v1/meters', payload);
       setShowMeterModal(false);
       reloadSiteMeters();
     } catch (err: unknown) {
@@ -916,27 +497,15 @@ export default function SitesPage() {
     try {
       const res = await apiClient.post<{ success?: boolean; value?: number; message?: string }>(`/api/v1/meters/${node.id}/poll`);
       const d = res.data;
-      setActionResult({
-        title: `Abfrage: ${node.name}`,
-        message: d.value !== undefined
-          ? `Wert: ${d.value} ${node.unit}`
-          : d.message || JSON.stringify(d),
-      });
+      setActionResult({ title: `Abfrage: ${node.name}`, message: d.value !== undefined ? `Wert: ${d.value} ${node.unit}` : d.message || JSON.stringify(d) });
     } catch { setActionResult({ title: `Abfrage: ${node.name}`, message: 'Fehler beim Abfragen.' }); }
   };
 
   const handleTestConnection = async (node: AnnotatedMeterNode) => {
     try {
-      const res = await apiClient.get<{ success: boolean; current_power_w?: number; total_energy_kwh?: number; error?: string }>(
-        `/api/v1/meters/${node.id}/test-connection`
-      );
+      const res = await apiClient.get<{ success: boolean; current_power_w?: number; total_energy_kwh?: number; error?: string }>(`/api/v1/meters/${node.id}/test-connection`);
       const d = res.data;
-      setActionResult({
-        title: `Verbindungstest: ${node.name}`,
-        message: d.success
-          ? `OK – Leistung: ${d.current_power_w ?? '?'} W · Zähler: ${d.total_energy_kwh?.toFixed(2) ?? '?'} kWh`
-          : `Fehler: ${d.error}`,
-      });
+      setActionResult({ title: `Verbindungstest: ${node.name}`, message: d.success ? `OK – Leistung: ${d.current_power_w ?? '?'} W · Zähler: ${d.total_energy_kwh?.toFixed(2) ?? '?'} kWh` : `Fehler: ${d.error}` });
     } catch { setActionResult({ title: `Verbindungstest: ${node.name}`, message: 'Verbindung fehlgeschlagen.' }); }
   };
 
@@ -959,14 +528,12 @@ export default function SitesPage() {
 
   const handleSyncNetMeters = async () => {
     if (!selectedSite) return;
-    setSyncingNetMeters(true);
-    setSyncResult(null);
+    setSyncingNetMeters(true); setSyncResult(null);
     try {
       const res = await apiClient.post(`/api/v1/sites/${selectedSite.id}/sync-net-meters`);
       setSyncResult(res.data);
-      // Zählerliste und Verbrauchsdaten aktualisieren
       await reloadSiteMeters();
-      if (selectedSite) loadSiteConsumption(selectedSite.id, new Date().getFullYear());
+      loadSiteConsumption(selectedSite.id, consumptionYear);
     } catch { /* Interceptor */ }
     setSyncingNetMeters(false);
   };
@@ -1003,11 +570,11 @@ export default function SitesPage() {
     try {
       await apiClient.delete(`/api/v1/sites/${selectedSite.id}/buildings/${b.id}`);
       loadSiteDetail(selectedSite);
-      if (selectedBuilding?.id === b.id) setSelectedBuilding(null);
+      if (selectedNode.type === 'building' && selectedNode.id === b.id) setSelectedNode({ type: 'site' });
     } catch { /* Interceptor */ }
   };
 
-  // ── Nutzungseinheit CRUD ──
+  // ── NE CRUD ──
 
   const handleSubmitUnit = async (e: React.FormEvent) => {
     e.preventDefault(); if (!selectedSite || !selectedBuilding) return;
@@ -1033,98 +600,105 @@ export default function SitesPage() {
   };
 
   const totalPages = Math.ceil(total / pageSize);
+  const breakoutStyle = { margin: '-1.5rem' };
 
-  // ── Energieart-Extraktion aus annotiertem Baum ──
-
-  function extractEnergyTypes(nodes: AnnotatedMeterNode[]): string[] {
-    const types = new Set<string>();
-    const visit = (n: AnnotatedMeterNode) => { types.add(n.energy_type); n.children.forEach(visit); };
-    nodes.forEach(visit);
-    return [...types].sort();
-  }
-
-  // ── Breadcrumb ──
-
-  const breadcrumb = (
-    <div className="flex items-center gap-2 text-sm text-gray-500 mb-4">
-      <button className={`hover:text-primary-600 ${!selectedSite ? 'font-semibold text-gray-900' : ''}`}
-        onClick={() => { setSelectedSite(null); setSelectedBuilding(null); }}>Standorte</button>
-      {selectedSite && (<>
-        <span>/</span>
-        <button className={`hover:text-primary-600 ${!selectedBuilding ? 'font-semibold text-gray-900' : ''}`}
-          onClick={() => setSelectedBuilding(null)}>{selectedSite.name}</button>
-      </>)}
-      {selectedBuilding && (<><span>/</span><span className="font-semibold text-gray-900">{selectedBuilding.name}</span></>)}
-    </div>
-  );
-
-  // ── Render: Standort-Liste ──
+  // ── Render: Liste ──
 
   if (!selectedSite) {
+    const totalMeters = sites.reduce((a, s) => a + s.meter_count, 0);
     return (
-      <div>
-        <div className="flex items-center justify-between">
+      <div className="sites-v2 dash-v2" style={breakoutStyle}>
+        <div className="page-head">
           <div>
-            <h1 className="page-title">Standorte</h1>
-            <p className="mt-1 text-sm text-gray-500">{total} Standorte insgesamt</p>
+            <div className="breadcrumb">Stammdaten · Standorte</div>
+            <h1>Standorte</h1>
+            <div className="head-sub">{total} Standorte · {totalMeters} Zähler gesamt</div>
           </div>
-          <button onClick={() => { setEditingId(null); setSiteForm(emptySiteForm); setFormError(null); setShowSiteModal(true); }} className="btn-primary">
-            + Neuer Standort
-          </button>
+          <div className="head-actions">
+            <button className="btn-primary" onClick={() => { setEditingId(null); setSiteForm(emptySiteForm); setFormError(null); setShowSiteModal(true); }}>
+              <Plus size={13} /> Neuer Standort
+            </button>
+          </div>
         </div>
 
-        <div className="card mt-4">
-          <input type="text" className="input w-full" placeholder="Suche nach Name, Stadt..."
-            value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />
+        <div className="toolbar">
+          <div className="search-input">
+            <Search size={13} style={{ color: 'var(--ink-4)', flexShrink: 0 }} />
+            <input type="text" placeholder="Suche nach Name, Stadt…" value={search}
+              onChange={e => { setSearch(e.target.value); setPage(1); }} />
+          </div>
+          <div className="view-toggle">
+            <button className={viewMode === 'cards' ? 'active' : ''} onClick={() => setViewMode('cards')}>Karten</button>
+            <button className={viewMode === 'table' ? 'active' : ''} onClick={() => setViewMode('table')}>Tabelle</button>
+          </div>
         </div>
 
-        <div className="card mt-4 overflow-hidden p-0">
-          {loading ? (
-            <LoadingSpinner />
-          ) : sites.length === 0 ? (
-            <div className="p-8 text-center text-gray-400">Keine Standorte gefunden.</div>
-          ) : (
-            <table className="w-full text-left text-sm">
-              <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-                <tr>
-                  <th className="px-4 py-3">Name</th>
-                  <th className="px-4 py-3">Stadt</th>
-                  <th className="px-4 py-3">PLZ</th>
-                  <th className="px-4 py-3 text-center">Gebäude</th>
-                  <th className="px-4 py-3 text-center">Zähler</th>
-                  <th className="px-4 py-3 text-right">Aktionen</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {sites.map(site => (
-                  <tr key={site.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => loadSiteDetail(site)}>
-                    <td className="px-4 py-3 font-medium text-primary-600">{site.name}</td>
-                    <td className="px-4 py-3 text-gray-500">{site.city || '–'}</td>
-                    <td className="px-4 py-3 text-gray-500">{site.zip_code || '–'}</td>
-                    <td className="px-4 py-3 text-center">
-                      <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">{site.building_count}</span>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">{site.meter_count}</span>
-                    </td>
-                    <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
-                      <button onClick={() => { setEditingId(site.id); setSiteForm({ name: site.name, street: site.street || '', zip_code: site.zip_code || '', city: site.city || '', country: site.country, latitude: site.latitude?.toString() || '', longitude: site.longitude?.toString() || '' }); setFormError(null); setShowSiteModal(true); }}
-                        className="mr-2 text-primary-600 hover:text-primary-800">Bearbeiten</button>
-                      <button onClick={e => handleDeleteSite(site, e)} className="text-red-500 hover:text-red-700">Löschen</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+        {loading ? (
+          <div style={{ padding: '48px 24px' }}><LoadingSpinner /></div>
+        ) : sites.length === 0 ? (
+          <div className="empty" style={{ margin: '24px' }}>
+            <strong>Noch keine Standorte</strong>Legen Sie jetzt Ihren ersten Standort an.
+          </div>
+        ) : viewMode === 'cards' ? (
+          <div className="standorte-grid">
+            {sites.map(site => (
+              <div key={site.id} className="standort-card" onClick={() => loadSiteDetail(site)}>
+                <div className="standort-card-head">
+                  <div>
+                    <div className="standort-card-title">{site.name}</div>
+                    <div className="standort-card-sub">{[site.zip_code, site.city].filter(Boolean).join(' ') || '–'}</div>
+                  </div>
+                  <div className="standort-card-menu" onClick={e => { e.stopPropagation(); setEditingId(site.id); setSiteForm({ name: site.name, street: site.street || '', zip_code: site.zip_code || '', city: site.city || '', country: site.country, latitude: site.latitude?.toString() || '', longitude: site.longitude?.toString() || '' }); setFormError(null); setShowSiteModal(true); }}>
+                    <Settings size={13} />
+                  </div>
+                </div>
+                <div className="struct-row">
+                  <div className="struct-cell">
+                    <div className="struct-num">{site.building_count}</div>
+                    <div className="struct-label">Gebäude</div>
+                  </div>
+                  <div className="struct-cell">
+                    <div className="struct-num muted">–</div>
+                    <div className="struct-label">NE</div>
+                  </div>
+                  <div className="struct-cell">
+                    <div className="struct-num">{site.meter_count}</div>
+                    <div className="struct-label">Zähler</div>
+                  </div>
+                </div>
+                <div className="standort-card-foot">
+                  <span style={{ fontSize: 11 }}>{site.timezone}</span>
+                  <span className="open-cta">Öffnen <ChevronRight size={12} /></span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="standorte-table">
+            <div className="st-tr head">
+              <span>Name</span><span>Stadt</span><span>PLZ</span><span>Gebäude · Zähler</span><span>Aktionen</span>
+            </div>
+            {sites.map(site => (
+              <div key={site.id} className="st-tr" onClick={() => loadSiteDetail(site)}>
+                <span className="st-name">{site.name}</span>
+                <span className="st-mono">{site.city || '–'}</span>
+                <span className="st-mono">{site.zip_code || '–'}</span>
+                <span style={{ fontSize: 12, color: 'var(--ink-2)' }}>{site.building_count} · {site.meter_count}</span>
+                <div className="st-actions" onClick={e => e.stopPropagation()}>
+                  <span className="edit" onClick={() => { setEditingId(site.id); setSiteForm({ name: site.name, street: site.street || '', zip_code: site.zip_code || '', city: site.city || '', country: site.country, latitude: site.latitude?.toString() || '', longitude: site.longitude?.toString() || '' }); setFormError(null); setShowSiteModal(true); }}>Bearb.</span>
+                  <span className="delete" onClick={e => handleDeleteSite(site, e)}>Löschen</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {totalPages > 1 && (
-          <div className="mt-4 flex items-center justify-between">
-            <p className="text-sm text-gray-500">Seite {page} von {totalPages}</p>
-            <div className="flex gap-2">
-              <button className="btn-secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>Zurück</button>
-              <button className="btn-secondary" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Weiter</button>
+          <div style={{ padding: '0 24px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13 }}>
+            <span style={{ color: 'var(--ink-3)' }}>Seite {page} von {totalPages}</span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn-primary" disabled={page <= 1} onClick={() => setPage(page - 1)} style={{ padding: '6px 12px', fontSize: 12 }}>Zurück</button>
+              <button className="btn-primary" disabled={page >= totalPages} onClick={() => setPage(page + 1)} style={{ padding: '6px 12px', fontSize: 12 }}>Weiter</button>
             </div>
           </div>
         )}
@@ -1135,391 +709,491 @@ export default function SitesPage() {
     );
   }
 
-  // ── Render: Standort-Detail ──
+  // ── Render: Detail ──
 
-  if (!selectedBuilding) {
-    const energyTypes = extractEnergyTypes(siteMeters);
-    const filteredTree = meterEnergyFilter ? filterTree(siteMeters, meterEnergyFilter) : siteMeters;
-    const totalMeterCount = countNodes(siteMeters);
-    const hasExits = siteConsumption && siteConsumption.cross_site_exit_kwh > 0;
+  const flatMeters = flattenTree(siteMeters);
+  const totalMeterCount = flatMeters.length || selectedSite.meter_count;
+  const hasExits = !!(siteConsumption && siteConsumption.cross_site_exit_kwh > 0);
 
-    return (
-      <div>
-        {breadcrumb}
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="page-title">{selectedSite.name}</h1>
-            <p className="mt-1 text-sm text-gray-500">
-              {[selectedSite.zip_code, selectedSite.city].filter(Boolean).join(' ')}
-              {selectedSite.street && ` · ${selectedSite.street}`}
-            </p>
+  const siteEnergySet = new Set(flatMeters.map(m => m.energy_type));
+  const activeDefs = SITE_ENERGY_DEFS.filter(d => siteEnergySet.has(d.key));
+  const unknownEnergyTypes = [...siteEnergySet].filter(k => !SITE_ENERGY_DEFS.some(d => d.key === k));
+  const filterDefs: Array<{ key: string; label: string; color: string }> = [
+    ...activeDefs,
+    ...unknownEnergyTypes.map(k => ({ key: k, label: ENERGY_TYPE_LABELS[k as keyof typeof ENERGY_TYPE_LABELS] || k, color: '#9A968B' })),
+  ];
+
+  const panelMeters = selectedNode.type === 'building'
+    ? flatMeters.filter(m => m.building_id === selectedNode.id)
+    : flatMeters;
+  const filteredPanelMeters = meterEnergyFilter
+    ? panelMeters.filter(m => m.energy_type === meterEnergyFilter)
+    : panelMeters;
+
+  // Sankey: Energieart → Gebäude
+  const sankeyFlowMap = new Map<string, number>();
+  flatMeters.forEach(m => {
+    if (!m.building_id) return;
+    const k = `${m.energy_type}::${m.building_id}`;
+    sankeyFlowMap.set(k, (sankeyFlowMap.get(k) ?? 0) + 1);
+  });
+  const siteFlows: Array<{ source: string; target: string; value: number }> = [];
+  sankeyFlowMap.forEach((cnt, k) => { const [s, t] = k.split('::'); siteFlows.push({ source: s, target: t, value: cnt }); });
+  const sankeyBuildingIds = new Set(flatMeters.map(m => m.building_id).filter(Boolean) as string[]);
+  const sankeyBuildingTargets = siteBuildings.filter(b => sankeyBuildingIds.has(b.id)).map(b => ({ id: b.id, label: b.name }));
+
+  // Sankey: Energieart → NE (nur wenn Gebäude gewählt + units geladen)
+  const bldgFlowMap = new Map<string, number>();
+  if (selectedNode.type === 'building' && selectedBuilding?.id === selectedNode.id && selectedBuilding.usage_units?.length) {
+    flatMeters.filter(m => m.building_id === selectedNode.id && m.usage_unit_id).forEach(m => {
+      const k = `${m.energy_type}::${m.usage_unit_id}`;
+      bldgFlowMap.set(k, (bldgFlowMap.get(k) ?? 0) + 1);
+    });
+  }
+  const bldgFlows: Array<{ source: string; target: string; value: number }> = [];
+  bldgFlowMap.forEach((cnt, k) => { const [s, t] = k.split('::'); bldgFlows.push({ source: s, target: t, value: cnt }); });
+
+  const panelBuilding = selectedNode.type === 'building' ? siteBuildings.find(b => b.id === selectedNode.id) ?? null : null;
+  const panelBuildingUnits = (selectedBuilding?.id === selectedNode.id) ? (selectedBuilding?.usage_units ?? []) : [];
+
+  const getEnergyColor = (k: string) => (SITE_ENERGY_DEFS.find(d => d.key === k)?.color ?? '#9A968B');
+  const fmtKwh = (v: number) => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' kWh';
+
+  return (
+    <div className="sites-v2 dash-v2" style={breakoutStyle}>
+      {/* Page head */}
+      <div className="page-head">
+        <div>
+          <div className="breadcrumb">
+            <button style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', color: 'inherit', padding: 0 }}
+              onClick={() => setSelectedSite(null)}>Standorte</button>
+            <span style={{ color: 'var(--ink-4)' }}>›</span>
+            <span style={{ color: 'var(--ink)', fontWeight: 500 }}>{selectedSite.name}</span>
           </div>
-          <button onClick={() => { setEditingId(selectedSite.id); setSiteForm({ name: selectedSite.name, street: selectedSite.street || '', zip_code: selectedSite.zip_code || '', city: selectedSite.city || '', country: selectedSite.country, latitude: selectedSite.latitude?.toString() || '', longitude: selectedSite.longitude?.toString() || '' }); setFormError(null); setShowSiteModal(true); }}
-            className="btn-secondary">Standort bearbeiten</button>
+          <h1>{selectedSite.name}</h1>
+          <div className="head-sub">{[selectedSite.zip_code, selectedSite.city, selectedSite.street].filter(Boolean).join(' · ')}</div>
         </div>
-
-        {/* KPI-Kacheln */}
-        <div className="grid gap-4 mb-4 grid-cols-2 sm:grid-cols-4">
-          <div className="card p-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wide">Zähler</p>
-            <p className="text-2xl font-bold text-primary-700 mt-1">{totalMeterCount || selectedSite.meter_count}</p>
-          </div>
-          <div className="card p-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wide">Gebäude</p>
-            <p className="text-2xl font-bold text-gray-700 mt-1">{siteBuildings.length}</p>
-          </div>
-          <div className="card p-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wide">CO₂-Region</p>
-            <p className="text-lg font-semibold text-gray-700 mt-1">{selectedSite.co2_region || '–'}</p>
-          </div>
-          <div className="card p-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wide">Zeitzone</p>
-            <p className="text-sm font-semibold text-gray-700 mt-1">{selectedSite.timezone}</p>
-          </div>
+        <div className="head-actions">
+          <button className="btn-primary" style={{ background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', fontSize: 12 }}
+            onClick={() => { setEditingId(selectedSite.id); setSiteForm({ name: selectedSite.name, street: selectedSite.street || '', zip_code: selectedSite.zip_code || '', city: selectedSite.city || '', country: selectedSite.country, latitude: selectedSite.latitude?.toString() || '', longitude: selectedSite.longitude?.toString() || '' }); setFormError(null); setShowSiteModal(true); }}>
+            Bearbeiten
+          </button>
+          <button className="btn-primary" onClick={openNewMeter}><Plus size={13} /> Neuer Zähler</button>
         </div>
+      </div>
 
-        {/* Verbrauchsrechnung */}
-        {siteConsumption && (
-          <div className={`card p-4 mb-6 ${hasExits ? 'border-amber-200 bg-amber-50' : 'border-gray-200'}`}>
-            <div className="flex items-center justify-between mb-3">
+      {/* Stats strip */}
+      <div className="stats-strip" style={{ margin: '16px 24px 0' }}>
+        <div className="stats-cell">
+          <div className="stats-label">Gebäude</div>
+          <div className="stats-value">{siteBuildings.length}</div>
+        </div>
+        <div className="stats-cell">
+          <div className="stats-label">Zähler</div>
+          <div className="stats-value">{totalMeterCount}</div>
+        </div>
+        <div className="stats-cell">
+          <div className="stats-label">CO₂-Region</div>
+          <div className="stats-value" style={{ fontSize: 14 }}>{selectedSite.co2_region || '–'}</div>
+        </div>
+        <div className="stats-cell">
+          <div className="stats-label">Zeitzone</div>
+          <div className="stats-value" style={{ fontSize: 12 }}>{selectedSite.timezone}</div>
+        </div>
+        <div className="stats-cell">
+          <div className="stats-label">Fremd-Abzüge</div>
+          <div className="stats-value">{siteConsumption ? siteConsumption.exit_points.length : '–'}</div>
+          {siteConsumption && <div className="stats-sub">{consumptionYear}</div>}
+        </div>
+      </div>
+
+      {/* VBR-Block */}
+      {siteConsumption && (
+        <div className={`vbr-block${vbrCollapsed ? ' collapsed' : ''}`}>
+          <div className="vbr-head" onClick={() => setVbrCollapsed(v => !v)}>
+            <div className="vbr-head-left">
+              <div className="vbr-icon"><Zap size={13} /></div>
               <div>
-                <p className={`text-xs font-medium uppercase tracking-wide ${hasExits ? 'text-amber-700' : 'text-gray-500'}`}>
-                  Verbrauchsrechnung
-                </p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Berechnung nach physikalischer Zählerhierarchie
-                </p>
+                <div className="vbr-title">Verbrauchsrechnung</div>
+                <div className="vbr-sub">Physikalische Zählerhierarchie</div>
               </div>
-              <select
-                className={`text-xs border rounded px-2 py-1 ${hasExits ? 'border-amber-300 text-amber-700 bg-amber-50' : 'border-gray-200 text-gray-600 bg-white'}`}
-                value={consumptionYear}
-                onChange={e => setConsumptionYear(Number(e.target.value))}
-              >
+            </div>
+            <div className="vbr-head-right">
+              <div className="vbr-net">
+                <div className="vbr-net-label">Netto</div>
+                <div className="vbr-net-value">{fmtKwh(siteConsumption.net_consumption_kwh)}</div>
+              </div>
+              <select className="vbr-year-select" value={consumptionYear}
+                onClick={e => e.stopPropagation()}
+                onChange={e => setConsumptionYear(Number(e.target.value))}>
                 {Array.from({ length: 5 }, (_, i) => currentYear - 1 - i).map(y => (
                   <option key={y} value={y}>{y}</option>
                 ))}
               </select>
-            </div>
-
-            <div className="space-y-1.5 text-sm">
-              {/* Bruttoverbrauch */}
-              <div className="flex items-baseline justify-between">
-                <span className="text-gray-700">
-                  Bruttoverbrauch
-                  <span className="ml-1 text-xs text-gray-400">(physikalische Eingangs-Zähler dieses Standorts)</span>
-                </span>
-                <span className="font-semibold text-gray-900 tabular-nums">
-                  {Number(siteConsumption.gross_consumption_kwh).toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh
-                </span>
-              </div>
-
-              {/* Abzüge */}
-              {hasExits && (
-                <>
-                  {siteConsumption.exit_points.map(ep => (
-                    <div key={ep.meter_id} className="flex items-baseline justify-between pl-4 text-amber-700">
-                      <span>
-                        <span className="mr-1 font-medium">−</span>
-                        {ep.meter_name}
-                        <span className="ml-1 text-xs text-amber-500">(gehört zu: {ep.owner_site_name})</span>
-                      </span>
-                      <span className="font-medium tabular-nums">
-                        {Number(ep.consumption_kwh).toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh
-                      </span>
-                    </div>
-                  ))}
-                  <div className="border-t border-amber-200 pt-1.5 flex items-baseline justify-between">
-                    <span className="text-xs text-amber-600 uppercase tracking-wide font-medium">
-                      Abzüge gesamt
-                    </span>
-                    <span className="text-amber-700 font-semibold tabular-nums">
-                      − {Number(siteConsumption.cross_site_exit_kwh).toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh
-                    </span>
-                  </div>
-                </>
-              )}
-
-              {/* Nettoverbrauch */}
-              <div className={`flex items-baseline justify-between pt-1.5 ${hasExits ? 'border-t border-amber-300' : 'border-t border-gray-200'}`}>
-                <span className={`font-semibold ${hasExits ? 'text-amber-800' : 'text-primary-700'}`}>
-                  = Nettoverbrauch {selectedSite.name}
-                </span>
-                <span className={`text-xl font-bold tabular-nums ${hasExits ? 'text-amber-900' : 'text-primary-700'}`}>
-                  {Number(siteConsumption.net_consumption_kwh).toLocaleString('de-DE', { maximumFractionDigits: 0 })} kWh
-                </span>
-              </div>
-
-              {!hasExits && (
-                <p className="text-xs text-gray-400 pt-1">
-                  Keine standortübergreifenden Subtraktionszähler vorhanden – Brutto = Netto.
-                </p>
-              )}
-
-              {hasExits && (
-                <div className="pt-2 border-t border-amber-200">
-                  <button
-                    onClick={handleSyncNetMeters}
-                    disabled={syncingNetMeters}
-                    className="flex items-center gap-1.5 text-xs rounded px-2.5 py-1.5 bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300 disabled:opacity-50"
-                  >
-                    {syncingNetMeters
-                      ? <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-600 border-t-transparent" />
-                      : <Zap className="h-3 w-3" />}
-                    Netto-Zähler automatisch erstellen
-                  </button>
-                  {syncResult && syncResult.length > 0 && (
-                    <div className="mt-2 space-y-0.5">
-                      {syncResult.map((r) => (
-                        <p key={r.name} className="text-xs text-amber-700">
-                          ✓ {r.name} ({r.action}, {r.subtract_count} Subtraktionszähler)
-                        </p>
-                      ))}
-                    </div>
-                  )}
-                  {syncResult && syncResult.length === 0 && (
-                    <p className="mt-1 text-xs text-amber-600">Alle Netto-Zähler sind bereits aktuell.</p>
-                  )}
-                </div>
-              )}
+              <span className="vbr-chev"><ChevronRight size={14} /></span>
             </div>
           </div>
-        )}
+          <div className="vbr-body">
+            <div className="vbr-line brutto">
+              <span>Bruttoverbrauch</span>
+              <span className="meter-val">{fmtKwh(siteConsumption.gross_consumption_kwh)}</span>
+            </div>
+            {hasExits && siteConsumption.exit_points.map(ep => (
+              <div key={ep.meter_id} className="vbr-line">
+                <div className="meter-line">
+                  <span className="meter-code">{ep.meter_name}</span>
+                  <span className="meter-belongs">gehört zu: {ep.owner_site_name}</span>
+                </div>
+                <span className="meter-val">− {fmtKwh(ep.consumption_kwh)}</span>
+              </div>
+            ))}
+            {hasExits && (
+              <div className="vbr-line section-sum">
+                <span>Abzüge gesamt</span>
+                <span className="meter-val">− {fmtKwh(siteConsumption.cross_site_exit_kwh)}</span>
+              </div>
+            )}
+            <div className="vbr-line netto">
+              <span>= Nettoverbrauch {selectedSite.name}</span>
+              <span className="meter-val">{fmtKwh(siteConsumption.net_consumption_kwh)}</span>
+            </div>
+            {!hasExits && (
+              <p style={{ fontSize: 11.5, color: '#92551A', fontStyle: 'italic', marginTop: 4 }}>
+                Keine standortübergreifenden Subtraktionszähler – Brutto = Netto.
+              </p>
+            )}
+            {hasExits && (
+              <div className="vbr-actions">
+                <button className="btn-amber" onClick={handleSyncNetMeters} disabled={syncingNetMeters}>
+                  {syncingNetMeters
+                    ? <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-700 border-t-transparent" />
+                    : <Zap size={11} />}
+                  Netto-Zähler erstellen
+                </button>
+                <button className="btn-amber" disabled style={{ opacity: 0.4, cursor: 'not-allowed' }}>Berechnung exportieren</button>
+              </div>
+            )}
+            {syncResult && syncResult.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                {syncResult.map(r => <p key={r.name} style={{ fontSize: 11.5, color: '#7B3F0C' }}>✓ {r.name} ({r.action}, {r.subtract_count} Subtraktionszähler)</p>)}
+              </div>
+            )}
+            {syncResult && syncResult.length === 0 && (
+              <p style={{ fontSize: 11.5, color: '#92551A', marginTop: 4 }}>Alle Netto-Zähler sind bereits aktuell.</p>
+            )}
+          </div>
+        </div>
+      )}
 
-        {/* Tabs */}
-        <div className="flex border-b border-gray-200 mb-4 gap-1">
-          <button
-            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${activeTab === 'meters' ? 'border-primary-600 text-primary-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-            onClick={() => setActiveTab('meters')}
-          >
-            <Zap className="w-4 h-4" /> Zähler ({totalMeterCount || selectedSite.meter_count})
-          </button>
-          <button
-            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${activeTab === 'buildings' ? 'border-primary-600 text-primary-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-            onClick={() => setActiveTab('buildings')}
-          >
-            <Building2 className="w-4 h-4" /> Gebäude ({siteBuildings.length})
-          </button>
+      {/* Zwei-Spalten-Layout */}
+      <div className="detail-main">
+        {/* Baum */}
+        <div className="tree">
+          <div className="tree-head">
+            <span className="tree-head-title">Hierarchie</span>
+            <span className="tree-expand-toggle" onClick={() => setBuildingsExpanded(v => !v)}>
+              {buildingsExpanded ? 'Einklappen' : 'Aufklappen'}
+            </span>
+          </div>
+          <div className="tree-body">
+            <div className={`tree-node${buildingsExpanded && siteBuildings.length > 0 ? ' open' : ''}`}>
+              <div className={`tree-row tree-level-standort${selectedNode.type === 'site' ? ' selected' : ''}`}
+                onClick={() => setSelectedNode({ type: 'site' })}>
+                <div className={`tree-chev${siteBuildings.length === 0 ? ' empty' : ''}`}
+                  onClick={e => { e.stopPropagation(); setBuildingsExpanded(v => !v); }}>
+                  {siteBuildings.length > 0 && <ChevronRight size={12} />}
+                </div>
+                <div className="tree-ico"><Building2 size={13} /></div>
+                <span className="tree-label">{selectedSite.name}</span>
+                <span className="tree-meta">{totalMeterCount}</span>
+              </div>
+              <div className="tree-children">
+                {detailLoading && <div style={{ padding: '8px 12px', fontSize: 11, color: 'var(--ink-4)' }}>Laden…</div>}
+                {siteBuildings.map(b => {
+                  const bCount = flatMeters.filter(m => m.building_id === b.id).length;
+                  const isSel = selectedNode.type === 'building' && selectedNode.id === b.id;
+                  return (
+                    <div key={b.id} className="tree-node">
+                      <div className={`tree-row tree-level-gebaeude${isSel ? ' selected' : ''}`}
+                        onClick={() => handleBuildingNodeClick(b)}>
+                        <div className="tree-chev empty" />
+                        <div className="tree-ico"><Building2 size={12} /></div>
+                        <span className="tree-label">{b.name}</span>
+                        <span className="tree-meta">{bCount}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* Tab: Zähler */}
-        {activeTab === 'meters' && (
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              {/* Energieart-Filter */}
-              {!detailLoading && energyTypes.length > 1 && (
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={() => setMeterEnergyFilter('')}
-                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${meterEnergyFilter === '' ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-gray-600 border-gray-300 hover:border-primary-400'}`}>
-                    Alle ({totalMeterCount})
-                  </button>
-                  {energyTypes.map(et => {
-                    const count = countNodes(filterTree(siteMeters, et));
-                    return (
-                      <button key={et} onClick={() => setMeterEnergyFilter(et === meterEnergyFilter ? '' : et)}
-                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${meterEnergyFilter === et ? 'bg-primary-600 text-white border-primary-600' : 'bg-white border-gray-300 hover:border-primary-400 ' + (ENERGY_COLORS[et] || 'text-gray-600')}`}>
-                        {ENERGY_TYPE_LABELS[et as keyof typeof ENERGY_TYPE_LABELS] || et} ({count})
-                      </button>
-                    );
-                  })}
+        {/* Panel */}
+        <div className="panel">
+          {selectedNode.type === 'site' ? (
+            <>
+              {/* Standort Entity-Head */}
+              <div className="entity-head">
+                <div className="entity-crumb">Standort</div>
+                <div className="entity-title-row">
+                  <h2>{selectedSite.name}</h2>
+                  <span className="entity-kind">Standort</span>
+                </div>
+                <div className="entity-meta">
+                  {selectedSite.city && <div className="item"><span className="item-label">Stadt</span><span className="item-val">{selectedSite.city}</span></div>}
+                  {selectedSite.zip_code && <div className="item"><span className="item-label">PLZ</span><span className="item-val">{selectedSite.zip_code}</span></div>}
+                  {selectedSite.co2_region && <div className="item"><span className="item-label">CO₂</span><span className="item-val">{selectedSite.co2_region}</span></div>}
+                  <div className="item"><span className="item-label">Gebäude</span><span className="item-val">{siteBuildings.length}</span></div>
+                  <div className="item"><span className="item-label">Zähler</span><span className="item-val">{totalMeterCount}</span></div>
+                </div>
+              </div>
+
+              {/* Sankey Energieart → Gebäude */}
+              {siteFlows.length > 0 && sankeyBuildingTargets.length > 0 && (
+                <div className="panel-card">
+                  <div className="panel-card-head">
+                    <div>
+                      <h3>Energiefluss · Standort-Übersicht</h3>
+                      <div className="panel-card-sub">Zähler nach Energieart und Gebäude</div>
+                    </div>
+                  </div>
+                  <div className="sankey-wrap">
+                    <Sankey
+                      sources={activeDefs.map(d => ({ id: d.key, label: d.label, color: d.color }))}
+                      targets={sankeyBuildingTargets}
+                      flows={siteFlows}
+                      height={Math.max(160, sankeyBuildingTargets.length * 42 + 60)}
+                      width={560} labelLeft={100} labelRight={120}
+                    />
+                    <div className="sankey-foot">
+                      <span className="lhs">Energieart</span>
+                      <span className="rhs">Gebäude</span>
+                    </div>
+                  </div>
                 </div>
               )}
-              <button onClick={openNewMeter} className="btn-primary ml-auto flex items-center gap-1.5">
-                <Plus className="w-4 h-4" /> Neuer Zähler
+
+              {/* Gebäude-Karten */}
+              {siteBuildings.length > 0 && (
+                <div className="panel-card">
+                  <div className="panel-card-head">
+                    <div><h3>Gebäude</h3></div>
+                    <button className="btn-primary" style={{ fontSize: 12, padding: '5px 10px' }}
+                      onClick={() => { setEditingId(null); setBuildingForm(emptyBuildingForm); setFormError(null); setShowBuildingModal(true); }}>
+                      <Plus size={12} /> Neu
+                    </button>
+                  </div>
+                  <div className="building-grid">
+                    {siteBuildings.map(b => {
+                      const bMeters = flatMeters.filter(m => m.building_id === b.id);
+                      return (
+                        <div key={b.id} className="building-card" onClick={() => handleBuildingNodeClick(b)}>
+                          <div className="building-name">{b.name}</div>
+                          <div className="building-attrs">
+                            {b.building_type && <div className="row"><span className="l">Typ</span><span>{BUILDING_TYPES[b.building_type] || b.building_type}</span></div>}
+                            {b.total_area_m2 && <div className="row"><span className="l">Fläche</span><span>{Number(b.total_area_m2).toLocaleString('de-DE')} m²</span></div>}
+                            {b.building_year && <div className="row"><span className="l">Baujahr</span><span>{b.building_year}</span></div>}
+                          </div>
+                          <div className="building-foot">
+                            <span>{b.usage_unit_count} NE</span>
+                            <span className="ne-count">{bMeters.length} Zähler</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : panelBuilding ? (
+            <>
+              {/* Gebäude Entity-Head */}
+              <div className="entity-head">
+                <div className="entity-crumb">
+                  <button style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', color: 'var(--ink-3)', padding: 0 }}
+                    onClick={() => setSelectedNode({ type: 'site' })}>{selectedSite.name}</button>
+                  <span style={{ color: 'var(--ink-4)' }}>›</span>
+                  <span style={{ color: 'var(--ink)' }}>{panelBuilding.name}</span>
+                </div>
+                <div className="entity-title-row">
+                  <h2>{panelBuilding.name}</h2>
+                  <span className="entity-kind">Gebäude</span>
+                </div>
+                <div className="entity-meta">
+                  {panelBuilding.building_type && <div className="item"><span className="item-label">Typ</span><span className="item-val">{BUILDING_TYPES[panelBuilding.building_type] || panelBuilding.building_type}</span></div>}
+                  {panelBuilding.total_area_m2 && <div className="item"><span className="item-label">Fläche</span><span className="item-val">{Number(panelBuilding.total_area_m2).toLocaleString('de-DE')} m²</span></div>}
+                  {panelBuilding.building_year && <div className="item"><span className="item-label">Baujahr</span><span className="item-val">{panelBuilding.building_year}</span></div>}
+                  <div className="item"><span className="item-label">NE</span><span className="item-val">{panelBuilding.usage_unit_count}</span></div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  <button className="btn-primary" style={{ background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', fontSize: 11, padding: '4px 10px' }}
+                    onClick={() => { setEditingId(panelBuilding.id); setBuildingForm({ name: panelBuilding.name, building_type: panelBuilding.building_type || '', building_year: panelBuilding.building_year?.toString() || '', total_area_m2: panelBuilding.total_area_m2?.toString() || '', heated_area_m2: panelBuilding.heated_area_m2?.toString() || '', cooled_area_m2: panelBuilding.cooled_area_m2?.toString() || '', floors: panelBuilding.floors?.toString() || '', energy_certificate_class: panelBuilding.energy_certificate_class || '' }); setFormError(null); setShowBuildingModal(true); }}>
+                    Bearbeiten
+                  </button>
+                  {panelBuildingUnits.length > 0 && (
+                    <button className="btn-primary" style={{ background: 'var(--surface)', color: 'var(--ink)', border: '1px solid var(--line)', fontSize: 11, padding: '4px 10px' }}
+                      onClick={() => { setEditingId(null); setUnitForm(emptyUnitForm); setFormError(null); setShowUnitModal(true); }}>
+                      + NE
+                    </button>
+                  )}
+                  <button className="btn-primary" style={{ background: 'var(--surface)', color: '#B91C1C', border: '1px solid var(--line)', fontSize: 11, padding: '4px 10px' }}
+                    onClick={() => handleDeleteBuilding(panelBuilding)}>Löschen</button>
+                </div>
+              </div>
+
+              {/* Sankey Energieart → NE (wenn geladen) */}
+              {bldgFlows.length > 0 && panelBuildingUnits.length > 0 && (
+                <div className="panel-card">
+                  <div className="panel-card-head">
+                    <div>
+                      <h3>Energiefluss · {panelBuilding.name}</h3>
+                      <div className="panel-card-sub">Zähler nach Energieart und Nutzungseinheit</div>
+                    </div>
+                  </div>
+                  <div className="sankey-wrap">
+                    <Sankey
+                      sources={activeDefs.filter(d => bldgFlows.some(f => f.source === d.key)).map(d => ({ id: d.key, label: d.label, color: d.color }))}
+                      targets={panelBuildingUnits.map(u => ({ id: u.id, label: u.name }))}
+                      flows={bldgFlows}
+                      height={Math.max(140, panelBuildingUnits.length * 36 + 60)}
+                      width={560} labelLeft={100} labelRight={120}
+                    />
+                    <div className="sankey-foot">
+                      <span className="lhs">Energieart</span>
+                      <span className="rhs">Nutzungseinheit</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : null}
+
+          {/* Zähler-Liste (gemeinsam für Standort- und Gebäude-Panel) */}
+          <div className="panel-card">
+            <div className="panel-card-head">
+              <div>
+                <h3>Zähler</h3>
+                <div className="panel-card-sub">
+                  {filteredPanelMeters.length} von {panelMeters.length}
+                  {selectedNode.type === 'building' && panelBuilding ? ` · ${panelBuilding.name}` : ''}
+                </div>
+              </div>
+              <button className="btn-primary" style={{ fontSize: 12, padding: '5px 10px' }} onClick={openNewMeter}>
+                <Plus size={12} /> Neu
               </button>
             </div>
 
-            {hasExits && (
-              <div className="mb-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700 flex items-center gap-2">
-                <span className="font-medium">Amber-markierte Zähler</span> gehören anderen Standorten und werden in der Verbrauchsrechnung oben subtrahiert.
+            {filterDefs.length > 1 && (
+              <div className="meter-filter-bar">
+                <button className={`filter-pill${meterEnergyFilter === '' ? ' active' : ''}`}
+                  onClick={() => setMeterEnergyFilter('')}>
+                  Alle <span className="count">{panelMeters.length}</span>
+                </button>
+                {filterDefs.map(d => {
+                  const cnt = panelMeters.filter(m => m.energy_type === d.key).length;
+                  if (cnt === 0) return null;
+                  return (
+                    <button key={d.key} className={`filter-pill${meterEnergyFilter === d.key ? ' active' : ''}`}
+                      onClick={() => setMeterEnergyFilter(meterEnergyFilter === d.key ? '' : d.key)}>
+                      {meterEnergyFilter !== d.key && <span className="dot" style={{ background: d.color }} />}
+                      {d.label} <span className="count">{cnt}</span>
+                    </button>
+                  );
+                })}
               </div>
             )}
 
-            <div className="card overflow-hidden p-0">
-              <MeterTreeTable
-                nodes={filteredTree}
-                loading={detailLoading}
-                emptyMessage={totalMeterCount === 0 ? 'Diesem Standort sind keine aktiven Zähler zugewiesen.' : 'Keine Zähler für diese Energieart.'}
-                onEdit={openEditMeter}
-                onDelete={handleDeleteMeter}
-                onPoll={handlePollMeter}
-                onTestConnection={handleTestConnection}
-              />
+            <div className="banner" style={{ margin: '12px 18px 0' }}>
+              <span>Zähler-Hierarchie unter</span>
+              <a href="/meters" onClick={e => { e.preventDefault(); window.location.href = '/meters'; }}>
+                Zähler → Physikalisches Netzwerk
+              </a>
             </div>
-            <p className="mt-2 text-xs text-gray-400">
-              Tipp: Zähler per Drag & Drop (⠿) in Eltern-Kind-Beziehungen anordnen
-            </p>
-          </div>
-        )}
 
-        {/* Tab: Gebäude */}
-        {activeTab === 'buildings' && (
-          <div>
-            <div className="flex justify-end mb-3">
-              <button onClick={() => { setEditingId(null); setBuildingForm(emptyBuildingForm); setFormError(null); setShowBuildingModal(true); }}
-                className="btn-primary">+ Neues Gebäude</button>
-            </div>
             {detailLoading ? (
-              <LoadingSpinner />
-            ) : siteBuildings.length === 0 ? (
-              <div className="card p-8 text-center text-gray-400">Keine Gebäude vorhanden.</div>
+              <div style={{ padding: 24 }}><LoadingSpinner text="Zähler werden geladen" /></div>
+            ) : filteredPanelMeters.length === 0 ? (
+              <div className="empty">
+                <strong>Keine Zähler</strong>
+                {meterEnergyFilter ? 'Keine Zähler für diese Energieart.' : 'Diesem Standort sind noch keine Zähler zugewiesen.'}
+              </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {siteBuildings.map(b => (
-                  <div key={b.id} className="card cursor-pointer hover:border-primary-300 transition-colors"
-                    onClick={() => loadBuildingDetail(selectedSite.id, b.id)}>
-                    <h3 className="font-semibold text-primary-700">{b.name}</h3>
-                    <div className="mt-2 space-y-1 text-sm text-gray-500">
-                      {b.building_type && <p>Typ: {BUILDING_TYPES[b.building_type] || b.building_type}</p>}
-                      {b.total_area_m2 && <p>Fläche: {Number(b.total_area_m2).toLocaleString('de-DE')} m²</p>}
-                      {b.building_year && <p>Baujahr: {b.building_year}</p>}
-                      <p className="text-xs">{b.usage_unit_count} Nutzungseinheit(en)</p>
+              <div className="meter-list">
+                {filteredPanelMeters.map(m => {
+                  const color = getEnergyColor(m.energy_type);
+                  const label = ENERGY_TYPE_LABELS[m.energy_type as keyof typeof ENERGY_TYPE_LABELS] || m.energy_type;
+                  return (
+                    <div key={m.id} className={`meter-row${m.cross_site_boundary ? ' foreign' : ''}`}>
+                      <div className="stripe" style={{ background: color }} />
+                      <div className="meter-main">
+                        <span className="meter-name" title={m.display_name ? `${m.name} · ${m.display_name}` : m.name}>{m.name}</span>
+                        {m.cross_site_boundary && <span className="meter-belongs">↗ gehört zu: {m.owner_site_name ?? 'Anderer Standort'}</span>}
+                        {m.meter_number && <span className="meter-num">{m.meter_number}</span>}
+                      </div>
+                      <div className="meter-energy" style={{ background: color + '22', color: '#3D3D3D', border: `1px solid ${color}55` }}>
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, display: 'inline-block', flexShrink: 0 }} />
+                        {label}
+                      </div>
+                      <span className="meter-source">{DATA_SOURCE_LABELS[m.data_source] || m.data_source}</span>
+                      <div className="meter-row-actions">
+                        {!m.cross_site_boundary && (
+                          <>
+                            <button onClick={() => openEditMeter(m)} title="Bearbeiten"><Settings size={12} /></button>
+                            <button onClick={() => handlePollMeter(m)} title="Abfragen"><Activity size={12} /></button>
+                            {m.data_source === 'shelly' && <button onClick={() => handleTestConnection(m)} title="Verbindung testen"><Wifi size={12} /></button>}
+                            <button onClick={() => handleDeleteMeter(m)} title="Löschen" style={{ color: '#B91C1C' }}><Trash2 size={12} /></button>
+                          </>
+                        )}
+                        <a href={`/readings?meter_id=${m.id}`}
+                          onClick={e => { e.preventDefault(); window.location.href = `/readings?meter_id=${m.id}`; }}
+                          style={{ fontSize: 11, color: 'var(--ink-3)', textDecoration: 'underline', paddingLeft: 2 }}>
+                          Werte
+                        </a>
+                      </div>
                     </div>
-                    <div className="mt-3 flex gap-2" onClick={e => e.stopPropagation()}>
-                      <button onClick={() => { setEditingId(b.id); setBuildingForm({ name: b.name, building_type: b.building_type || '', building_year: b.building_year?.toString() || '', total_area_m2: b.total_area_m2?.toString() || '', heated_area_m2: b.heated_area_m2?.toString() || '', cooled_area_m2: b.cooled_area_m2?.toString() || '', floors: b.floors?.toString() || '', energy_certificate_class: b.energy_certificate_class || '' }); setFormError(null); setShowBuildingModal(true); }}
-                        className="text-xs text-primary-600 hover:text-primary-800">Bearbeiten</button>
-                      <button onClick={() => handleDeleteBuilding(b)} className="text-xs text-red-500 hover:text-red-700">Löschen</button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
-        )}
+        </div>
+      </div>
 
-        {showSiteModal && <SiteModal form={siteForm} setForm={setSiteForm} editingId={editingId}
-          onSubmit={handleSubmitSite} onClose={() => setShowSiteModal(false)} error={formError} saving={saving} />}
+      {/* Modals */}
+      {showSiteModal && <SiteModal form={siteForm} setForm={setSiteForm} editingId={editingId}
+        onSubmit={handleSubmitSite} onClose={() => setShowSiteModal(false)} error={formError} saving={saving} />}
 
-        {showBuildingModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
-              <h2 className="mb-4 text-lg font-bold">{editingId ? 'Gebäude bearbeiten' : 'Neues Gebäude'}</h2>
-              <form onSubmit={handleSubmitBuilding} className="space-y-4">
-                {formError && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{formError}</div>}
-                <div><label className="label">Name *</label><input type="text" className="input" value={buildingForm.name} onChange={e => setBuildingForm({ ...buildingForm, name: e.target.value })} required autoFocus /></div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div><label className="label">Gebäudetyp</label><select className="input" value={buildingForm.building_type} onChange={e => setBuildingForm({ ...buildingForm, building_type: e.target.value })}><option value="">– Wählen –</option>{Object.entries(BUILDING_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
-                  <div><label className="label">Baujahr</label><input type="number" className="input" value={buildingForm.building_year} onChange={e => setBuildingForm({ ...buildingForm, building_year: e.target.value })} /></div>
-                </div>
-                <div className="grid grid-cols-3 gap-4">
-                  <div><label className="label">Bruttofläche (m²)</label><input type="number" step="0.01" className="input" value={buildingForm.total_area_m2} onChange={e => setBuildingForm({ ...buildingForm, total_area_m2: e.target.value })} /></div>
-                  <div><label className="label">Beheizt (m²)</label><input type="number" step="0.01" className="input" value={buildingForm.heated_area_m2} onChange={e => setBuildingForm({ ...buildingForm, heated_area_m2: e.target.value })} /></div>
-                  <div><label className="label">Gekühlt (m²)</label><input type="number" step="0.01" className="input" value={buildingForm.cooled_area_m2} onChange={e => setBuildingForm({ ...buildingForm, cooled_area_m2: e.target.value })} /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div><label className="label">Stockwerke</label><input type="number" className="input" value={buildingForm.floors} onChange={e => setBuildingForm({ ...buildingForm, floors: e.target.value })} /></div>
-                  <div><label className="label">Energieausweis-Klasse</label><select className="input" value={buildingForm.energy_certificate_class} onChange={e => setBuildingForm({ ...buildingForm, energy_certificate_class: e.target.value })}><option value="">– Keine –</option>{['A+','A','B','C','D','E','F','G','H'].map(c => <option key={c} value={c}>{c}</option>)}</select></div>
-                </div>
-                <div className="flex justify-end gap-3 pt-2"><button type="button" onClick={() => setShowBuildingModal(false)} className="btn-secondary">Abbrechen</button><button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Speichern...' : editingId ? 'Speichern' : 'Anlegen'}</button></div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {showMeterModal && (
-          <MeterModal
-            form={meterForm} setForm={setMeterForm} editingId={editingMeterId}
-            onSubmit={handleSubmitMeter} onClose={() => setShowMeterModal(false)}
-            error={meterFormError} saving={meterSaving}
-            siteBuildings={siteBuildings} siteUnits={allSiteUnits}
-          />
-        )}
-
-        {actionResult && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-              <h2 className="mb-3 text-lg font-bold">{actionResult.title}</h2>
-              <p className="text-sm text-gray-700 whitespace-pre-wrap">{actionResult.message}</p>
-              <div className="mt-4 flex justify-end">
-                <button onClick={() => setActionResult(null)} className="btn-secondary">Schließen</button>
+      {showBuildingModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+            <h2 className="mb-4 text-lg font-bold">{editingId ? 'Gebäude bearbeiten' : 'Neues Gebäude'}</h2>
+            <form onSubmit={handleSubmitBuilding} className="space-y-4">
+              {formError && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{formError}</div>}
+              <div><label className="label">Name *</label><input type="text" className="input" value={buildingForm.name} onChange={e => setBuildingForm({ ...buildingForm, name: e.target.value })} required autoFocus /></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="label">Gebäudetyp</label><select className="input" value={buildingForm.building_type} onChange={e => setBuildingForm({ ...buildingForm, building_type: e.target.value })}><option value="">– Wählen –</option>{Object.entries(BUILDING_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
+                <div><label className="label">Baujahr</label><input type="number" className="input" value={buildingForm.building_year} onChange={e => setBuildingForm({ ...buildingForm, building_year: e.target.value })} /></div>
               </div>
-            </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div><label className="label">Bruttofläche (m²)</label><input type="number" step="0.01" className="input" value={buildingForm.total_area_m2} onChange={e => setBuildingForm({ ...buildingForm, total_area_m2: e.target.value })} /></div>
+                <div><label className="label">Beheizt (m²)</label><input type="number" step="0.01" className="input" value={buildingForm.heated_area_m2} onChange={e => setBuildingForm({ ...buildingForm, heated_area_m2: e.target.value })} /></div>
+                <div><label className="label">Gekühlt (m²)</label><input type="number" step="0.01" className="input" value={buildingForm.cooled_area_m2} onChange={e => setBuildingForm({ ...buildingForm, cooled_area_m2: e.target.value })} /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="label">Stockwerke</label><input type="number" className="input" value={buildingForm.floors} onChange={e => setBuildingForm({ ...buildingForm, floors: e.target.value })} /></div>
+                <div><label className="label">Energieausweis-Klasse</label><select className="input" value={buildingForm.energy_certificate_class} onChange={e => setBuildingForm({ ...buildingForm, energy_certificate_class: e.target.value })}><option value="">– Keine –</option>{['A+','A','B','C','D','E','F','G','H'].map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowBuildingModal(false)} className="btn-secondary">Abbrechen</button>
+                <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Speichern...' : editingId ? 'Speichern' : 'Anlegen'}</button>
+              </div>
+            </form>
           </div>
-        )}
-      </div>
-    );
-  }
-
-  // ── Render: Gebäude-Detail ──
-
-  return (
-    <div>
-      {breadcrumb}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="page-title">{selectedBuilding.name}</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            {selectedBuilding.building_type && (BUILDING_TYPES[selectedBuilding.building_type] || selectedBuilding.building_type)}
-            {selectedBuilding.total_area_m2 && ` · ${Number(selectedBuilding.total_area_m2).toLocaleString('de-DE')} m²`}
-            {selectedBuilding.building_year && ` · Baujahr ${selectedBuilding.building_year}`}
-          </p>
-        </div>
-        {buildingActiveTab === 'units' && (
-          <button onClick={() => { setEditingId(null); setUnitForm(emptyUnitForm); setFormError(null); setShowUnitModal(true); }}
-            className="btn-primary">+ Neue Nutzungseinheit</button>
-        )}
-      </div>
-
-      {/* Tabs */}
-      <div className="flex border-b border-gray-200 mb-4 gap-1">
-        <button className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${buildingActiveTab === 'meters' ? 'border-primary-600 text-primary-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-          onClick={() => setBuildingActiveTab('meters')}>
-          <Zap className="w-4 h-4" /> Zähler ({countNodes(buildingMeters)})
-        </button>
-        <button className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${buildingActiveTab === 'units' ? 'border-primary-600 text-primary-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-          onClick={() => setBuildingActiveTab('units')}>
-          <Home className="w-4 h-4" /> Nutzungseinheiten ({selectedBuilding.usage_units.length})
-        </button>
-      </div>
-
-      {buildingActiveTab === 'meters' && (
-        <div className="card overflow-hidden p-0">
-          <MeterTreeTable
-            nodes={buildingMeters}
-            emptyMessage="Diesem Gebäude sind keine Zähler zugewiesen."
-            onEdit={openEditMeter}
-            onDelete={handleDeleteMeter}
-            onPoll={handlePollMeter}
-            onTestConnection={handleTestConnection}
-          />
         </div>
       )}
 
-      {buildingActiveTab === 'units' && (
-        <div className="card overflow-hidden p-0">
-          {selectedBuilding.usage_units.length === 0 ? (
-            <div className="p-8 text-center text-gray-400"><Home className="w-8 h-8 mx-auto mb-2 opacity-30" />Keine Nutzungseinheiten vorhanden.</div>
-          ) : (
-            <table className="w-full text-left text-sm">
-              <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-                <tr>
-                  <th className="px-4 py-3">Name</th><th className="px-4 py-3">Nutzungsart</th><th className="px-4 py-3">Etage</th>
-                  <th className="px-4 py-3 text-right">Fläche (m²)</th><th className="px-4 py-3 text-right">Personen</th>
-                  <th className="px-4 py-3">Mieter</th><th className="px-4 py-3 text-right">Aktionen</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {selectedBuilding.usage_units.map(u => (
-                  <tr key={u.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium">{u.name}</td>
-                    <td className="px-4 py-3"><span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">{USAGE_TYPES[u.usage_type] || u.usage_type}</span></td>
-                    <td className="px-4 py-3 text-gray-500">{u.floor || '–'}</td>
-                    <td className="px-4 py-3 text-right text-gray-500">{u.area_m2 ? Number(u.area_m2).toLocaleString('de-DE') : '–'}</td>
-                    <td className="px-4 py-3 text-right text-gray-500">{u.occupants ?? '–'}</td>
-                    <td className="px-4 py-3 text-gray-500">{u.tenant_name || '–'}</td>
-                    <td className="px-4 py-3 text-right">
-                      <button onClick={() => { setEditingId(u.id); setUnitForm({ name: u.name, usage_type: u.usage_type, floor: u.floor || '', area_m2: u.area_m2?.toString() || '', occupants: u.occupants?.toString() || '', tenant_name: u.tenant_name || '' }); setFormError(null); setShowUnitModal(true); }}
-                        className="mr-2 text-primary-600 hover:text-primary-800">Bearbeiten</button>
-                      <button onClick={() => handleDeleteUnit(u)} className="text-red-500 hover:text-red-700">Löschen</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
-
-      {showUnitModal && (
+      {showUnitModal && selectedBuilding && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
             <h2 className="mb-4 text-lg font-bold">{editingId ? 'Nutzungseinheit bearbeiten' : 'Neue Nutzungseinheit'}</h2>
@@ -1530,24 +1204,25 @@ export default function SitesPage() {
                 <div><label className="label">Nutzungsart *</label><select className="input" value={unitForm.usage_type} onChange={e => setUnitForm({ ...unitForm, usage_type: e.target.value })}>{Object.entries(USAGE_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
               </div>
               <div className="grid grid-cols-3 gap-4">
-                <div><label className="label">Etage</label><input type="text" className="input" value={unitForm.floor} onChange={e => setUnitForm({ ...unitForm, floor: e.target.value })} placeholder="z.B. EG, 1. OG" /></div>
+                <div><label className="label">Etage</label><input type="text" className="input" value={unitForm.floor} onChange={e => setUnitForm({ ...unitForm, floor: e.target.value })} placeholder="EG, 1. OG…" /></div>
                 <div><label className="label">Fläche (m²)</label><input type="number" step="0.01" className="input" value={unitForm.area_m2} onChange={e => setUnitForm({ ...unitForm, area_m2: e.target.value })} /></div>
                 <div><label className="label">Personen</label><input type="number" className="input" value={unitForm.occupants} onChange={e => setUnitForm({ ...unitForm, occupants: e.target.value })} /></div>
               </div>
               <div><label className="label">Mieter</label><input type="text" className="input" value={unitForm.tenant_name} onChange={e => setUnitForm({ ...unitForm, tenant_name: e.target.value })} /></div>
-              <div className="flex justify-end gap-3 pt-2"><button type="button" onClick={() => setShowUnitModal(false)} className="btn-secondary">Abbrechen</button><button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Speichern...' : editingId ? 'Speichern' : 'Anlegen'}</button></div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowUnitModal(false)} className="btn-secondary">Abbrechen</button>
+                <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Speichern...' : editingId ? 'Speichern' : 'Anlegen'}</button>
+              </div>
             </form>
           </div>
         </div>
       )}
 
       {showMeterModal && (
-        <MeterModal
-          form={meterForm} setForm={setMeterForm} editingId={editingMeterId}
+        <MeterModal form={meterForm} setForm={setMeterForm} editingId={editingMeterId}
           onSubmit={handleSubmitMeter} onClose={() => setShowMeterModal(false)}
           error={meterFormError} saving={meterSaving}
-          siteBuildings={siteBuildings} siteUnits={allSiteUnits}
-        />
+          siteBuildings={siteBuildings} siteUnits={allSiteUnits} />
       )}
 
       {actionResult && (
@@ -1564,11 +1239,9 @@ export default function SitesPage() {
 }
 
 // ── Standort-Modal ──
-
 function SiteModal({ form, setForm, editingId, onSubmit, onClose, error, saving }: {
   form: SiteForm; setForm: (f: SiteForm) => void; editingId: string | null;
-  onSubmit: (e: React.FormEvent) => void; onClose: () => void;
-  error: string | null; saving: boolean;
+  onSubmit: (e: React.FormEvent) => void; onClose: () => void; error: string | null; saving: boolean;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
