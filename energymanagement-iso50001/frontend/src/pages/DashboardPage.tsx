@@ -327,10 +327,10 @@ function StatusBand({ co2Current, co2Baseline }: { co2Current: number; co2Baseli
           {onTrack ? 'Im Zielkorridor' : 'Hinter Ziel'}
         </div>
         <div>
-          <span style={{ display: 'block', fontWeight: 600, fontSize: 13.5, color: 'var(--dv-ink)' }}>
+          <span style={{ display: 'block', fontWeight: 600, fontSize: 13.5, color: 'var(--ink)' }}>
             ISO 50001 · CO₂-Reduktionspfad
           </span>
-          <span style={{ display: 'block', fontSize: 11.5, color: 'var(--dv-ink-3)', marginTop: 2 }}>
+          <span style={{ display: 'block', fontSize: 11.5, color: 'var(--ink-3)', marginTop: 2 }}>
             Ziel: −{targetPct}% bis {targetYear} · Basis {baselineYear}
           </span>
         </div>
@@ -345,19 +345,19 @@ function StatusBand({ co2Current, co2Baseline }: { co2Current: number; co2Baseli
             <div className="dv-marker-dot" />
           </div>
         </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 12, color: 'var(--dv-ink-2)', marginTop: 4 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 12, color: 'var(--ink-2)', marginTop: 4 }}>
           <span>
-            Erreicht: <strong style={{ color: 'var(--dv-ink)' }}>{reductionAchieved.toFixed(1)}%</strong>
+            Erreicht: <strong style={{ color: 'var(--ink)' }}>{reductionAchieved.toFixed(1)}%</strong>
           </span>
-          <span style={{ color: 'var(--dv-ink-4)' }}>·</span>
+          <span style={{ color: 'var(--ink-4)' }}>·</span>
           <span>
-            Ziel {targetYear}: <strong style={{ color: 'var(--dv-ink)' }}>−{targetPct}%</strong>
+            Ziel {targetYear}: <strong style={{ color: 'var(--ink)' }}>−{targetPct}%</strong>
           </span>
           {co2Baseline > 0 && (
             <>
-              <span style={{ color: 'var(--dv-ink-4)' }}>·</span>
+              <span style={{ color: 'var(--ink-4)' }}>·</span>
               <span>
-                Basis: <strong style={{ color: 'var(--dv-ink)' }}>{fmtNum(co2Baseline)} kg</strong>
+                Basis: <strong style={{ color: 'var(--ink)' }}>{fmtNum(co2Baseline)} kg</strong>
               </span>
             </>
           )}
@@ -368,12 +368,12 @@ function StatusBand({ co2Current, co2Baseline }: { co2Current: number; co2Baseli
       <button
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 6,
-          border: '1px solid var(--dv-line)',
-          background: 'var(--dv-surface)',
+          border: '1px solid var(--line)',
+          background: 'var(--surface)',
           padding: '7px 12px',
-          borderRadius: 'var(--dv-r-sm)',
+          borderRadius: 'var(--r-sm)',
           fontSize: 12.5, fontWeight: 500,
-          color: 'var(--dv-ink)',
+          color: 'var(--ink)',
           cursor: 'pointer',
           whiteSpace: 'nowrap',
         }}
@@ -396,7 +396,7 @@ function DeltaBadge({ pct, inverse = false }: { pct: number | null; inverse?: bo
     ? <path d="M6 2L10 6H2L6 2Z" fill={color}/>
     : <path d="M6 10L10 6H2L6 10Z" fill={color}/>;
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 12, fontWeight: 600, fontFamily: 'var(--dv-font-mono)', color }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-mono)', color }}>
       <svg width="10" height="10" viewBox="0 0 12 12">{Arrow}</svg>
       {fmtDelta(pct)}
     </span>
@@ -457,23 +457,23 @@ function HeroKPIs({ cards }: { cards: KPICard[] }) {
     <div className="dv-hero-trio">
       {heroes.map((h, i) => (
         <div key={i} className="dv-hero-card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--dv-ink-3)', fontWeight: 500 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)', fontWeight: 500 }}>
             {h.icon}
             {h.label}
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-            <span style={{ fontSize: 30, fontWeight: 600, letterSpacing: '-0.025em', fontFamily: 'var(--dv-font-mono)', fontFeatureSettings: '"tnum"', color: 'var(--dv-ink)' }}>
+            <span style={{ fontSize: 30, fontWeight: 600, letterSpacing: '-0.025em', fontFamily: 'var(--font-mono)', fontFeatureSettings: '"tnum"', color: 'var(--ink)' }}>
               {h.value}
             </span>
             {h.unit && (
-              <span style={{ fontSize: 12, color: 'var(--dv-ink-3)', fontFamily: 'var(--dv-font-mono)' }}>
+              <span style={{ fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
                 {h.unit}
               </span>
             )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <DeltaBadge pct={h.delta} />
-            <span style={{ fontSize: 11, color: 'var(--dv-ink-3)' }}>vs. Vorjahr</span>
+            <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>vs. Vorjahr</span>
           </div>
         </div>
       ))}
@@ -498,22 +498,22 @@ function EnergyMixCard({ breakdown }: { breakdown: EnergyBreakdown[] }) {
   return (
     <div className="dv-card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 12, color: 'var(--dv-ink-3)', fontWeight: 500 }}>Energiemix</span>
-        <span style={{ fontSize: 12, fontFamily: 'var(--dv-font-mono)', color: 'var(--dv-ink-3)' }}>
-          Gesamt <strong style={{ color: 'var(--dv-ink)', fontWeight: 600, fontSize: 15 }}>{fmtNum(totalKWh)}</strong> kWh
+        <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 500 }}>Energiemix</span>
+        <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--ink-3)' }}>
+          Gesamt <strong style={{ color: 'var(--ink)', fontWeight: 600, fontSize: 15 }}>{fmtNum(totalKWh)}</strong> kWh
         </span>
       </div>
       {segments.length > 0 ? (
         <ShareBar segments={segments} height={14} radius={4} />
       ) : (
-        <div style={{ height: 14, background: 'var(--dv-line)', borderRadius: 4 }} />
+        <div style={{ height: 14, background: 'var(--line)', borderRadius: 4 }} />
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 2 }}>
         {segments.map((s) => (
           <div key={s.key} style={{ display: 'grid', gridTemplateColumns: '12px 1fr auto', alignItems: 'center', gap: 8, fontSize: 12 }}>
             <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, display: 'inline-block' }} />
-            <span style={{ color: 'var(--dv-ink)' }}>{s.label}</span>
-            <span style={{ color: 'var(--dv-ink-3)', fontFamily: 'var(--dv-font-mono)', fontSize: 11 }}>
+            <span style={{ color: 'var(--ink)' }}>{s.label}</span>
+            <span style={{ color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
               {s.share.toFixed(1)}%
             </span>
           </div>
@@ -552,13 +552,13 @@ function TypeCards({
               >
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: def.color, display: 'block' }} />
               </div>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--dv-ink)' }}>{def.displayName}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{def.displayName}</span>
               {bd && (
                 <span
                   style={{
-                    marginLeft: 'auto', fontSize: 10.5, color: 'var(--dv-ink-3)',
-                    background: 'var(--dv-surface-2)', padding: '2px 6px',
-                    borderRadius: 3, fontFamily: 'var(--dv-font-mono)',
+                    marginLeft: 'auto', fontSize: 10.5, color: 'var(--ink-3)',
+                    background: 'var(--surface-2)', padding: '2px 6px',
+                    borderRadius: 3, fontFamily: 'var(--font-mono)',
                   }}
                 >
                   {bd.share_percent.toFixed(1)}%
@@ -568,10 +568,10 @@ function TypeCards({
 
             {/* Hauptwert */}
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, marginTop: 2 }}>
-              <span style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.025em', fontFamily: 'var(--dv-font-mono)', color: 'var(--dv-ink)' }}>
+              <span style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.025em', fontFamily: 'var(--font-mono)', color: 'var(--ink)' }}>
                 {kpi != null && kpi.value > 0 ? fmtNum(kpi.value) : '—'}
               </span>
-              <span style={{ fontSize: 11.5, color: 'var(--dv-ink-3)', fontFamily: 'var(--dv-font-mono)' }}>
+              <span style={{ fontSize: 11.5, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
                 {kpi?.unit ?? def.unit}
               </span>
             </div>
@@ -580,7 +580,7 @@ function TypeCards({
             {kpi?.trend_percent != null && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <DeltaBadge pct={kpi.trend_percent} />
-                <span style={{ fontSize: 11, color: 'var(--dv-ink-3)' }}>
+                <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>
                   {kpi.comparison_label ?? 'vs. Vorjahr'}
                 </span>
               </div>
@@ -595,12 +595,12 @@ function TypeCards({
 
             {/* Fußzeile */}
             {bd && bd.consumption_kwh > 0 && (
-              <div style={{ paddingTop: 8, borderTop: '1px solid var(--dv-line)', marginTop: 'auto' }}>
+              <div style={{ paddingTop: 8, borderTop: '1px solid var(--line)', marginTop: 'auto' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span style={{ fontSize: 10, color: 'var(--dv-ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  <span style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
                     Anteil gesamt
                   </span>
-                  <div style={{ background: 'var(--dv-surface-2)', borderRadius: 99, height: 4, overflow: 'hidden' }}>
+                  <div style={{ background: 'var(--surface-2)', borderRadius: 99, height: 4, overflow: 'hidden' }}>
                     <div
                       style={{
                         height: '100%', borderRadius: 99,
@@ -637,10 +637,10 @@ function MonthlyTrend({
     <div className="dv-card">
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.005em', color: 'var(--dv-ink)' }}>
+          <div style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.005em', color: 'var(--ink)' }}>
             {title}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--dv-ink-3)', marginTop: 2 }}>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
             Alle Energieträger · kWh
           </div>
         </div>
@@ -649,7 +649,7 @@ function MonthlyTrend({
             {activeKeys.map((k) => {
               const def = ENERGY_DEFS.find((d) => d.key === k)!;
               return (
-                <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--dv-ink-2)' }}>
+                <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--ink-2)' }}>
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: def.color, display: 'inline-block' }} />
                   {def.displayName}
                 </div>
@@ -670,7 +670,7 @@ function MonthlyTrend({
           currentMonthIdx={currentSlotIdx}
         />
       ) : (
-        <div style={{ height: 240, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dv-ink-4)', fontSize: 13 }}>
+        <div style={{ height: 240, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontSize: 13 }}>
           Keine Daten im gewählten Zeitraum
         </div>
       )}
@@ -747,14 +747,14 @@ function InsightsPanel({ data }: { data: DashboardData }) {
     <div className="dv-card" style={{ display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--dv-ink)' }}>Insights</div>
-          <div style={{ fontSize: 12, color: 'var(--dv-ink-3)', marginTop: 2 }}>Automatische Auswertung</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>Insights</div>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>Automatische Auswertung</div>
         </div>
         <span
           style={{
-            display: 'inline-block', background: 'var(--dv-surface-2)',
-            border: '1px solid var(--dv-line)', padding: '2px 8px',
-            borderRadius: 99, fontSize: 11, fontWeight: 600, color: 'var(--dv-ink-2)',
+            display: 'inline-block', background: 'var(--surface-2)',
+            border: '1px solid var(--line)', padding: '2px 8px',
+            borderRadius: 99, fontSize: 11, fontWeight: 600, color: 'var(--ink-2)',
           }}
         >
           {insights.length}
@@ -778,13 +778,13 @@ function InsightsPanel({ data }: { data: DashboardData }) {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--dv-ink)', lineHeight: 1.3, flex: 1 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.3, flex: 1 }}>
                     {ins.title}
                   </span>
                   <span
                     style={{
-                      fontSize: 10, color: 'var(--dv-ink-3)',
-                      background: 'var(--dv-surface-2)', padding: '1px 6px',
+                      fontSize: 10, color: 'var(--ink-3)',
+                      background: 'var(--surface-2)', padding: '1px 6px',
                       borderRadius: 3, fontWeight: 500, textTransform: 'uppercase',
                       letterSpacing: '0.04em', whiteSpace: 'nowrap',
                     }}
@@ -792,7 +792,7 @@ function InsightsPanel({ data }: { data: DashboardData }) {
                     {ins.tag}
                   </span>
                 </div>
-                <p style={{ fontSize: 12, color: 'var(--dv-ink-2)', lineHeight: 1.45, margin: 0 }}>
+                <p style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.45, margin: 0 }}>
                   {ins.body}
                 </p>
               </div>
@@ -810,8 +810,8 @@ function TopConsumers({ groups }: { groups: TopConsumerGroup[] }) {
   if (relevant.length === 0) {
     return (
       <div className="dv-card">
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--dv-ink)', marginBottom: 14 }}>Top-Verbraucher</div>
-        <p style={{ color: 'var(--dv-ink-4)', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', marginBottom: 14 }}>Top-Verbraucher</div>
+        <p style={{ color: 'var(--ink-4)', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>
           Keine Verbrauchsdaten vorhanden
         </p>
       </div>
@@ -822,8 +822,8 @@ function TopConsumers({ groups }: { groups: TopConsumerGroup[] }) {
     <div className="dv-card">
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--dv-ink)' }}>Top-Verbraucher</div>
-          <div style={{ fontSize: 12, color: 'var(--dv-ink-3)', marginTop: 2 }}>Nach Energieträger gruppiert</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>Top-Verbraucher</div>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>Nach Energieträger gruppiert</div>
         </div>
       </div>
 
@@ -840,12 +840,12 @@ function TopConsumers({ groups }: { groups: TopConsumerGroup[] }) {
               style={{
                 display: 'flex', alignItems: 'center', gap: 6,
                 paddingBottom: 8, marginBottom: 6,
-                borderBottom: '1px solid var(--dv-line)',
+                borderBottom: '1px solid var(--line)',
               }}
             >
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, display: 'inline-block' }} />
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--dv-ink)' }}>{group.energy_type_label}</span>
-              <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'var(--dv-font-mono)', color: 'var(--dv-ink-3)' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{group.energy_type_label}</span>
+              <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--ink-3)' }}>
                 {fmtNum(topTotal)} {group.meters[0]?.unit || 'kWh'}
               </span>
             </div>
@@ -855,14 +855,14 @@ function TopConsumers({ groups }: { groups: TopConsumerGroup[] }) {
               return (
                 <div key={meter.meter_id} className="dv-tc-row">
                   <div>
-                    <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--dv-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {meter.name}
                     </div>
-                    <div style={{ fontSize: 10.5, fontFamily: 'var(--dv-font-mono)', color: 'var(--dv-ink-4)' }}>
+                    <div style={{ fontSize: 10.5, fontFamily: 'var(--font-mono)', color: 'var(--ink-4)' }}>
                       {meter.meter_id.slice(0, 24)}
                     </div>
                   </div>
-                  <div style={{ background: 'var(--dv-surface-2)', borderRadius: 99, height: 6, overflow: 'hidden' }}>
+                  <div style={{ background: 'var(--surface-2)', borderRadius: 99, height: 6, overflow: 'hidden' }}>
                     <div
                       style={{
                         height: '100%', borderRadius: 99,
@@ -872,14 +872,14 @@ function TopConsumers({ groups }: { groups: TopConsumerGroup[] }) {
                     />
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 4, justifyContent: 'flex-end' }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--dv-font-mono)', color: 'var(--dv-ink)' }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-mono)', color: 'var(--ink)' }}>
                       {fmtNum(meter.consumption)}
                     </span>
-                    <span style={{ fontSize: 10.5, color: 'var(--dv-ink-3)', fontFamily: 'var(--dv-font-mono)' }}>
+                    <span style={{ fontSize: 10.5, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
                       {meter.unit}
                     </span>
                   </div>
-                  <span style={{ fontSize: 11, color: 'var(--dv-ink-3)', fontFamily: 'var(--dv-font-mono)', textAlign: 'right' }}>
+                  <span style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', textAlign: 'right' }}>
                     {(share * 100).toFixed(1)}%
                   </span>
                 </div>
@@ -907,10 +907,10 @@ function CO2Card({ cards }: { cards: KPICard[] }) {
 
   return (
     <div className="dv-card" style={{ display: 'flex', flexDirection: 'column' }}>
-      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--dv-ink)', marginBottom: 4 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>
         CO₂-Reduktionspfad
       </div>
-      <div style={{ fontSize: 12, color: 'var(--dv-ink-3)', marginBottom: 14 }}>
+      <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 14 }}>
         Basis 2022 · Ziel −20% bis 2030
       </div>
 
@@ -925,7 +925,7 @@ function CO2Card({ cards }: { cards: KPICard[] }) {
           height={160}
         />
       ) : (
-        <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dv-ink-4)', fontSize: 13 }}>
+        <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-4)', fontSize: 13 }}>
           Keine CO₂-Daten verfügbar
         </div>
       )}
@@ -933,7 +933,7 @@ function CO2Card({ cards }: { cards: KPICard[] }) {
       <div
         style={{
           display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12,
-          marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--dv-line)',
+          marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)',
         }}
       >
         {[
@@ -954,13 +954,13 @@ function CO2Card({ cards }: { cards: KPICard[] }) {
           },
         ].map((s) => (
           <div key={s.label}>
-            <div style={{ fontSize: 10.5, color: 'var(--dv-ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+            <div style={{ fontSize: 10.5, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
               {s.label}
             </div>
             <div
               style={{
-                fontSize: 16, fontWeight: 600, fontFamily: 'var(--dv-font-mono)',
-                color: s.good ? '#10B981' : 'var(--dv-ink)',
+                fontSize: 16, fontWeight: 600, fontFamily: 'var(--font-mono)',
+                color: s.good ? '#10B981' : 'var(--ink)',
               }}
             >
               {s.value}
@@ -1072,16 +1072,16 @@ export default function DashboardPage() {
       >
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 28 }}>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--dv-ink-3)', marginBottom: 2 }}>
+            <div style={{ fontSize: 11, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--ink-3)', marginBottom: 2 }}>
               Energiemanagement
             </div>
-            <h1 style={{ fontSize: 26, fontWeight: 600, letterSpacing: '-0.025em', margin: 0, color: 'var(--dv-ink)' }}>
+            <h1 style={{ fontSize: 26, fontWeight: 600, letterSpacing: '-0.025em', margin: 0, color: 'var(--ink)' }}>
               Dashboard
             </h1>
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, paddingBottom: 4 }}>
-            <span style={{ fontSize: 11, color: 'var(--dv-ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Zeitraum</span>
-            <span style={{ fontFamily: 'var(--dv-font-mono)', fontSize: 12, color: 'var(--dv-ink)', fontWeight: 500 }}>
+            <span style={{ fontSize: 11, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Zeitraum</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ink)', fontWeight: 500 }}>
               {data.period_start} – {data.period_end}
             </span>
           </div>
@@ -1090,14 +1090,14 @@ export default function DashboardPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
           {/* Standort-Filter */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 10, color: 'var(--dv-ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Standort</span>
+            <span style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Standort</span>
             <select
               value={selectedSite}
               onChange={(e) => setSelectedSite(e.target.value)}
               style={{
-                border: '1px solid var(--dv-line)', background: 'var(--dv-surface)',
-                padding: '5px 10px', borderRadius: 'var(--dv-r-sm)',
-                fontSize: 12.5, color: 'var(--dv-ink)', outline: 'none', cursor: 'pointer',
+                border: '1px solid var(--line)', background: 'var(--surface)',
+                padding: '5px 10px', borderRadius: 'var(--r-sm)',
+                fontSize: 12.5, color: 'var(--ink)', outline: 'none', cursor: 'pointer',
               }}
             >
               <option value="">Alle Standorte</option>
@@ -1107,47 +1107,47 @@ export default function DashboardPage() {
 
           {/* Zeitraum Von */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 10, color: 'var(--dv-ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Von</span>
+            <span style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Von</span>
             <input
               type="date" value={periodStart}
               onChange={(e) => { setPeriodStart(e.target.value); setViewMode(null); }}
               style={{
-                border: '1px solid var(--dv-line)', background: 'var(--dv-surface)',
-                padding: '5px 10px', borderRadius: 'var(--dv-r-sm)',
-                fontSize: 12.5, color: 'var(--dv-ink)', outline: 'none',
+                border: '1px solid var(--line)', background: 'var(--surface)',
+                padding: '5px 10px', borderRadius: 'var(--r-sm)',
+                fontSize: 12.5, color: 'var(--ink)', outline: 'none',
               }}
             />
           </div>
 
           {/* Zeitraum Bis */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 10, color: 'var(--dv-ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Bis</span>
+            <span style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Bis</span>
             <input
               type="date" value={periodEnd}
               onChange={(e) => { setPeriodEnd(e.target.value); setViewMode(null); }}
               style={{
-                border: '1px solid var(--dv-line)', background: 'var(--dv-surface)',
-                padding: '5px 10px', borderRadius: 'var(--dv-r-sm)',
-                fontSize: 12.5, color: 'var(--dv-ink)', outline: 'none',
+                border: '1px solid var(--line)', background: 'var(--surface)',
+                padding: '5px 10px', borderRadius: 'var(--r-sm)',
+                fontSize: 12.5, color: 'var(--ink)', outline: 'none',
               }}
             />
           </div>
 
           {/* Zeitfenster-Switcher */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 10, color: 'var(--dv-ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Ansicht</span>
-            <div style={{ display: 'flex', border: '1px solid var(--dv-line)', background: 'var(--dv-surface)', borderRadius: 'var(--dv-r-sm)', overflow: 'hidden' }}>
+            <span style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Ansicht</span>
+            <div style={{ display: 'flex', border: '1px solid var(--line)', background: 'var(--surface)', borderRadius: 'var(--r-sm)', overflow: 'hidden' }}>
               {VIEW_MODES.map((mode, i) => (
                 <button
                   key={mode.key}
                   onClick={() => applyViewMode(mode.key)}
                   style={{
                     padding: '5px 10px', fontSize: 12, cursor: 'pointer',
-                    background: viewMode === mode.key ? 'var(--dv-ink)' : 'transparent',
-                    color: viewMode === mode.key ? '#FFF' : 'var(--dv-ink-3)',
+                    background: viewMode === mode.key ? 'var(--ink)' : 'transparent',
+                    color: viewMode === mode.key ? '#FFF' : 'var(--ink-3)',
                     fontWeight: viewMode === mode.key ? 500 : 400,
                     border: 'none',
-                    borderRight: i < VIEW_MODES.length - 1 ? '1px solid var(--dv-line)' : 'none',
+                    borderRight: i < VIEW_MODES.length - 1 ? '1px solid var(--line)' : 'none',
                     transition: 'background 120ms',
                   }}
                 >

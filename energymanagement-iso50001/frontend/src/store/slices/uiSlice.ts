@@ -1,9 +1,23 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
+export type ThemeMode = 'light' | 'dark';
+
+const THEME_KEY = 'em_theme';
+
+function readInitialTheme(): ThemeMode {
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === 'dark' || stored === 'light') return stored;
+  } catch {
+    /* ignore */
+  }
+  return 'light';
+}
+
 interface UIState {
   sidebarOpen: boolean;
   language: 'de' | 'en';
-  theme: 'light';
+  theme: ThemeMode;
   notifications: Array<{
     id: string;
     type: 'success' | 'error' | 'warning' | 'info';
@@ -15,7 +29,7 @@ interface UIState {
 const initialState: UIState = {
   sidebarOpen: true,
   language: 'de',
-  theme: 'light',
+  theme: readInitialTheme(),
   notifications: [],
   backupLocked: false,
 };
@@ -29,6 +43,12 @@ const uiSlice = createSlice({
     },
     setLanguage(state, action: PayloadAction<'de' | 'en'>) {
       state.language = action.payload;
+    },
+    setTheme(state, action: PayloadAction<ThemeMode>) {
+      state.theme = action.payload;
+    },
+    toggleTheme(state) {
+      state.theme = state.theme === 'dark' ? 'light' : 'dark';
     },
     addNotification(
       state,
@@ -48,5 +68,13 @@ const uiSlice = createSlice({
   },
 });
 
-export const { toggleSidebar, setLanguage, addNotification, removeNotification, setBackupLocked } = uiSlice.actions;
+export const {
+  toggleSidebar,
+  setLanguage,
+  setTheme,
+  toggleTheme,
+  addNotification,
+  removeNotification,
+  setBackupLocked,
+} = uiSlice.actions;
 export default uiSlice.reducer;

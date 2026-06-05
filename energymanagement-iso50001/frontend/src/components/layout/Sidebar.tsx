@@ -45,9 +45,7 @@ interface NavGroup {
 const navGroups: NavGroup[] = [
   {
     labelKey: 'nav.group.overview',
-    items: [
-      { path: '/dashboard', labelKey: 'nav.dashboard', icon: LayoutDashboard },
-    ],
+    items: [{ path: '/dashboard', labelKey: 'nav.dashboard', icon: LayoutDashboard }],
   },
   {
     labelKey: 'nav.group.master_data',
@@ -69,9 +67,7 @@ const navGroups: NavGroup[] = [
   },
   {
     labelKey: 'nav.group.costs',
-    items: [
-      { path: '/economics', labelKey: 'nav.costsEconomy', icon: Euro },
-    ],
+    items: [{ path: '/economics', labelKey: 'nav.costsEconomy', icon: Euro }],
   },
   {
     labelKey: 'nav.group.environment',
@@ -100,11 +96,7 @@ const navGroups: NavGroup[] = [
   },
 ];
 
-const SIDEBAR_BG     = '#0E1419';
-const SIDEBAR_LINE   = '#1E252D';
-const SIDEBAR_DIM    = '#8C9097';
-const SIDEBAR_INK    = '#FAFAF7';
-const ACCENT_COLOR   = '#E89A3C';
+const ACCENT_COLOR = 'var(--fw-fernwaerme)';
 
 export default function Sidebar() {
   const dispatch = useAppDispatch();
@@ -131,39 +123,46 @@ export default function Sidebar() {
     <aside
       role="navigation"
       aria-label={t('nav.dashboard')}
-      style={{ background: SIDEBAR_BG, borderRight: `1px solid #060A0E` }}
       className={`fixed inset-y-0 left-0 z-30 flex flex-col text-white transition-all duration-300 ${
         sidebarOpen ? 'w-64' : 'w-16'
       }`}
+      style={{
+        background: 'var(--sidebar-bg)',
+        color: 'var(--sidebar-ink)',
+        borderRight: '1px solid var(--sidebar-line)',
+        fontSize: 13,
+      }}
     >
       {/* Brand */}
       <div
-        style={{ borderBottom: `1px solid ${SIDEBAR_LINE}` }}
+        style={{ borderBottom: '1px solid var(--sidebar-line)' }}
         className="flex h-16 items-center justify-between px-4"
       >
         {sidebarOpen && (
           <div className="flex items-center gap-2.5">
             <div
               style={{
-                width: 22, height: 22,
+                width: 22,
+                height: 22,
                 background: 'linear-gradient(135deg, #E89A3C, #F2C94C)',
                 borderRadius: 5,
-                display: 'grid', placeItems: 'center',
+                display: 'grid',
+                placeItems: 'center',
               }}
             >
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path d="M6 1L10.33 9H1.67L6 1Z" fill="white" fillOpacity="0.9"/>
+                <path d="M6 1L10.33 9H1.67L6 1Z" fill="#FAFAF7" />
               </svg>
             </div>
-            <span style={{ color: SIDEBAR_INK, fontWeight: 600, fontSize: 14, letterSpacing: '-0.01em' }}>
+            <span style={{ color: 'var(--sidebar-ink)', fontWeight: 600, fontSize: 14, letterSpacing: '-0.01em' }}>
               EnergieManager
             </span>
           </div>
         )}
         <button
           onClick={() => dispatch(toggleSidebar())}
-          style={{ color: SIDEBAR_DIM }}
-          className="rounded p-1 hover:opacity-100 transition-opacity"
+          style={{ color: 'var(--sidebar-dim)' }}
+          className="rounded p-1 transition-opacity hover:opacity-100"
           aria-label={sidebarOpen ? 'Sidebar einklappen' : 'Sidebar ausklappen'}
         >
           {sidebarOpen ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
@@ -171,15 +170,15 @@ export default function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto py-2 relative" aria-label="Hauptnavigation">
+      <nav className="relative flex-1 overflow-y-auto py-2" aria-label="Hauptnavigation">
         {backupLocked && (
           <div
             style={{ background: 'rgba(14,20,25,0.85)' }}
-            className="absolute inset-0 z-10 flex flex-col items-center justify-center cursor-not-allowed select-none"
+            className="absolute inset-0 z-10 flex cursor-not-allowed select-none flex-col items-center justify-center"
           >
-            <AlertTriangle size={20} className="text-amber-400 mb-2" />
+            <AlertTriangle size={20} style={{ color: 'var(--fw-strom)' }} className="mb-2" />
             {sidebarOpen && (
-              <p className="text-xs text-amber-300 text-center px-4 leading-snug">
+              <p style={{ color: 'var(--fw-strom)' }} className="px-4 text-center text-xs leading-snug">
                 Datensicherung läuft –<br />Navigation gesperrt
               </p>
             )}
@@ -193,8 +192,12 @@ export default function Sidebar() {
               {sidebarOpen ? (
                 <button
                   onClick={() => !backupLocked && toggleGroup(group.labelKey)}
-                  style={{ color: SIDEBAR_DIM, fontSize: 10, letterSpacing: '0.08em' }}
-                  className="flex w-full items-center justify-between px-4 py-1.5 font-semibold uppercase hover:opacity-100 transition-opacity"
+                  style={{
+                    color: 'var(--sidebar-dim)',
+                    fontSize: 10,
+                    letterSpacing: '0.08em',
+                  }}
+                  className="flex w-full items-center justify-between px-[18px] py-1.5 font-semibold uppercase transition-opacity hover:opacity-100"
                 >
                   <span>{t(group.labelKey)}</span>
                   <ChevronDown
@@ -203,7 +206,7 @@ export default function Sidebar() {
                   />
                 </button>
               ) : (
-                <div style={{ borderTop: `1px solid ${SIDEBAR_LINE}` }} className="mx-3 my-2" />
+                <div style={{ borderTop: '1px solid var(--sidebar-line)' }} className="mx-3 my-2" />
               )}
 
               {(!isCollapsed || !sidebarOpen) &&
@@ -213,27 +216,31 @@ export default function Sidebar() {
                     to={path}
                     aria-label={t(labelKey)}
                     aria-disabled={backupLocked}
-                    onClick={(e) => { if (backupLocked) e.preventDefault(); }}
-                    className={({ isActive }) =>
-                      `flex items-center gap-3 px-4 py-[7px] text-sm transition-all ${
-                        isActive ? 'font-medium' : ''
-                      }`
-                    }
-                    style={({ isActive }) => isActive
-                      ? {
-                          color: '#FFFFFF',
-                          background: `rgba(232, 154, 60, 0.08)`,
-                          borderLeft: `2px solid ${ACCENT_COLOR}`,
-                          paddingLeft: 14,
-                        }
-                      : {
-                          color: SIDEBAR_INK,
-                          opacity: 0.82,
-                          borderLeft: '2px solid transparent',
-                        }
+                    onClick={(e) => {
+                      if (backupLocked) e.preventDefault();
+                    }}
+                    className="flex items-center gap-[10px] px-[18px] transition-all"
+                    style={({ isActive }) =>
+                      isActive
+                        ? {
+                            color: '#FFFFFF',
+                            background: 'rgba(232, 154, 60, 0.08)',
+                            borderLeft: `2px solid ${ACCENT_COLOR}`,
+                            paddingLeft: 16,
+                            paddingTop: 7,
+                            paddingBottom: 7,
+                            fontWeight: 500,
+                          }
+                        : {
+                            color: 'var(--sidebar-ink)',
+                            opacity: 0.82,
+                            borderLeft: '2px solid transparent',
+                            paddingTop: 7,
+                            paddingBottom: 7,
+                          }
                     }
                   >
-                    <Icon size={16} aria-hidden="true" />
+                    <Icon size={15} aria-hidden="true" />
                     {sidebarOpen && <span style={{ fontSize: 13 }}>{t(labelKey)}</span>}
                   </NavLink>
                 ))}
@@ -243,22 +250,22 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div style={{ borderTop: `1px solid ${SIDEBAR_LINE}` }} className="px-4 py-3">
+      <div style={{ borderTop: '1px solid var(--sidebar-line)' }} className="px-4 py-3">
         <button
           onClick={toggleLanguage}
-          style={{ color: SIDEBAR_DIM, fontSize: 12 }}
-          className="flex items-center gap-2 hover:opacity-100 transition-opacity w-full"
+          style={{ color: 'var(--sidebar-dim)', fontSize: 12 }}
+          className="flex w-full items-center gap-2 transition-opacity hover:opacity-100"
           aria-label={`Sprache wechseln zu ${i18n.language === 'de' ? 'English' : 'Deutsch'}`}
         >
           <Globe size={14} aria-hidden="true" />
           {sidebarOpen && (
-            <span>{i18n.language === 'de' ? 'DE' : 'EN'} / {i18n.language === 'de' ? 'English' : 'Deutsch'}</span>
+            <span>
+              {i18n.language === 'de' ? 'DE' : 'EN'} / {i18n.language === 'de' ? 'English' : 'Deutsch'}
+            </span>
           )}
         </button>
         {sidebarOpen && (
-          <div style={{ color: SIDEBAR_DIM, fontSize: 11, marginTop: 8 }}>
-            v1.0.0 · ISO 50001
-          </div>
+          <div style={{ color: 'var(--sidebar-dim)', fontSize: 11, marginTop: 8 }}>v1.0.0 · ISO 50001</div>
         )}
       </div>
     </aside>

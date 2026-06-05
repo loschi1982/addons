@@ -5,12 +5,28 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Energiemanagement ISO 50001</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <script>
+      // Pre-paint: gespeichertes Theme setzen, bevor React rendert (kein Flackern).
+      // Schluckt View-Transition-Rejections der Cross-Document-Transition,
+      // sonst feuert die Navigation eine unhandled "Transition was skipped"-Rejection.
+      try {
+        document.documentElement.dataset.theme = localStorage.getItem('em_theme') || 'light';
+      } catch (e) {
+        document.documentElement.dataset.theme = 'light';
+      }
+      (function () {
+        function s(v) {
+          if (!v) return;
+          v.ready && v.ready.catch(function () {});
+          v.finished && v.finished.catch(function () {});
+          v.updateCallbackDone && v.updateCallbackDone.catch(function () {});
+        }
+        addEventListener('pagereveal', function (e) { s(e.viewTransition); });
+        addEventListener('pageswap', function (e) { s(e.viewTransition); });
+      })();
+    </script>
   </head>
-  <body class="bg-gray-50 font-sans antialiased">
+  <body class="font-sans antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
