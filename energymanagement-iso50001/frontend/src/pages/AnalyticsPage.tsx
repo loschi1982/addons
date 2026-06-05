@@ -13,6 +13,7 @@ import SankeyDiagram from '@/components/charts/SankeyDiagram';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import PageHead from '@/components/ui/PageHead';
 import PageTabs, { ANALYSIS_TABS } from '@/components/layout/PageTabs';
 
 const MonthlyComparisonPage = lazy(() => import('./MonthlyComparisonPage'));
@@ -104,7 +105,7 @@ interface CO2ReductionPath {
 /* ── Konstanten ── */
 
 const CHART_COLORS = [
-  '#1B5E7B', '#F59E0B', '#3B82F6', '#10B981',
+  'var(--ink)', 'var(--fw-strom)', 'var(--info)', 'var(--good)',
   '#8B5CF6', '#F97316', '#EC4899', '#84CC16',
 ];
 
@@ -224,29 +225,30 @@ export default function AnalyticsPage() {
   return (
     <div>
       <PageTabs tabs={ANALYSIS_TABS} />
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="page-title">Analysen</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Erweiterte Auswertungen und Visualisierungen der Energiedaten.
-          </p>
-        </div>
-        {sites.length > 0 && (
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-gray-600">Standort:</label>
-            <select
-              className="input w-auto min-w-[200px]"
-              value={siteId}
-              onChange={(e) => setSiteId(e.target.value)}
-            >
-              <option value="">Alle Standorte</option>
-              {sites.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          </div>
-        )}
-      </div>
+      <PageHead
+        eyebrow="Analyse"
+        title="Analysen"
+        actions={
+          sites.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <span className="period-label">Standort</span>
+              <select
+                className="input w-auto min-w-[200px]"
+                value={siteId}
+                onChange={(e) => setSiteId(e.target.value)}
+              >
+                <option value="">Alle Standorte</option>
+                {sites.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          ) : undefined
+        }
+      />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
+        Erweiterte Auswertungen und Visualisierungen der Energiedaten.
+      </p>
 
       {/* Kategorien */}
       <div className="mt-4 flex gap-2">
@@ -439,7 +441,7 @@ function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
         ) : chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={400}>
             <ChartComp data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
               <XAxis dataKey="label" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} />
               <Tooltip
@@ -479,7 +481,7 @@ function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
                         x={Number(props.cx) - 6}
                         y={Number(props.cy) + 4}
                         fontSize={10}
-                        fill="#F59E0B"
+                        fill="var(--fw-strom)"
                       >⚠</text>
                     );
                   }
@@ -615,13 +617,13 @@ function ComparisonTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
         ) : chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={400}>
             <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
               <XAxis dataKey="label" />
               <YAxis />
               <Tooltip formatter={(val: number) => [`${formatNumber(val)} kWh`, '']} />
               <Legend />
-              <Bar dataKey="vorjahr" name={`${thisYear - 1}`} fill="#94a3b8" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="aktuell" name={`${thisYear}`} fill="#1B5E7B" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="vorjahr" name={`${thisYear - 1}`} fill="var(--ink-3)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="aktuell" name={`${thisYear}`} fill="var(--ink)" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         ) : (
@@ -839,7 +841,7 @@ function HeatmapTab({ meters }: { meters: Meter[] }) {
                         >
                           <div
                             className="h-6 w-6 rounded-sm"
-                            style={{ backgroundColor: val > 0 ? getColor(val) : '#f3f4f6' }}
+                            style={{ backgroundColor: val > 0 ? getColor(val) : 'var(--surface-2)' }}
                           />
                         </td>
                       );
@@ -1043,13 +1045,13 @@ function WeatherCorrectionTab({ meters }: { meters: Meter[] }) {
         ) : chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={400}>
             <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
               <XAxis dataKey="label" />
               <YAxis />
               <Tooltip formatter={(val: number) => [`${formatNumber(val)} kWh`, '']} />
               <Legend />
-              <Bar dataKey="roh" name="Rohverbrauch" fill="#94a3b8" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="korrigiert" name="Witterungskorrigiert" fill="#1B5E7B" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="roh" name="Rohverbrauch" fill="var(--ink-3)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="korrigiert" name="Witterungskorrigiert" fill="var(--ink)" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         ) : (
@@ -1122,13 +1124,13 @@ function CO2PathTab() {
         ) : chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={400}>
             <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
               <XAxis dataKey="year" />
               <YAxis />
               <Tooltip formatter={(val: number) => [`${formatNumber(val)} kg CO₂`, '']} />
               <Legend />
-              <Line dataKey="ist" name="Ist-Emissionen" stroke="#1B5E7B" strokeWidth={3} dot={{ r: 5 }} connectNulls />
-              <Line dataKey="ziel" name="Zielpfad" stroke="#10B981" strokeWidth={2} strokeDasharray="8 4" dot={false} connectNulls />
+              <Line dataKey="ist" name="Ist-Emissionen" stroke="var(--ink)" strokeWidth={3} dot={{ r: 5 }} connectNulls />
+              <Line dataKey="ziel" name="Zielpfad" stroke="var(--good)" strokeWidth={2} strokeDasharray="8 4" dot={false} connectNulls />
             </LineChart>
           </ResponsiveContainer>
         ) : (
@@ -1326,7 +1328,7 @@ function SelfConsumptionTab() {
         ) : chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={400}>
             <ComposedChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
               <XAxis dataKey="label" tick={{ fontSize: 11 }} />
               <YAxis yAxisId="kwh" tick={{ fontSize: 12 }} />
               <YAxis yAxisId="pct" orientation="right" domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
@@ -1337,9 +1339,9 @@ function SelfConsumptionTab() {
                 }}
               />
               <Legend />
-              <Bar yAxisId="kwh" dataKey="produktion" name="PV-Produktion" fill="#F59E0B" radius={[4, 4, 0, 0]} />
-              <Bar yAxisId="kwh" dataKey="eigenverbrauch" name="Eigenverbrauch" fill="#10B981" radius={[4, 4, 0, 0]} />
-              <Line yAxisId="pct" dataKey="autarkiegrad" name="Autarkiegrad" stroke="#1B5E7B" strokeWidth={2} dot={{ r: 3 }} type="monotone" />
+              <Bar yAxisId="kwh" dataKey="produktion" name="PV-Produktion" fill="var(--fw-strom)" radius={[4, 4, 0, 0]} />
+              <Bar yAxisId="kwh" dataKey="eigenverbrauch" name="Eigenverbrauch" fill="var(--good)" radius={[4, 4, 0, 0]} />
+              <Line yAxisId="pct" dataKey="autarkiegrad" name="Autarkiegrad" stroke="var(--ink)" strokeWidth={2} dot={{ r: 3 }} type="monotone" />
             </ComposedChart>
           </ResponsiveContainer>
         ) : (
@@ -1416,11 +1418,11 @@ function DurationCurveTab({ meters }: { meters: Meter[] }) {
         ) : data.length > 0 ? (
           <ResponsiveContainer width="100%" height={400}>
             <AreaChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
               <XAxis dataKey="index" tick={{ fontSize: 11 }} label={{ value: 'Stunden', position: 'insideBottom', offset: -5 }} />
               <YAxis tick={{ fontSize: 12 }} label={{ value: 'kWh', angle: -90, position: 'insideLeft' }} />
               <Tooltip formatter={(val: number) => [`${formatNumber(val)} kWh`, 'Verbrauch']} />
-              <Area type="monotone" dataKey="value" stroke="#1B5E7B" fill="#1B5E7B" fillOpacity={0.2} />
+              <Area type="monotone" dataKey="value" stroke="var(--ink)" fill="var(--ink)" fillOpacity={0.2} />
             </AreaChart>
           </ResponsiveContainer>
         ) : (
@@ -1523,7 +1525,7 @@ function CumulativeTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
         ) : chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={400}>
             <AreaChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
               <XAxis dataKey="label" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 12 }} />
               <Tooltip formatter={(val: number) => [`${formatNumber(val)} kWh`, '']} />
@@ -1584,7 +1586,7 @@ function SubMeterContributionTab({ meters }: { meters: Meter[] }) {
   const pieData = data
     ? [
         ...(data.children || []).map((c, i) => ({ name: c.name, value: c.kwh, color: CHART_COLORS[i % CHART_COLORS.length] })),
-        ...(data.unaccounted_kwh > 0.1 ? [{ name: 'Nicht erfasst', value: data.unaccounted_kwh, color: '#E5E7EB' }] : []),
+        ...(data.unaccounted_kwh > 0.1 ? [{ name: 'Nicht erfasst', value: data.unaccounted_kwh, color: 'var(--line)' }] : []),
       ]
     : [];
 
@@ -1834,7 +1836,7 @@ function WeatherRegressionTab({ meters }: { meters: Meter[] }) {
             </h3>
             <ResponsiveContainer width="100%" height={360}>
               <ComposedChart data={data.points}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
                 <XAxis
                   dataKey="temp"
                   type="number"
@@ -1854,12 +1856,12 @@ function WeatherRegressionTab({ meters }: { meters: Meter[] }) {
                   ]}
                   labelFormatter={(label: number) => `${Number(label).toFixed(1)}°C`}
                 />
-                <Scatter dataKey="consumption" fill="#1B5E7B" opacity={0.6} />
+                <Scatter dataKey="consumption" fill="var(--ink)" opacity={0.6} />
                 {regressionLineData.length === 2 && (
                   <Line
                     data={regressionLineData}
                     dataKey="regression"
-                    stroke="#F59E0B"
+                    stroke="var(--fw-strom)"
                     strokeWidth={2}
                     dot={false}
                     type="linear"

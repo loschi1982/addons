@@ -56,18 +56,38 @@ export default function ChangePasswordPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-100">
-      <div className="w-full max-w-md rounded-xl bg-white p-8 shadow-lg">
+    <div
+      className="flex min-h-screen items-center justify-center"
+      style={{ background: 'var(--bg)' }}
+    >
+      <div
+        className="w-full max-w-md p-8"
+        style={{
+          background: 'var(--surface)',
+          border: '1px solid var(--line)',
+          borderRadius: 'var(--r-lg)',
+          boxShadow: '0 12px 32px -8px rgba(0,0,0,0.08)',
+        }}
+      >
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-bold text-primary-600">Passwort ändern</h1>
-          <p className="mt-2 text-sm text-gray-500">
+          <h1 className="page-title-h1" style={{ fontSize: 22 }}>Passwort ändern</h1>
+          <p style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 6 }}>
             Bitte ändern Sie Ihr Passwort, um fortzufahren.
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
-            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+            <div
+              style={{
+                padding: '10px 12px',
+                fontSize: 13,
+                borderRadius: 'var(--r-sm)',
+                background: 'color-mix(in srgb, var(--alert) 12%, var(--surface))',
+                border: '1px solid color-mix(in srgb, var(--alert) 38%, transparent)',
+                color: 'var(--alert)',
+              }}
+            >
               {error}
             </div>
           )}
@@ -94,7 +114,7 @@ export default function ChangePasswordPage() {
               required
               minLength={8}
             />
-            <p className="mt-1 text-xs text-gray-400">Mindestens 8 Zeichen</p>
+            <p style={{ marginTop: 4, fontSize: 11, color: 'var(--ink-4)' }}>Mindestens 8 Zeichen</p>
           </div>
 
           <div>

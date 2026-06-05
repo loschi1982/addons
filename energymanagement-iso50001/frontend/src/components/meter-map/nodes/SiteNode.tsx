@@ -14,17 +14,17 @@ interface SiteNodeData {
 
 function SiteNodeComponent({ data }: { data: SiteNodeData }) {
   return (
-    <div className="rounded-lg border-2 border-[#1B5E7B] bg-[#1B5E7B]/10 px-4 py-3 shadow-md min-w-[220px]">
+    <div className="rounded-lg border-2 border-[var(--ink)] bg-[var(--ink)]/10 px-4 py-3 shadow-md min-w-[220px]">
       <div className="flex items-center gap-2">
-        <Building2 className="h-5 w-5 text-[#1B5E7B] shrink-0" />
+        <Building2 className="h-5 w-5 text-[var(--ink)] shrink-0" />
         <div className="min-w-0">
-          <div className="font-semibold text-[#1B5E7B] text-sm truncate">{data.label}</div>
+          <div className="font-semibold text-[var(--ink)] text-sm truncate">{data.label}</div>
           {data.city && (
             <div className="text-xs text-gray-500 truncate">{data.city}</div>
           )}
         </div>
       </div>
-      <Handle type="source" position={Position.Bottom} className="!bg-[#1B5E7B] !w-2 !h-2" />
+      <Handle type="source" position={Position.Bottom} className="!bg-[var(--ink)] !w-2 !h-2" />
     </div>
   );
 }

@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { RefreshCw, Download, BarChart3 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
+import PageHead from '@/components/ui/PageHead';
 
 /* ── Typen ── */
 
@@ -131,23 +132,24 @@ export default function EnergyBalancePage({ siteId }: { siteId?: string }) {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="page-title">Energiebilanz</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Verbrauchsstatistik nach Energieträgern – monatlich aufgeschlüsselt
-          </p>
-        </div>
-        {data && (
-          <button
-            className="btn-secondary flex items-center gap-2"
-            onClick={() => exportCsv(data)}
-          >
-            <Download size={16} />
-            CSV-Export
-          </button>
-        )}
-      </div>
+      <PageHead
+        eyebrow="Analyse"
+        title="Energiebilanz"
+        actions={
+          data ? (
+            <button
+              className="btn-secondary flex items-center gap-2"
+              onClick={() => exportCsv(data)}
+            >
+              <Download size={16} />
+              CSV-Export
+            </button>
+          ) : undefined
+        }
+      />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
+        Verbrauchsstatistik nach Energieträgern – monatlich aufgeschlüsselt
+      </p>
 
       {/* Filter */}
       <div className="card p-4 flex flex-wrap gap-4 items-end">
@@ -214,7 +216,7 @@ export default function EnergyBalancePage({ siteId }: { siteId?: string }) {
                 </div>
               );
             })}
-            <div className="card p-4 bg-[#1B5E7B] text-white">
+            <div className="card p-4 bg-[var(--ink)] text-white">
               <div className="text-xs font-semibold uppercase tracking-wide mb-1 opacity-80">
                 Gesamt kWh-Äquiv.
               </div>
@@ -244,7 +246,7 @@ export default function EnergyBalancePage({ siteId }: { siteId?: string }) {
                   <button
                     className={`px-3 py-1 rounded text-sm font-medium transition-all ${
                       chartView === 'kwh'
-                        ? 'bg-[#1B5E7B] text-white'
+                        ? 'bg-[var(--ink)] text-white'
                         : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                     }`}
                     onClick={() => setChartView('kwh')}
@@ -254,7 +256,7 @@ export default function EnergyBalancePage({ siteId }: { siteId?: string }) {
                   <button
                     className={`px-3 py-1 rounded text-sm font-medium transition-all ${
                       chartView === 'cost'
-                        ? 'bg-[#1B5E7B] text-white'
+                        ? 'bg-[var(--ink)] text-white'
                         : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                     }`}
                     onClick={() => setChartView('cost')}
@@ -265,7 +267,7 @@ export default function EnergyBalancePage({ siteId }: { siteId?: string }) {
               </div>
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
                   <XAxis dataKey="label" tick={{ fontSize: 10 }} />
                   <YAxis
                     tick={{ fontSize: 11 }}
@@ -318,7 +320,7 @@ export default function EnergyBalancePage({ siteId }: { siteId?: string }) {
           {/* Tabelle */}
           <div className="card overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-[#1B5E7B] text-white">
+              <thead className="bg-[var(--ink)] text-white">
                 <tr>
                   <th className="px-3 py-2 text-left font-semibold">Monat</th>
                   {data.energy_types.map(et => (
@@ -333,7 +335,7 @@ export default function EnergyBalancePage({ siteId }: { siteId?: string }) {
                   <th className="px-3 py-2 text-right font-semibold">Gesamt kWh</th>
                   <th className="px-3 py-2 text-right font-semibold">Kosten netto</th>
                 </tr>
-                <tr className="bg-[#155068] text-white text-xs">
+                <tr className="bg-[var(--ink)] text-white text-xs">
                   <th className="px-3 py-1 text-left">&nbsp;</th>
                   {data.energy_types.map(et => (
                     <>
@@ -387,7 +389,7 @@ export default function EnergyBalancePage({ siteId }: { siteId?: string }) {
                   </tr>
                 ))}
               </tbody>
-              <tfoot className="bg-gray-100 font-semibold border-t-2 border-[#1B5E7B]">
+              <tfoot className="bg-gray-100 font-semibold border-t-2 border-[var(--ink)]">
                 <tr>
                   <td className="px-3 py-2 text-gray-800">Gesamt</td>
                   {data.energy_types.map(et => {
@@ -405,10 +407,10 @@ export default function EnergyBalancePage({ siteId }: { siteId?: string }) {
                       </>
                     );
                   })}
-                  <td className="px-2 py-2 text-right text-[#1B5E7B]">
+                  <td className="px-2 py-2 text-right text-[var(--ink)]">
                     {data.grand_total_kwh.toLocaleString('de-DE', { maximumFractionDigits: 0 })}
                   </td>
-                  <td className="px-2 py-2 text-right text-[#1B5E7B]">
+                  <td className="px-2 py-2 text-right text-[var(--ink)]">
                     {data.grand_total_cost_net > 0
                       ? data.grand_total_cost_net.toLocaleString('de-DE', {
                           style: 'currency',

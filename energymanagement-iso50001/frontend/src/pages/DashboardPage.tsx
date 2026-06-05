@@ -309,9 +309,9 @@ function StatusBand({ co2Current, co2Baseline }: { co2Current: number; co2Baseli
         <div
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 6,
-            background: onTrack ? '#ECFDF5' : '#FEF3C7',
-            color: onTrack ? '#10B981' : '#B45309',
-            border: `1px solid ${onTrack ? '#A7F3D0' : '#FDE68A'}`,
+            background: onTrack ? 'color-mix(in srgb, var(--good) 12%, var(--surface))' : 'color-mix(in srgb, var(--fw-strom) 18%, var(--surface))',
+            color: onTrack ? 'var(--good)' : 'var(--warn)',
+            border: `1px solid ${onTrack ? 'color-mix(in srgb, var(--good) 30%, transparent)' : 'color-mix(in srgb, var(--fw-strom) 30%, transparent)'}`,
             fontSize: 11, fontWeight: 600, padding: '4px 10px',
             borderRadius: 99, letterSpacing: '0.02em',
             flexShrink: 0,
@@ -320,7 +320,7 @@ function StatusBand({ co2Current, co2Baseline }: { co2Current: number; co2Baseli
           <span
             style={{
               width: 6, height: 6, borderRadius: '50%',
-              background: onTrack ? '#10B981' : '#B45309',
+              background: onTrack ? 'var(--good)' : 'var(--warn)',
               boxShadow: `0 0 0 3px ${onTrack ? 'rgba(16,185,129,0.18)' : 'rgba(180,83,9,0.18)'}`,
             }}
           />
@@ -391,7 +391,7 @@ function DeltaBadge({ pct, inverse = false }: { pct: number | null; inverse?: bo
   if (pct == null) return null;
   const isPositive = pct < 0; // negative delta = Reduktion = gut
   const good = inverse ? !isPositive : isPositive;
-  const color = good ? '#10B981' : '#B91C1C';
+  const color = good ? 'var(--good)' : 'var(--alert)';
   const Arrow = pct > 0
     ? <path d="M6 2L10 6H2L6 2Z" fill={color}/>
     : <path d="M6 10L10 6H2L6 10Z" fill={color}/>;
@@ -431,11 +431,11 @@ function HeroKPIs({ cards }: { cards: KPICard[] }) {
       value: co2 ? fmtNum(co2.value) : '—',
       unit: co2?.unit || 'kg',
       delta: co2?.trend_percent ?? null,
-      color: '#10B981',
+      color: 'var(--good)',
       icon: (
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="6" stroke="#10B981" strokeWidth="1.5"/>
-          <path d="M5 8.5C5 7.12 6.12 6 7.5 6S10 7.12 10 8.5" stroke="#10B981" strokeWidth="1.5" strokeLinecap="round"/>
+          <circle cx="8" cy="8" r="6" stroke="var(--good)" strokeWidth="1.5"/>
+          <path d="M5 8.5C5 7.12 6.12 6 7.5 6S10 7.12 10 8.5" stroke="var(--good)" strokeWidth="1.5" strokeLinecap="round"/>
         </svg>
       ),
     },
@@ -444,10 +444,10 @@ function HeroKPIs({ cards }: { cards: KPICard[] }) {
       value: cost ? fmtEur(cost.value) : '—',
       unit: '',
       delta: cost?.trend_percent ?? null,
-      color: '#3D3D3D',
+      color: 'var(--ink-2)',
       icon: (
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M8 2V14M5 5h4.5a1.5 1.5 0 010 3H6a1.5 1.5 0 000 3H11" stroke="#3D3D3D" strokeWidth="1.5" strokeLinecap="round"/>
+          <path d="M8 2V14M5 5h4.5a1.5 1.5 0 010 3H6a1.5 1.5 0 000 3H11" stroke="var(--ink-2)" strokeWidth="1.5" strokeLinecap="round"/>
         </svg>
       ),
     },
@@ -737,10 +737,10 @@ function InsightsPanel({ data }: { data: DashboardData }) {
   }
 
   const kindConfig: Record<InsightKind, { bg: string; fg: string; dot: string }> = {
-    warn:  { bg: '#FEF9EC', fg: '#B45309', dot: '#F59E0B' },
-    good:  { bg: '#ECFDF5', fg: '#059669', dot: '#10B981' },
-    alert: { bg: '#FEF2F2', fg: '#B91C1C', dot: '#EF4444' },
-    info:  { bg: '#EFF6FF', fg: '#1E40AF', dot: '#3B82F6' },
+    warn:  { bg: 'color-mix(in srgb, var(--fw-strom) 10%, var(--surface))', fg: 'var(--warn)', dot: 'var(--fw-strom)' },
+    good:  { bg: 'color-mix(in srgb, var(--good) 12%, var(--surface))', fg: '#059669', dot: 'var(--good)' },
+    alert: { bg: 'color-mix(in srgb, var(--alert) 12%, var(--surface))', fg: 'var(--alert)', dot: 'var(--alert)' },
+    info:  { bg: 'color-mix(in srgb, var(--info) 10%, var(--surface))', fg: '#1E40AF', dot: 'var(--info)' },
   };
 
   return (
@@ -831,7 +831,7 @@ function TopConsumers({ groups }: { groups: TopConsumerGroup[] }) {
         const def = ENERGY_DEFS.find((d) =>
           d.apiTypes.some((t) => t.toLowerCase() === group.energy_type.toLowerCase())
         );
-        const color = def?.color || '#8A8A8A';
+        const color = def?.color || 'var(--ink-3)';
         const topTotal = group.meters.reduce((s, m) => s + m.consumption, 0);
 
         return (
@@ -960,7 +960,7 @@ function CO2Card({ cards }: { cards: KPICard[] }) {
             <div
               style={{
                 fontSize: 16, fontWeight: 600, fontFamily: 'var(--font-mono)',
-                color: s.good ? '#10B981' : 'var(--ink)',
+                color: s.good ? 'var(--good)' : 'var(--ink)',
               }}
             >
               {s.value}
@@ -1048,8 +1048,8 @@ export default function DashboardPage() {
   if (error || !data) {
     return (
       <div className="dash-v2" style={{ ...breakoutStyle, padding: 24 }}>
-        <div style={{ border: '1px solid #FECACA', background: '#FEF2F2', borderRadius: 12, padding: 24, textAlign: 'center' }}>
-          <p style={{ color: '#B91C1C' }}>{error || 'Keine Daten verfügbar'}</p>
+        <div style={{ border: '1px solid color-mix(in srgb, var(--alert) 28%, transparent)', background: 'color-mix(in srgb, var(--alert) 12%, var(--surface))', borderRadius: 12, padding: 24, textAlign: 'center' }}>
+          <p style={{ color: 'var(--alert)' }}>{error || 'Keine Daten verfügbar'}</p>
           <button
             onClick={fetchDashboard}
             style={{ marginTop: 12, padding: '7px 16px', background: '#0F1115', color: '#FFF', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 13 }}

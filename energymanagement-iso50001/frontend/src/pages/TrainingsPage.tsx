@@ -3,9 +3,10 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { GraduationCap, Plus, X, AlertCircle, CheckCircle, Clock } from 'lucide-react';
+import { Plus, X, AlertCircle, CheckCircle, Clock } from 'lucide-react';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import { apiClient } from '@/utils/api';
+import PageHead from '@/components/ui/PageHead';
 
 interface Training {
   id: string;
@@ -195,15 +196,15 @@ export default function TrainingsPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <GraduationCap size={24} className="text-primary-600" />
-          <h1 className="page-title">Schulungen (ISO 50001 Kap. 7.2/7.3)</h1>
-        </div>
-        <button className="btn-primary flex items-center gap-2" onClick={openCreate}>
-          <Plus size={16} /> Schulung anlegen
-        </button>
-      </div>
+      <PageHead
+        eyebrow="ISO 50001 · Kap. 7.2/7.3"
+        title="Schulungen"
+        actions={
+          <button className="btn-primary flex items-center gap-2" onClick={openCreate}>
+            <Plus size={16} /> Schulung anlegen
+          </button>
+        }
+      />
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded flex justify-between">

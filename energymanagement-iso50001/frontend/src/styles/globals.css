@@ -1206,3 +1206,109 @@ html { scroll-behavior: smooth; }
     letter-spacing: -0.005em;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   Globale Native-Element-Patches
+   Damit Bestand-Selects/Textareas/Date-Inputs/Checkboxes in beiden
+   Themes lesbar bleiben, ohne dass jede Page einzelne Klassen tragen muss.
+   ════════════════════════════════════════════════════════════════════ */
+
+select.input,
+select.input.w-32,
+select.input.w-40,
+select.input.w-48,
+select {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-family: inherit;
+  color-scheme: light;
+}
+[data-theme="dark"] select { color-scheme: dark; }
+
+textarea {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-family: inherit;
+}
+textarea::placeholder { color: var(--ink-4); }
+textarea:focus {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+input[type="date"],
+input[type="datetime-local"],
+input[type="time"],
+input[type="month"],
+input[type="week"],
+input[type="number"],
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+input[type="tel"],
+input[type="url"] {
+  color-scheme: light;
+}
+[data-theme="dark"] input[type="date"],
+[data-theme="dark"] input[type="datetime-local"],
+[data-theme="dark"] input[type="time"],
+[data-theme="dark"] input[type="month"],
+[data-theme="dark"] input[type="week"],
+[data-theme="dark"] input[type="number"],
+[data-theme="dark"] input[type="text"],
+[data-theme="dark"] input[type="email"],
+[data-theme="dark"] input[type="password"],
+[data-theme="dark"] input[type="search"],
+[data-theme="dark"] input[type="tel"],
+[data-theme="dark"] input[type="url"] {
+  color-scheme: dark;
+}
+
+/* Checkboxes/Radios kriegen die Marken-Akzentfarbe, damit „checked" sichtbar
+   bleibt im Dark-Mode (sonst hellblau-Browser-Default auf dunklem Surface). */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--ink);
+}
+
+/* Tailwind-eigenes <hr> sieht im Dark-Mode auf Surface komisch aus. */
+hr { border-color: var(--line); }
+
+/* Native Code-/Pre-Elemente sollen Geist Mono ziehen. */
+code, pre, kbd, samp {
+  font-family: var(--font-mono);
+}
+
+/* Modal-Backdrop (von vielen Pages über lokalen CSS-Wert „bg-black bg-opacity-50"
+   gerendert) bleibt halbtransparent dunkel — in beiden Themes ok. */
+
+/* Tailwind `bg-amber-*` Pastel-Töne, die in vielen Pages für Banner/Warnungen
+   benutzt werden, sind im Dark-Mode zu hell. In dunklem Modus etwas abdunkeln
+   via Filter ist nicht ideal — wir mappen stattdessen die Marken-amber Pastel
+   auf token-basierte color-mix-Werte über die Tailwind-Brücke (siehe
+   tailwind.config.js -> gray-Mapping greift; amber bleibt Marken-pastell). */
+
+/* Disabled-States: globale Abblendung für native Buttons/Inputs. */
+button:disabled, input:disabled, select:disabled, textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Page-Tabs (Bestand verwendet PageTabs.tsx): Border-Tokens hochziehen. */
+.tab-bar {
+  border-bottom: 1px solid var(--line);
+}
+
+/* Bestand-Tab-Buttons in mehreren Pages: ersetzbar via SegControl, aber für
+   die noch nicht angefassten Pages stellen wir wenigstens die Border-Tokens. */
+nav.flex.gap-6 > button.pb-2,
+nav.flex.gap-0 > button {
+  color: var(--ink-3);
+}
+nav.flex.gap-6 > button.pb-2:hover { color: var(--ink); }

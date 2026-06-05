@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '@/utils/api';
 import type { PaginatedResponse } from '@/types';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import PageHead from '@/components/ui/PageHead';
+import SegControl from '@/components/ui/SegControl';
 
 // ── Typen ──
 
@@ -59,25 +61,20 @@ export default function UsersPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <h1 className="page-title">Benutzerverwaltung</h1>
-      </div>
-
-      {/* Tab-Navigation */}
-      <div className="mt-4 flex border-b">
-        <button
-          className={`px-4 py-2 text-sm font-medium ${activeTab === 'users' ? 'border-b-2 border-primary-600 text-primary-600' : 'text-gray-500 hover:text-gray-700'}`}
-          onClick={() => setActiveTab('users')}
-        >
-          Benutzer
-        </button>
-        <button
-          className={`px-4 py-2 text-sm font-medium ${activeTab === 'audit' ? 'border-b-2 border-primary-600 text-primary-600' : 'text-gray-500 hover:text-gray-700'}`}
-          onClick={() => setActiveTab('audit')}
-        >
-          Audit-Log
-        </button>
-      </div>
+      <PageHead
+        eyebrow="System"
+        title="Benutzerverwaltung"
+        actions={
+          <SegControl
+            value={activeTab}
+            onChange={(v) => setActiveTab(v)}
+            options={[
+              { value: 'users', label: 'Benutzer' },
+              { value: 'audit', label: 'Audit-Log' },
+            ]}
+          />
+        }
+      />
 
       {activeTab === 'users' ? <UsersList /> : <AuditLogList />}
     </div>

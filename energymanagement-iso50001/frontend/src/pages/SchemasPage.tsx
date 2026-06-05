@@ -8,6 +8,7 @@ import {
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS } from '@/types';
 import InfoTip from '@/components/ui/InfoTip';
+import PageHead from '@/components/ui/PageHead';
 
 /* ── Typen ── */
 
@@ -73,12 +74,12 @@ const ENERGY_ICONS: Record<string, React.ElementType> = {
 };
 
 const NODE_COLORS: Record<string, string> = {
-  electricity: '#F59E0B',
-  natural_gas: '#3B82F6',
+  electricity: 'var(--fw-strom)',
+  natural_gas: 'var(--info)',
   heating_oil: '#8B5CF6',
   district_heating: '#F97316',
   water: '#06B6D4',
-  solar: '#10B981',
+  solar: 'var(--good)',
 };
 
 /* ── Formatierung ── */
@@ -269,20 +270,21 @@ export default function SchemasPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="page-title">Energieschema</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Zählerstränge als Baumstruktur visualisieren – basierend auf der Zähler-Hierarchie.
-          </p>
-        </div>
-        {!selectedTree && (
-          <button onClick={() => setShowAddModal(true)} className="btn-primary flex items-center gap-1.5">
-            <Plus className="h-4 w-4" />
-            Betrachtungspunkt hinzufügen
-          </button>
-        )}
-      </div>
+      <PageHead
+        eyebrow="Stammdaten"
+        title="Energieschema"
+        actions={
+          !selectedTree ? (
+            <button onClick={() => setShowAddModal(true)} className="btn-primary flex items-center gap-1.5">
+              <Plus className="h-4 w-4" />
+              Betrachtungspunkt hinzufügen
+            </button>
+          ) : undefined
+        }
+      />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
+        Zählerstränge als Baumstruktur visualisieren – basierend auf der Zähler-Hierarchie.
+      </p>
 
       {!selectedTree ? (
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -299,7 +301,7 @@ export default function SchemasPage() {
               const Icon = root.energy_type
                 ? (ENERGY_ICONS[root.energy_type] || Gauge)
                 : (root.scope_type === 'meter' ? Gauge : Building2);
-              const color = root.energy_type ? (NODE_COLORS[root.energy_type] || '#6b7280') : '#1B5E7B';
+              const color = root.energy_type ? (NODE_COLORS[root.energy_type] || 'var(--ink-3)') : 'var(--ink)';
               const scopeLabel = {
                 site: 'Standort',
                 building: 'Gebäude',
@@ -570,8 +572,8 @@ function TreeView({
           {nodes.map((n) => {
             const isVirtualRoot = n.node.is_virtual_root === true;
             const color = isVirtualRoot
-              ? '#1B5E7B'
-              : (NODE_COLORS[n.node.energy_type] || '#6b7280');
+              ? 'var(--ink)'
+              : (NODE_COLORS[n.node.energy_type] || 'var(--ink-3)');
             const Icon = isVirtualRoot
               ? Building2
               : (ENERGY_ICONS[n.node.energy_type] || Gauge);
@@ -1099,7 +1101,7 @@ function AddSchemaRootModal({
                       {siteOpen && site.groups.map((g) => {
                         const etOpen = expanded.has(g.etKey);
                         const EtIcon = ENERGY_ICONS[g.energyType] || Gauge;
-                        const etColor = NODE_COLORS[g.energyType] || '#6b7280';
+                        const etColor = NODE_COLORS[g.energyType] || 'var(--ink-3)';
                         return (
                           <div key={g.etKey}>
                             <button

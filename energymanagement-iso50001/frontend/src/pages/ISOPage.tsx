@@ -6,6 +6,7 @@ import {
   Shield, TrendingUp,
 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
+import PageHead from '@/components/ui/PageHead';
 
 /* ── Typen ── */
 
@@ -243,13 +244,13 @@ export default function ISOPage() {
 
   return (
     <div>
-      <h1 className="page-title">ISO 50001 Management</h1>
-      <p className="mt-1 text-sm text-gray-500">
+      <PageHead eyebrow="ISO 50001" title="ISO 50001 Management" />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
         Kontext, Energiepolitik, Ziele, Risiken, Audits und Dokumentation
       </p>
 
       {/* Tab-Navigation */}
-      <div className="mt-4 border-b border-gray-200 overflow-x-auto">
+      <div className="mt-4 overflow-x-auto" style={{ borderBottom: '1px solid var(--line)' }}>
         <nav className="flex gap-0 -mb-px">
           {TABS.map(tab => {
             const Icon = tab.icon;
@@ -260,7 +261,7 @@ export default function ISOPage() {
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
                   isActive
-                    ? 'border-[#1B5E7B] text-[#1B5E7B]'
+                    ? 'border-[var(--ink)] text-[var(--ink)]'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
@@ -485,7 +486,7 @@ function PolicyTab() {
       </div>
 
       {showForm && (
-        <div className="card border-2 border-[#1B5E7B]/20 space-y-3">
+        <div className="card border-2 border-[var(--ink)]/20 space-y-3">
           <div className="flex justify-between items-center">
             <h3 className="font-medium">{editId ? 'Politik bearbeiten' : 'Neue Energiepolitik'}</h3>
             <button onClick={() => setShowForm(false)}><X size={18} /></button>
@@ -602,7 +603,7 @@ function RolesTab() {
       </div>
 
       {showForm && (
-        <div className="card border-2 border-[#1B5E7B]/20 space-y-3">
+        <div className="card border-2 border-[var(--ink)]/20 space-y-3">
           <div className="flex justify-between"><h3 className="font-medium">{editId ? 'Rolle bearbeiten' : 'Neue Rolle'}</h3><button onClick={() => setShowForm(false)}><X size={18} /></button></div>
           <div className="grid grid-cols-3 gap-3">
             <div><label className="label">Rollenbezeichnung</label><input className="input w-full" value={form.role_name} onChange={e => setForm(f => ({ ...f, role_name: e.target.value }))} /></div>
@@ -718,7 +719,7 @@ function ObjectivesTab() {
       </div>
 
       {showForm && (
-        <div className="card border-2 border-[#1B5E7B]/20 space-y-3">
+        <div className="card border-2 border-[var(--ink)]/20 space-y-3">
           <div className="flex justify-between"><h3 className="font-medium">Neues Energieziel</h3><button onClick={() => setShowForm(false)}><X size={18} /></button></div>
           <input className="input w-full" placeholder="Titel" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
           <textarea className="input w-full h-20" placeholder="Beschreibung" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
@@ -764,7 +765,7 @@ function ObjectivesTab() {
                   <span>{Number(obj.progress_percent ?? 0).toFixed(0)}%</span>
                 </div>
                 <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                  <div className="h-full bg-[#1B5E7B] rounded-full transition-all" style={{ width: `${Math.min(Number(obj.progress_percent ?? 0), 100)}%` }} />
+                  <div className="h-full bg-[var(--ink)] rounded-full transition-all" style={{ width: `${Math.min(Number(obj.progress_percent ?? 0), 100)}%` }} />
                 </div>
               </div>
             </div>
@@ -848,7 +849,7 @@ function RisksTab() {
       </div>
 
       {showForm && (
-        <div className="card border-2 border-[#1B5E7B]/20 space-y-3">
+        <div className="card border-2 border-[var(--ink)]/20 space-y-3">
           <div className="flex justify-between"><h3 className="font-medium">Neues Risiko / Chance</h3><button onClick={() => setShowForm(false)}><X size={18} /></button></div>
           <div className="grid grid-cols-3 gap-3">
             <div><label className="label">Typ</label>
@@ -990,7 +991,7 @@ function LegalTab() {
       </div>
 
       {showForm && (
-        <div className="card border-2 border-[#1B5E7B]/20 space-y-3">
+        <div className="card border-2 border-[var(--ink)]/20 space-y-3">
           <div className="flex justify-between"><h3 className="font-medium">Neue Rechtsanforderung</h3><button onClick={() => setShowForm(false)}><X size={18} /></button></div>
           <input className="input w-full" placeholder="Titel / Gesetz" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
           <div className="grid grid-cols-3 gap-3">
@@ -1127,7 +1128,7 @@ function DocumentsTab() {
       )}
 
       {showForm && (
-        <div className="card border-2 border-[#1B5E7B]/20 space-y-3">
+        <div className="card border-2 border-[var(--ink)]/20 space-y-3">
           <div className="flex justify-between"><h3 className="font-medium">Neues Dokument</h3><button onClick={() => setShowForm(false)}><X size={18} /></button></div>
           <input className="input w-full" placeholder="Titel" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
           <div className="grid grid-cols-3 gap-3">
@@ -1176,7 +1177,7 @@ function DocumentsTab() {
                 <td className="py-2 px-3 text-gray-600">{d.iso_clause_reference || '–'}</td>
                 <td className="py-2 px-3 text-gray-600">{d.author}</td>
                 <td className="py-2 px-3">
-                  <button onClick={() => handleUpload(d.id)} className="text-[#1B5E7B] hover:underline text-xs">Upload</button>
+                  <button onClick={() => handleUpload(d.id)} className="text-[var(--ink)] hover:underline text-xs">Upload</button>
                 </td>
               </tr>
             ))}
@@ -1259,7 +1260,7 @@ function AuditsTab() {
 
       {/* Audit-Checkliste */}
       {showChecklist && (
-        <div className="card border-2 border-[#1B5E7B]/20">
+        <div className="card border-2 border-[var(--ink)]/20">
           <div className="flex justify-between items-center mb-4">
             <h3 className="font-medium text-gray-900">ISO 50001 Audit-Checkliste</h3>
             <button onClick={() => setShowChecklist(false)}><X size={18} /></button>
@@ -1268,7 +1269,7 @@ function AuditsTab() {
             {checklist.map(item => (
               <div key={item.clause} className="border rounded-lg p-3">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="font-mono text-sm font-bold text-[#1B5E7B]">{item.clause}</span>
+                  <span className="font-mono text-sm font-bold text-[var(--ink)]">{item.clause}</span>
                   <span className="font-medium text-gray-900">{item.topic}</span>
                 </div>
                 <div className="space-y-1.5 pl-4">
@@ -1297,7 +1298,7 @@ function AuditsTab() {
       )}
 
       {showForm && (
-        <div className="card border-2 border-[#1B5E7B]/20 space-y-3">
+        <div className="card border-2 border-[var(--ink)]/20 space-y-3">
           <div className="flex justify-between"><h3 className="font-medium">Neues Audit</h3><button onClick={() => setShowForm(false)}><X size={18} /></button></div>
           <input className="input w-full" placeholder="Titel" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
           <div className="grid grid-cols-3 gap-3">
@@ -1433,7 +1434,7 @@ function ReviewsTab() {
       </div>
 
       {showForm && (
-        <div className="card border-2 border-[#1B5E7B]/20 space-y-3">
+        <div className="card border-2 border-[var(--ink)]/20 space-y-3">
           <div className="flex justify-between"><h3 className="font-medium">Neue Managementbewertung</h3><button onClick={() => { setShowForm(false); setPrefillData(null); }}><X size={18} /></button></div>
           <input className="input w-full" placeholder="Titel" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
           <div className="grid grid-cols-3 gap-3">
@@ -1489,7 +1490,7 @@ function ReviewsTab() {
                         <span>{String(o.title)}</span>
                         <div className="flex items-center gap-2">
                           <div className="w-20 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                            <div className="h-full bg-[#1B5E7B] rounded-full" style={{ width: `${Math.min(Number(o.progress) || 0, 100)}%` }} />
+                            <div className="h-full bg-[var(--ink)] rounded-full" style={{ width: `${Math.min(Number(o.progress) || 0, 100)}%` }} />
                           </div>
                           <span className="text-xs text-gray-500">{Number(o.progress)?.toFixed(0)}%</span>
                           <StatusBadge status={String(o.status)} />
@@ -1621,7 +1622,7 @@ function NonconformitiesTab() {
       </div>
 
       {showForm && (
-        <div className="card border-2 border-[#1B5E7B]/20 space-y-3">
+        <div className="card border-2 border-[var(--ink)]/20 space-y-3">
           <div className="flex justify-between"><h3 className="font-medium">Neue Nichtkonformität</h3><button onClick={() => setShowForm(false)}><X size={18} /></button></div>
           <input className="input w-full" placeholder="Titel" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
           <div className="grid grid-cols-3 gap-3">
@@ -1695,7 +1696,7 @@ function NonconformitiesTab() {
                         </div>
                       ))}
                     </div>
-                    <button className="text-xs text-[#1B5E7B] hover:underline mt-2"
+                    <button className="text-xs text-[var(--ink)] hover:underline mt-2"
                       onClick={async () => {
                         const whys = [1, 2, 3, 4, 5]
                           .map(n => (document.getElementById(`why-${nc.id}-${n}`) as HTMLInputElement)?.value)
@@ -1717,7 +1718,7 @@ function NonconformitiesTab() {
                   <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded">
                     <p className="text-xs font-medium text-blue-800 mb-2">Wirksamkeitsprüfung</p>
                     <textarea className="input w-full text-xs h-16" placeholder="Bewertung der Wirksamkeit…" id={`verify-${nc.id}`} />
-                    <button className="text-xs text-[#1B5E7B] hover:underline mt-1"
+                    <button className="text-xs text-[var(--ink)] hover:underline mt-1"
                       onClick={async () => {
                         const notes = (document.getElementById(`verify-${nc.id}`) as HTMLTextAreaElement)?.value;
                         try {

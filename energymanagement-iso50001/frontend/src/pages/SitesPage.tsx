@@ -687,7 +687,7 @@ export default function SitesPage() {
                         <span key={d.key} style={{
                           display: 'inline-flex', alignItems: 'center', gap: 4,
                           background: d.color + '18', border: `1px solid ${d.color}44`,
-                          borderRadius: 4, padding: '2px 7px', fontSize: 10.5, color: '#3D3D3D',
+                          borderRadius: 4, padding: '2px 7px', fontSize: 10.5, color: 'var(--ink-2)',
                         }}>
                           <span style={{ width: 6, height: 6, borderRadius: '50%', background: d.color, display: 'inline-block', flexShrink: 0 }} />
                           {d.label}: {fmtMwh(summary.by_energy[d.key])}
@@ -750,7 +750,7 @@ export default function SitesPage() {
   const unknownEnergyTypes = [...siteEnergySet].filter(k => !SITE_ENERGY_DEFS.some(d => d.key === k));
   const filterDefs: Array<{ key: string; label: string; color: string }> = [
     ...activeDefs,
-    ...unknownEnergyTypes.map(k => ({ key: k, label: ENERGY_TYPE_LABELS[k as keyof typeof ENERGY_TYPE_LABELS] || k, color: '#9A968B' })),
+    ...unknownEnergyTypes.map(k => ({ key: k, label: ENERGY_TYPE_LABELS[k as keyof typeof ENERGY_TYPE_LABELS] || k, color: 'var(--ink-4)' })),
   ];
 
   const panelMeters = selectedNode.type === 'building'
@@ -786,7 +786,7 @@ export default function SitesPage() {
   const panelBuilding = selectedNode.type === 'building' ? siteBuildings.find(b => b.id === selectedNode.id) ?? null : null;
   const panelBuildingUnits = (selectedNode.type === 'building' && selectedBuilding?.id === selectedNode.id) ? (selectedBuilding?.usage_units ?? []) : [];
 
-  const getEnergyColor = (k: string) => (SITE_ENERGY_DEFS.find(d => d.key === k)?.color ?? '#9A968B');
+  const getEnergyColor = (k: string) => (SITE_ENERGY_DEFS.find(d => d.key === k)?.color ?? 'var(--ink-4)');
   const fmtKwh = (v: number) => Number(v).toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' kWh';
 
   return (
@@ -1067,7 +1067,7 @@ export default function SitesPage() {
                       + NE
                     </button>
                   )}
-                  <button className="btn-primary" style={{ background: 'var(--surface)', color: '#B91C1C', border: '1px solid var(--line)', fontSize: 11, padding: '4px 10px' }}
+                  <button className="btn-primary" style={{ background: 'var(--surface)', color: 'var(--alert)', border: '1px solid var(--line)', fontSize: 11, padding: '4px 10px' }}
                     onClick={() => handleDeleteBuilding(panelBuilding)}>Löschen</button>
                 </div>
               </div>
@@ -1161,7 +1161,7 @@ export default function SitesPage() {
                         {m.cross_site_boundary && <span className="meter-belongs">↗ gehört zu: {m.owner_site_name ?? 'Anderer Standort'}</span>}
                         {m.meter_number && <span className="meter-num">{m.meter_number}</span>}
                       </div>
-                      <div className="meter-energy" style={{ background: color + '22', color: '#3D3D3D', border: `1px solid ${color}55` }}>
+                      <div className="meter-energy" style={{ background: color + '22', color: 'var(--ink-2)', border: `1px solid ${color}55` }}>
                         <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, display: 'inline-block', flexShrink: 0 }} />
                         {label}
                       </div>
@@ -1172,7 +1172,7 @@ export default function SitesPage() {
                             <button onClick={() => openEditMeter(m)} title="Bearbeiten"><Settings size={12} /></button>
                             <button onClick={() => handlePollMeter(m)} title="Abfragen"><Activity size={12} /></button>
                             {m.data_source === 'shelly' && <button onClick={() => handleTestConnection(m)} title="Verbindung testen"><Wifi size={12} /></button>}
-                            <button onClick={() => handleDeleteMeter(m)} title="Löschen" style={{ color: '#B91C1C' }}><Trash2 size={12} /></button>
+                            <button onClick={() => handleDeleteMeter(m)} title="Löschen" style={{ color: 'var(--alert)' }}><Trash2 size={12} /></button>
                           </>
                         )}
                         <a href={`/readings?meter_id=${m.id}`}

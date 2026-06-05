@@ -3,6 +3,8 @@ import { apiClient } from '@/utils/api';
 import InfoTip from '@/components/ui/InfoTip';
 import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import PageHead from '@/components/ui/PageHead';
+import SegControl from '@/components/ui/SegControl';
 
 // ── Typen ──
 
@@ -69,35 +71,24 @@ export default function EmissionsPage() {
 
   return (
     <div>
-      <div>
-        <h1 className="page-title">CO₂-Emissionen</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          CO₂-Bilanzierung, Emissionsfaktoren und Reduktionsziele
-        </p>
-      </div>
-
-      {/* Tabs */}
-      <div className="mt-4 border-b border-gray-200">
-        <nav className="flex gap-6">
-          {([
-            ['dashboard', 'Dashboard'],
-            ['factors', 'Emissionsfaktoren'],
-            ['calculate', 'Berechnung'],
-          ] as [Tab, string][]).map(([key, label]) => (
-            <button
-              key={key}
-              className={`pb-2 text-sm font-medium ${
-                activeTab === key
-                  ? 'border-b-2 border-primary-600 text-primary-600'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-              onClick={() => setActiveTab(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <PageHead
+        eyebrow="Umwelt"
+        title="CO₂-Emissionen"
+        actions={
+          <SegControl<Tab>
+            value={activeTab}
+            onChange={setActiveTab}
+            options={[
+              { value: 'dashboard', label: 'Dashboard' },
+              { value: 'factors', label: 'Emissionsfaktoren' },
+              { value: 'calculate', label: 'Berechnung' },
+            ]}
+          />
+        }
+      />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
+        CO₂-Bilanzierung, Emissionsfaktoren und Reduktionsziele
+      </p>
 
       <div className="mt-4">
         {activeTab === 'dashboard' && <DashboardPanel />}

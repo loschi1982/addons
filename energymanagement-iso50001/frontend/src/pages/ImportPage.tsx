@@ -3,6 +3,8 @@ import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
 import { Info } from 'lucide-react';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import PageHead from '@/components/ui/PageHead';
+import SegControl from '@/components/ui/SegControl';
 
 // ── Typen ──
 
@@ -336,32 +338,23 @@ export default function ImportPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="page-title">Datenimport</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Zählerstände aus CSV oder Excel-Dateien importieren
-          </p>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="mt-4 border-b border-gray-200">
-        <nav className="flex gap-6">
-          <button
-            className={`pb-2 text-sm font-medium ${activeTab === 'wizard' ? 'border-b-2 border-primary-600 text-primary-600' : 'text-gray-500 hover:text-gray-700'}`}
-            onClick={() => setActiveTab('wizard')}
-          >
-            Import-Assistent
-          </button>
-          <button
-            className={`pb-2 text-sm font-medium ${activeTab === 'history' ? 'border-b-2 border-primary-600 text-primary-600' : 'text-gray-500 hover:text-gray-700'}`}
-            onClick={() => setActiveTab('history')}
-          >
-            Import-Verlauf
-          </button>
-        </nav>
-      </div>
+      <PageHead
+        eyebrow="System"
+        title="Datenimport"
+        actions={
+          <SegControl
+            value={activeTab}
+            onChange={(v) => setActiveTab(v as 'wizard' | 'history')}
+            options={[
+              { value: 'wizard', label: 'Import-Assistent' },
+              { value: 'history', label: 'Import-Verlauf' },
+            ]}
+          />
+        }
+      />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
+        Zählerstände aus CSV oder Excel-Dateien importieren
+      </p>
 
       {activeTab === 'wizard' && (
         <div className="mt-4">

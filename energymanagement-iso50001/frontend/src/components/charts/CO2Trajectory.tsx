@@ -48,29 +48,29 @@ export default function CO2Trajectory({
       <rect
         x={padL} y={yScale(targetVal)} width={innerW}
         height={padT + innerH - yScale(targetVal)}
-        fill="#10B981" opacity={0.06}
+        fill="var(--good)" opacity={0.06}
       />
       <line
         x1={padL} x2={padL + innerW}
         y1={yScale(targetVal)} y2={yScale(targetVal)}
-        stroke="#10B981" strokeDasharray="3 3" strokeWidth={1}
+        stroke="var(--good)" strokeDasharray="3 3" strokeWidth={1}
       />
       <text
         x={padL + innerW - 4} y={yScale(targetVal) - 4}
-        textAnchor="end" fontSize="10" fill="#10B981" fontWeight={600}
+        textAnchor="end" fontSize="10" fill="var(--good)" fontWeight={600}
       >
         Ziel −{target}% bis {targetYear}
       </text>
       <path
         d={idealPath}
-        fill="none" stroke="#8A8A8A"
+        fill="none" stroke="var(--ink-3)"
         strokeDasharray="2 3" strokeWidth={1.5}
       />
       <path
         d={`M${actualPts[0][0]},${actualPts[0][1]} L${actualPts[1][0]},${actualPts[1][1]}`}
-        fill="none" stroke="#10B981" strokeWidth={2.5} strokeLinecap="round"
+        fill="none" stroke="var(--good)" strokeWidth={2.5} strokeLinecap="round"
       />
-      <circle cx={actualPts[0][0]} cy={actualPts[0][1]} r={3} fill="#8A8A8A" />
+      <circle cx={actualPts[0][0]} cy={actualPts[0][1]} r={3} fill="var(--ink-3)" />
       <text
         x={actualPts[0][0]} y={actualPts[0][1] - 8}
         textAnchor="middle" fontSize="10" fill="#525252"
@@ -78,11 +78,11 @@ export default function CO2Trajectory({
       >
         {baselineYear}
       </text>
-      <circle cx={actualPts[1][0]} cy={actualPts[1][1]} r={5} fill="#10B981" />
-      <circle cx={actualPts[1][0]} cy={actualPts[1][1]} r={9} fill="#10B981" opacity={0.18} />
+      <circle cx={actualPts[1][0]} cy={actualPts[1][1]} r={5} fill="var(--good)" />
+      <circle cx={actualPts[1][0]} cy={actualPts[1][1]} r={9} fill="var(--good)" opacity={0.18} />
       <text
         x={actualPts[1][0]} y={actualPts[1][1] - 12}
-        textAnchor="middle" fontSize="11" fill="#0A0A0B" fontWeight={600}
+        textAnchor="middle" fontSize="11" fill="var(--ink)" fontWeight={600}
         fontFamily="ui-monospace, 'Geist Mono', monospace"
       >
         {fmtNum(current)} kg
@@ -90,7 +90,7 @@ export default function CO2Trajectory({
       {yrs.map((y) => (
         <text
           key={y} x={xScale(y)} y={height - 6}
-          textAnchor="middle" fontSize="10" fill="#8A8A8A"
+          textAnchor="middle" fontSize="10" fill="var(--ink-3)"
           fontFamily="ui-monospace, 'Geist Mono', monospace"
         >
           {y}

@@ -42,7 +42,7 @@ export default function MeterMapToolbar({
               style={{
                 backgroundColor: active ? color + '20' : 'transparent',
                 borderColor: active ? color : '#e5e7eb',
-                color: active ? color : '#9CA3AF',
+                color: active ? color : 'var(--ink-4)',
               }}
               onClick={() => onToggleEnergyFilter(type)}
               title={ENERGY_TYPE_LABELS[type]}

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import PageTabs, { COST_TABS } from '@/components/layout/PageTabs';
+import PageHead from '@/components/ui/PageHead';
 
 /* ── Typen ── */
 
@@ -63,13 +64,13 @@ const ET_LABELS: Record<string, string> = {
 };
 
 const ET_COLORS: Record<string, string> = {
-  electricity: '#F59E0B',
-  natural_gas: '#3B82F6',
+  electricity: 'var(--fw-strom)',
+  natural_gas: 'var(--info)',
   water: '#06B6D4',
-  district_heating: '#EF4444',
+  district_heating: 'var(--alert)',
   district_cooling: '#8B5CF6',
-  oil: '#6B7280',
-  pellets: '#10B981',
+  oil: 'var(--ink-3)',
+  pellets: 'var(--good)',
 };
 
 function fmt(v: number, digits = 1) {
@@ -272,7 +273,7 @@ function ComparisonCard({ cmp }: { cmp: Comparison }) {
         </div>
         <div className="card p-3">
           <p className="text-xs text-gray-500">Ist (tatsächlich)</p>
-          <p className="text-lg font-bold text-[#1B5E7B]">{fmt(cmp.actual_kwh)} kWh</p>
+          <p className="text-lg font-bold text-[var(--ink)]">{fmt(cmp.actual_kwh)} kWh</p>
         </div>
         <div className="card p-3">
           <p className="text-xs text-gray-500">Abweichung</p>
@@ -300,7 +301,7 @@ function ComparisonCard({ cmp }: { cmp: Comparison }) {
               className="h-2 rounded transition-all"
               style={{
                 width: `${progress}%`,
-                backgroundColor: progress > 100 ? '#DC2626' : '#1B5E7B',
+                backgroundColor: progress > 100 ? 'var(--alert)' : 'var(--ink)',
               }}
             />
           </div>
@@ -405,22 +406,23 @@ export default function ContractsPage() {
   return (
     <div className="p-6 space-y-6">
       <PageTabs tabs={COST_TABS} />
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="page-title">Energielieferverträge</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Vertragsmanagement: Laufzeiten, Preisstruktur und Soll-/Ist-Vergleich
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button className="btn-secondary flex items-center gap-2" onClick={load} disabled={loading}>
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-          </button>
-          <button className="btn-primary flex items-center gap-2" onClick={() => { setEditContract(null); setShowForm(true); }}>
-            <Plus size={16} /> Neuer Vertrag
-          </button>
-        </div>
-      </div>
+      <PageHead
+        eyebrow="Kosten & Wirtschaft"
+        title="Energielieferverträge"
+        actions={
+          <>
+            <button className="btn-secondary flex items-center gap-2" onClick={load} disabled={loading}>
+              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            </button>
+            <button className="btn-primary flex items-center gap-2" onClick={() => { setEditContract(null); setShowForm(true); }}>
+              <Plus size={16} /> Neuer Vertrag
+            </button>
+          </>
+        }
+      />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
+        Vertragsmanagement: Laufzeiten, Preisstruktur und Soll-/Ist-Vergleich
+      </p>
 
       {/* Ablauf-Warnung */}
       {expiring.length > 0 && (
@@ -512,7 +514,7 @@ export default function ContractsPage() {
             >
               <div
                 className="w-3 h-3 rounded-full flex-shrink-0"
-                style={{ backgroundColor: ET_COLORS[c.energy_type] ?? '#9CA3AF' }}
+                style={{ backgroundColor: ET_COLORS[c.energy_type] ?? 'var(--ink-4)' }}
               />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -537,7 +539,7 @@ export default function ContractsPage() {
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <button
-                  className="text-xs text-gray-500 hover:text-[#1B5E7B] px-2 py-1 rounded hover:bg-gray-100"
+                  className="text-xs text-gray-500 hover:text-[var(--ink)] px-2 py-1 rounded hover:bg-gray-100"
                   onClick={e => { e.stopPropagation(); setEditContract(c); setShowForm(true); }}
                 >
                   Bearbeiten

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, Trash2, Flag, TrendingDown, RefreshCw, ChevronUp, ChevronDown, ExternalLink } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS } from '@/types';
+import PageHead from '@/components/ui/PageHead';
 
 // ── Typen ──
 
@@ -165,17 +166,24 @@ export default function OutliersPage() {
   const fmtNum = (n: number) => n.toLocaleString('de-DE', { maximumFractionDigits: 1 });
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Kopfzeile */}
-      <div className="flex items-center gap-3">
-        <AlertTriangle className="w-7 h-7 text-orange-500" />
-        <div>
-          <h1 className="page-title">Ausreißer-Erkennung</h1>
-          <p className="text-sm text-gray-500">
-            Messwerte mit ungewöhnlich hohem Verbrauch erkennen und bereinigen
-          </p>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <PageHead
+        eyebrow="Stammdaten"
+        title="Ausreißer-Erkennung"
+        actions={
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '4px 10px', borderRadius: 999,
+            background: 'color-mix(in srgb, var(--warn) 14%, transparent)',
+            color: 'var(--warn)',
+            border: '1px solid color-mix(in srgb, var(--warn) 38%, transparent)',
+            fontSize: 11, fontWeight: 600,
+          }}>
+            <AlertTriangle size={12} />
+            Messwerte mit hohem Verbrauch
+          </span>
+        }
+      />
 
       {/* Filter-Panel */}
       <div className="card p-4">

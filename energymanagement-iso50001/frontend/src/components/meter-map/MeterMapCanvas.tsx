@@ -160,8 +160,8 @@ export default function MeterMapCanvas({
         <MiniMap
           position="bottom-left"
           nodeColor={(node) => {
-            if (node.type === 'siteNode') return '#1B5E7B';
-            return '#F59E0B';
+            if (node.type === 'siteNode') return 'var(--ink)';
+            return 'var(--fw-strom)';
           }}
           maskColor="rgba(0, 0, 0, 0.1)"
         />

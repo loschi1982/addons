@@ -30,12 +30,12 @@ interface SankeyDiagramProps {
 }
 
 const NODE_COLORS: Record<string, string> = {
-  quelle: '#94a3b8',
-  hauptzaehler: '#1B5E7B',
-  unterzaehler: '#3B82F6',
-  verbraucher: '#10B981',
-  eigenproduktion: '#F59E0B',
-  einspeisung: '#EF4444',
+  quelle: 'var(--ink-3)',
+  hauptzaehler: 'var(--ink)',
+  unterzaehler: 'var(--info)',
+  verbraucher: 'var(--good)',
+  eigenproduktion: 'var(--fw-strom)',
+  einspeisung: 'var(--alert)',
 };
 
 const NODE_LABELS: Record<string, string> = {
@@ -47,7 +47,7 @@ const NODE_LABELS: Record<string, string> = {
   einspeisung: 'Netzeinspeisung',
 };
 
-const FEED_IN_COLOR = '#F59E0B';
+const FEED_IN_COLOR = 'var(--fw-strom)';
 
 const NODE_WIDTH = 20;
 const NODE_PADDING = 14;
@@ -298,7 +298,7 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
             C ${mx} ${link.ty + link.sw}, ${mx} ${link.sy + link.sw}, ${x0} ${link.sy + link.sw}
             Z`;
 
-          const color = isFeedIn ? FEED_IN_COLOR : (NODE_COLORS[sNode.type] || '#94a3b8');
+          const color = isFeedIn ? FEED_IN_COLOR : (NODE_COLORS[sNode.type] || 'var(--ink-3)');
           const isEmpty = link.value === 0;
           const tooltipSuffix = isFeedIn ? ' (Einspeisung)' : '';
 
@@ -352,7 +352,7 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
 
         {/* Knoten */}
         {layout.nodes.map((node, idx) => {
-          const color = NODE_COLORS[node.type] || '#94a3b8';
+          const color = NODE_COLORS[node.type] || 'var(--ink-3)';
           const isProducer = node.type === 'eigenproduktion';
           return (
             <g key={idx}>

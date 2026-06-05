@@ -3,9 +3,10 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { SlidersHorizontal, Plus, X, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { Plus, X, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import PageHead from '@/components/ui/PageHead';
 
 interface Strategy {
   id: string;
@@ -201,15 +202,15 @@ export default function ControlStrategiesPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <SlidersHorizontal size={24} className="text-primary-600" />
-          <h1 className="page-title">BMS-Regelstrategien</h1>
-        </div>
-        <button className="btn-primary flex items-center gap-2" onClick={openCreate}>
-          <Plus size={16} /> Regelstrategie anlegen
-        </button>
-      </div>
+      <PageHead
+        eyebrow="ISO 50001 · Kap. 8"
+        title="BMS-Regelstrategien"
+        actions={
+          <button className="btn-primary flex items-center gap-2" onClick={openCreate}>
+            <Plus size={16} /> Regelstrategie anlegen
+          </button>
+        }
+      />
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded flex justify-between">

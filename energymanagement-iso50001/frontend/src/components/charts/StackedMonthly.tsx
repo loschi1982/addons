@@ -34,7 +34,7 @@ function HoverTooltip({ hover, colW, padL, data, keys, colors, names, units, cha
       <rect
         x={cx - tooltipW / 2} y={ty}
         width={tooltipW} height={tooltipH}
-        rx={4} fill="#0A0A0B"
+        rx={4} fill="var(--ink)"
       />
       {activeKeys.map((k, i) => {
         const val = data[k]?.[hover] ?? 0;
@@ -108,7 +108,7 @@ export default function StackedMonthly({
             <line x1={padL} x2={svgW - padR} y1={y} y2={y} stroke="#EDEAE3" strokeWidth={1} />
             <text
               x={padL - 8} y={y + 3}
-              textAnchor="end" fontSize="10" fill="#8A8A8A"
+              textAnchor="end" fontSize="10" fill="var(--ink-3)"
               fontFamily="ui-monospace, 'Geist Mono', monospace"
             >
               {fmtNum(max * p)}
@@ -147,13 +147,13 @@ export default function StackedMonthly({
               <line
                 x1={x + barW / 2} x2={x + barW / 2}
                 y1={padTop} y2={padTop + innerH}
-                stroke="#0A0A0B" strokeWidth={1} strokeDasharray="2 3" opacity={0.35}
+                stroke="var(--ink)" strokeWidth={1} strokeDasharray="2 3" opacity={0.35}
               />
             )}
             <text
               x={padL + i * colW + colW / 2} y={padTop + innerH + 16}
               textAnchor="middle" fontSize="11"
-              fill={isCurrent ? '#0A0A0B' : '#8A8A8A'}
+              fill={isCurrent ? 'var(--ink)' : 'var(--ink-3)'}
               fontWeight={isCurrent ? 600 : 400}
               fontFamily="ui-monospace, 'Geist Mono', monospace"
             >{m}</text>

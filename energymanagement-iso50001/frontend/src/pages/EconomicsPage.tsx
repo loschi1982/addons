@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import PageTabs, { COST_TABS } from '@/components/layout/PageTabs';
+import PageHead from '@/components/ui/PageHead';
 
 /* ── Typen ── */
 
@@ -247,22 +248,19 @@ export default function EconomicsPage() {
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
       <PageTabs tabs={COST_TABS} />
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="page-title flex items-center gap-2">
-            <Euro className="h-6 w-6 text-primary-600" />
-            Wirtschaftlichkeit
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Amortisationsrechnung für Aktionspläne und Investitionen in Verbraucher
-          </p>
-        </div>
-        <button onClick={load} className="btn-secondary flex items-center gap-2" disabled={loading}>
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Aktualisieren
-        </button>
-      </div>
+      <PageHead
+        eyebrow="Kosten & Wirtschaft"
+        title="Wirtschaftlichkeit"
+        actions={
+          <button onClick={load} className="btn-secondary flex items-center gap-2" disabled={loading}>
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Aktualisieren
+          </button>
+        }
+      />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
+        Amortisationsrechnung für Aktionspläne und Investitionen in Verbraucher
+      </p>
 
       {/* Preis-Info-Banner */}
       {priceInfo && (

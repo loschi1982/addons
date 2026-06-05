@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import PageTabs, { ANALYSIS_TABS } from '@/components/layout/PageTabs';
+import PageHead from '@/components/ui/PageHead';
 
 interface Alert {
   type: string;
@@ -234,22 +235,23 @@ export default function DataQualityPage() {
     <div>
       <PageTabs tabs={ANALYSIS_TABS} />
 
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h1 className="page-title">Datenqualität</h1>
-          <p className="text-sm text-gray-500">
-            Zähler ohne aktuelle Daten und Plausibilitätsprüfung Haupt-/Unterzähler.
-          </p>
-        </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="btn-secondary flex items-center gap-2 disabled:opacity-50"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Neu prüfen
-        </button>
-      </div>
+      <PageHead
+        eyebrow="Analyse"
+        title="Datenqualität"
+        actions={
+          <button
+            onClick={load}
+            disabled={loading}
+            className="btn-secondary flex items-center gap-2 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Neu prüfen
+          </button>
+        }
+      />
+      <p style={{ marginTop: -4, marginBottom: 12, fontSize: 12, color: 'var(--ink-3)' }}>
+        Zähler ohne aktuelle Daten und Plausibilitätsprüfung Haupt-/Unterzähler.
+      </p>
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">

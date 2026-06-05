@@ -6,6 +6,7 @@ import { useAppDispatch } from '@/hooks/useRedux';
 import { logout } from '@/store/slices/authSlice';
 import { setBackupLocked } from '@/store/slices/uiSlice';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import PageHead from '@/components/ui/PageHead';
 
 interface SettingEntry {
   value: Record<string, unknown>;
@@ -96,15 +97,18 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="page-title">Einstellungen</h1>
-        {activeTab !== 'system' && activeTab !== 'integrations' && activeTab !== 'status' && activeTab !== 'logs' && activeTab !== 'backup' && (
-          <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2">
-            <Save className="w-4 h-4" />
-            {saving ? 'Speichern...' : saved ? 'Gespeichert!' : 'Speichern'}
-          </button>
-        )}
-      </div>
+      <PageHead
+        eyebrow="System"
+        title="Einstellungen"
+        actions={
+          activeTab !== 'system' && activeTab !== 'integrations' && activeTab !== 'status' && activeTab !== 'logs' && activeTab !== 'backup' ? (
+            <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2">
+              <Save className="w-4 h-4" />
+              {saving ? 'Speichern...' : saved ? 'Gespeichert!' : 'Speichern'}
+            </button>
+          ) : undefined
+        }
+      />
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
@@ -945,7 +949,7 @@ function BrandingForm({
             <div className="flex items-center gap-3">
               <input
                 type="color"
-                value={(values[c.key] as string) || '#1B5E7B'}
+                value={(values[c.key] as string) || 'var(--ink)'}
                 onChange={(e) => onChange(c.key, e.target.value)}
                 className="w-12 h-10 rounded cursor-pointer border border-gray-300"
               />
@@ -953,7 +957,7 @@ function BrandingForm({
                 className="input flex-1"
                 value={(values[c.key] as string) || ''}
                 onChange={(e) => onChange(c.key, e.target.value)}
-                placeholder="#1B5E7B"
+                placeholder="var(--ink)"
               />
             </div>
           </FormField>
@@ -965,7 +969,7 @@ function BrandingForm({
         <div className="flex gap-3">
           <div
             className="w-24 h-10 rounded flex items-center justify-center text-white text-sm font-medium"
-            style={{ backgroundColor: (values.primary_color as string) || '#1B5E7B' }}
+            style={{ backgroundColor: (values.primary_color as string) || 'var(--ink)' }}
           >
             Primär
           </div>
@@ -977,7 +981,7 @@ function BrandingForm({
           </div>
           <div
             className="w-24 h-10 rounded flex items-center justify-center text-white text-sm font-medium"
-            style={{ backgroundColor: (values.accent_color as string) || '#F59E0B' }}
+            style={{ backgroundColor: (values.accent_color as string) || 'var(--fw-strom)' }}
           >
             Akzent
           </div>

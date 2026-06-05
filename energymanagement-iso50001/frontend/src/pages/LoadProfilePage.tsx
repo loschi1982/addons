@@ -6,6 +6,7 @@ import {
 import { RefreshCw, Zap, AlertTriangle, TrendingUp, Activity } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import PageTabs, { ANALYSIS_TABS } from '@/components/layout/PageTabs';
+import PageHead from '@/components/ui/PageHead';
 
 /* ── Typen ── */
 
@@ -144,12 +145,10 @@ export default function LoadProfilePage() {
   return (
     <div className="p-6 space-y-6">
       <PageTabs tabs={ANALYSIS_TABS} />
-      <div>
-        <h1 className="page-title">Lastprofil & Spitzenlast</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Leistungsverlauf (kW) aus Zählerständen – Peak-Erkennung und Vergleich mit Vertragslimit
-        </p>
-      </div>
+      <PageHead eyebrow="Analyse" title="Lastprofil & Spitzenlast" />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
+        Leistungsverlauf (kW) aus Zählerständen – Peak-Erkennung und Vergleich mit Vertragslimit
+      </p>
 
       {/* Filter */}
       <div className="card p-4 space-y-4">
@@ -163,8 +162,8 @@ export default function LoadProfilePage() {
                 onClick={() => handleEnergyTypeChange(et)}
                 className={`px-3 py-1 text-sm rounded-full border transition-all ${
                   selectedEnergyType === et
-                    ? 'bg-[#1B5E7B] text-white border-[#1B5E7B]'
-                    : 'bg-white text-gray-600 border-gray-300 hover:border-[#1B5E7B]'
+                    ? 'bg-[var(--ink)] text-white border-[var(--ink)]'
+                    : 'bg-white text-gray-600 border-gray-300 hover:border-[var(--ink)]'
                 }`}
               >
                 {et === 'electricity' ? 'Strom' : et === 'district_heating' ? 'Fernwärme' : et === 'district_cooling' ? 'Kälte' : et === 'water' ? 'Wasser' : et}
@@ -183,8 +182,8 @@ export default function LoadProfilePage() {
                 onClick={() => toggleMeter(m.id)}
                 className={`px-3 py-1 text-sm rounded-full border transition-all ${
                   selectedMeters.includes(m.id)
-                    ? 'bg-[#1B5E7B] text-white border-[#1B5E7B]'
-                    : 'bg-white text-gray-600 border-gray-300 hover:border-[#1B5E7B]'
+                    ? 'bg-[var(--ink)] text-white border-[var(--ink)]'
+                    : 'bg-white text-gray-600 border-gray-300 hover:border-[var(--ink)]'
                 }`}
               >
                 {m.name}
@@ -265,7 +264,7 @@ export default function LoadProfilePage() {
               <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
                 <Activity size={14} /> Spitzenlast
               </div>
-              <p className={`text-2xl font-bold ${data.contract_exceeded ? 'text-red-600' : 'text-[#1B5E7B]'}`}>
+              <p className={`text-2xl font-bold ${data.contract_exceeded ? 'text-red-600' : 'text-[var(--ink)]'}`}>
                 {data.peak_demand_kw != null ? `${fmt(data.peak_demand_kw, 1)} kW` : '–'}
               </p>
               {data.peak_timestamp && (
@@ -310,7 +309,7 @@ export default function LoadProfilePage() {
               </h2>
               <ResponsiveContainer width="100%" height={280}>
                 <ComposedChart data={chartPoints} margin={{ top: 5, right: 20, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
                   <XAxis
                     dataKey="ts"
                     tick={{ fontSize: 10 }}
@@ -331,20 +330,20 @@ export default function LoadProfilePage() {
                   {contractKw != null && (
                     <ReferenceLine
                       y={contractKw}
-                      stroke="#DC2626"
+                      stroke="var(--alert)"
                       strokeDasharray="6 3"
                       label={{
                         value: `Limit ${fmt(contractKw, 0)} kW`,
                         position: 'insideTopRight',
                         fontSize: 11,
-                        fill: '#DC2626',
+                        fill: 'var(--alert)',
                       }}
                     />
                   )}
                   <Line
                     type="monotone"
                     dataKey="demand_kw"
-                    stroke="#1B5E7B"
+                    stroke="var(--ink)"
                     strokeWidth={1.5}
                     dot={false}
                     connectNulls={false}
@@ -363,7 +362,7 @@ export default function LoadProfilePage() {
               </h2>
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={data.daily_peaks} margin={{ top: 5, right: 20, left: 0, bottom: 30 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
                   <XAxis
                     dataKey="date"
                     tick={{ fontSize: 10 }}
@@ -375,11 +374,11 @@ export default function LoadProfilePage() {
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${v.toFixed(0)}`} />
                   <Tooltip formatter={(v: number) => [`${fmt(v, 2)} kW`, 'Spitzenlast']} />
                   {contractKw != null && (
-                    <ReferenceLine y={contractKw} stroke="#DC2626" strokeDasharray="4 2" />
+                    <ReferenceLine y={contractKw} stroke="var(--alert)" strokeDasharray="4 2" />
                   )}
                   <Bar
                     dataKey="peak_kw"
-                    fill="#1B5E7B"
+                    fill="var(--ink)"
                     radius={[2, 2, 0, 0]}
                     name="Spitzenlast kW"
                   />

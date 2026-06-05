@@ -6,6 +6,7 @@ import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
 import { useSiteHierarchy } from '@/hooks/useSiteHierarchy';
 import DiscoveryModal from '@/components/DiscoveryModal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import PageHead from '@/components/ui/PageHead';
 
 // ── Typen ──
 
@@ -317,25 +318,26 @@ export default function MetersPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="page-title">Zähler</h1>
-          <p className="mt-1 text-sm text-gray-500">{allMeters.length} Zähler insgesamt</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            to="/meter-map"
-            className="flex items-center gap-1 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded border border-gray-300 transition-colors"
-            title="Baumansicht"
-          >
-            <Network className="h-4 w-4" />
-            <span className="hidden sm:inline">Karte</span>
-          </Link>
-          <button onClick={handlePollAll} className="btn-secondary">Alle abfragen</button>
-          <button onClick={() => setShowDiscovery(true)} className="btn-secondary">Geräte entdecken</button>
-          <button onClick={handleCreate} className="btn-primary">+ Neuer Zähler</button>
-        </div>
-      </div>
+      <PageHead
+        eyebrow="Stammdaten"
+        title="Zähler"
+        actions={
+          <>
+            <Link
+              to="/meter-map"
+              className="btn-secondary"
+              title="Baumansicht"
+            >
+              <Network className="h-4 w-4" />
+              <span className="hidden sm:inline">Karte</span>
+            </Link>
+            <button onClick={handlePollAll} className="btn-secondary">Alle abfragen</button>
+            <button onClick={() => setShowDiscovery(true)} className="btn-secondary">Geräte entdecken</button>
+            <button onClick={handleCreate} className="btn-primary">+ Neuer Zähler</button>
+          </>
+        }
+      />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>{allMeters.length} Zähler insgesamt</p>
 
       <MeterNetworkView
         meters={allMeters}

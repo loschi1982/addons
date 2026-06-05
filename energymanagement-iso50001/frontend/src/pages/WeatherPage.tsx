@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { apiClient } from '@/utils/api';
 import InfoTip from '@/components/ui/InfoTip';
+import PageHead from '@/components/ui/PageHead';
+import SegControl from '@/components/ui/SegControl';
 
 // ── Typen ──
 
@@ -77,36 +79,25 @@ export default function WeatherPage() {
 
   return (
     <div>
-      <div>
-        <h1 className="page-title">Wetterdaten</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          DWD-Wetterdaten, Gradtagszahlen und Witterungskorrektur
-        </p>
-      </div>
-
-      {/* Tabs */}
-      <div className="mt-4 border-b border-gray-200">
-        <nav className="flex gap-6">
-          {([
-            ['stations', 'Stationen'],
-            ['data', 'Wetterdaten'],
-            ['degree-days', 'Gradtagszahlen'],
-            ['correction', 'Witterungskorrektur'],
-          ] as [Tab, string][]).map(([key, label]) => (
-            <button
-              key={key}
-              className={`pb-2 text-sm font-medium ${
-                activeTab === key
-                  ? 'border-b-2 border-primary-600 text-primary-600'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-              onClick={() => setActiveTab(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <PageHead
+        eyebrow="Umwelt"
+        title="Wetterdaten"
+        actions={
+          <SegControl<Tab>
+            value={activeTab}
+            onChange={setActiveTab}
+            options={[
+              { value: 'stations', label: 'Stationen' },
+              { value: 'data', label: 'Wetterdaten' },
+              { value: 'degree-days', label: 'Gradtagszahlen' },
+              { value: 'correction', label: 'Witterungskorrektur' },
+            ]}
+          />
+        }
+      />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
+        DWD-Wetterdaten, Gradtagszahlen und Witterungskorrektur
+      </p>
 
       <div className="mt-4">
         {activeTab === 'stations' && <StationsPanel stations={stations} />}

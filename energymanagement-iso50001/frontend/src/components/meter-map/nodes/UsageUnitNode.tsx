@@ -16,10 +16,10 @@ interface UsageUnitNodeData {
 
 export function UsageUnitNode({ data }: { data: UsageUnitNodeData }) {
   return (
-    <div className="rounded-lg border-2 border-[#1B5E7B] bg-white px-4 py-3 shadow-md min-w-[200px]">
-      <Handle type="target" position={Position.Top} className="!bg-[#1B5E7B] !w-2 !h-2" />
+    <div className="rounded-lg border-2 border-[var(--ink)] bg-white px-4 py-3 shadow-md min-w-[200px]">
+      <Handle type="target" position={Position.Top} className="!bg-[var(--ink)] !w-2 !h-2" />
       <div className="flex items-center gap-2">
-        <Home className="h-4 w-4 text-[#1B5E7B] shrink-0" />
+        <Home className="h-4 w-4 text-[var(--ink)] shrink-0" />
         <div className="min-w-0 flex-1">
           <div className="font-medium text-gray-800 text-sm truncate">{data.label}</div>
           {data.usageType && (
@@ -27,7 +27,7 @@ export function UsageUnitNode({ data }: { data: UsageUnitNodeData }) {
           )}
         </div>
         <button
-          className="nopan nodrag p-1 rounded hover:bg-[#1B5E7B]/10 text-[#1B5E7B] transition-colors shrink-0"
+          className="nopan nodrag p-1 rounded hover:bg-[var(--ink)]/10 text-[var(--ink)] transition-colors shrink-0"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
@@ -39,7 +39,7 @@ export function UsageUnitNode({ data }: { data: UsageUnitNodeData }) {
           <Plus className="h-4 w-4" />
         </button>
       </div>
-      <Handle type="source" position={Position.Bottom} className="!bg-[#1B5E7B] !w-2 !h-2" />
+      <Handle type="source" position={Position.Bottom} className="!bg-[var(--ink)] !w-2 !h-2" />
     </div>
   );
 }

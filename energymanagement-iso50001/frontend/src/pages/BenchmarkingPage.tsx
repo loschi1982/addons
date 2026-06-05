@@ -15,9 +15,10 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts';
-import { BookOpen, Search, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import PageHead from '@/components/ui/PageHead';
 
 interface BenchmarkRef {
   id: string;
@@ -77,7 +78,7 @@ const ENERGY_TYPE_LABELS: Record<string, string> = {
 };
 
 const SOURCE_COLORS: Record<string, string> = {
-  VDI_3807: '#1B5E7B',
+  VDI_3807: 'var(--ink)',
   GEFMA_124: '#2196F3',
   BAFA: '#4CAF50',
   DIN_18599: '#FF9800',
@@ -180,10 +181,7 @@ export default function BenchmarkingPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center gap-3">
-        <BookOpen size={24} className="text-primary-600" />
-        <h1 className="page-title">Benchmarking</h1>
-      </div>
+      <PageHead eyebrow="ISO 50001" title="Benchmarking" />
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
@@ -282,10 +280,10 @@ export default function BenchmarkingPage() {
                   <Tooltip formatter={(v) => `${v} kWh/m²·a`} />
                   <ReferenceLine
                     y={compareResult.actual_value}
-                    stroke="#1B5E7B"
+                    stroke="var(--ink)"
                     strokeWidth={2}
                     strokeDasharray="6 3"
-                    label={{ value: 'Eigener Wert', position: 'insideTopRight', fill: '#1B5E7B', fontSize: 12 }}
+                    label={{ value: 'Eigener Wert', position: 'insideTopRight', fill: 'var(--ink)', fontSize: 12 }}
                   />
                   <Bar dataKey="value" radius={[4, 4, 0, 0]}>
                     {chartData.map((entry, index) => (

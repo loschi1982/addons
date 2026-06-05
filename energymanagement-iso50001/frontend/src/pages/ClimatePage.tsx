@@ -4,6 +4,8 @@ import { type PaginatedResponse } from '@/types';
 import DiscoveryModal from '@/components/DiscoveryModal';
 import InfoTip from '@/components/ui/InfoTip';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import PageHead from '@/components/ui/PageHead';
+import SegControl from '@/components/ui/SegControl';
 
 // ── Typen ──
 
@@ -107,35 +109,24 @@ export default function ClimatePage() {
 
   return (
     <div>
-      <div>
-        <h1 className="page-title">Klimasensoren</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Innenraum-Klimadaten, Behaglichkeitsanalyse und Komfort-Score
-        </p>
-      </div>
-
-      {/* Tabs */}
-      <div className="mt-4 border-b border-gray-200">
-        <nav className="flex gap-6">
-          {([
-            ['sensors', 'Sensoren'],
-            ['readings', 'Messwerte'],
-            ['comfort', 'Komfort-Dashboard'],
-          ] as [Tab, string][]).map(([key, label]) => (
-            <button
-              key={key}
-              className={`pb-2 text-sm font-medium ${
-                activeTab === key
-                  ? 'border-b-2 border-primary-600 text-primary-600'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-              onClick={() => setActiveTab(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <PageHead
+        eyebrow="Umwelt"
+        title="Klimasensoren"
+        actions={
+          <SegControl<Tab>
+            value={activeTab}
+            onChange={setActiveTab}
+            options={[
+              { value: 'sensors', label: 'Sensoren' },
+              { value: 'readings', label: 'Messwerte' },
+              { value: 'comfort', label: 'Komfort-Dashboard' },
+            ]}
+          />
+        }
+      />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
+        Innenraum-Klimadaten, Behaglichkeitsanalyse und Komfort-Score
+      </p>
 
       <div className="mt-4">
         {activeTab === 'sensors' && <SensorsPanel />}

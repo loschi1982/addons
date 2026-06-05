@@ -12,6 +12,7 @@ import {
 import SankeyDiagram from '@/components/charts/SankeyDiagram';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, ENERGY_TYPE_COLORS } from '@/types';
+import PageHead from '@/components/ui/PageHead';
 
 /* ── Typen ── */
 
@@ -176,18 +177,19 @@ export default function ReportsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="page-title">Berichte</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Energieberichte erstellen, als PDF exportieren und online ansehen.
-          </p>
-        </div>
-        <button onClick={() => setShowCreateModal(true)} className="btn-primary flex items-center gap-1.5">
-          <Plus className="h-4 w-4" />
-          Neuer Bericht
-        </button>
-      </div>
+      <PageHead
+        eyebrow="Analyse"
+        title="Berichte"
+        actions={
+          <button onClick={() => setShowCreateModal(true)} className="btn-primary flex items-center gap-1.5">
+            <Plus className="h-4 w-4" />
+            Neuer Bericht
+          </button>
+        }
+      />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
+        Energieberichte erstellen, als PDF exportieren und online ansehen.
+      </p>
 
       {/* Filter-Leiste */}
       <div className="mt-4 flex flex-wrap gap-3">
@@ -844,7 +846,7 @@ function YoyChart({ snapshot }: { snapshot: Record<string, unknown> }) {
                     <span className="font-mono font-medium">{row.curr_native.toLocaleString('de-DE', { maximumFractionDigits: 1 })} {row.unit}</span>
                   </div>
                   <div className="h-2 bg-gray-100 rounded-full">
-                    <div className="h-2 rounded-full" style={{ width: `${Math.min((row.curr_native / maxVal) * 100, 100)}%`, backgroundColor: delta != null && delta > 5 ? '#DC2626' : delta != null && delta < -5 ? '#16A34A' : '#1B5E7B' }} />
+                    <div className="h-2 rounded-full" style={{ width: `${Math.min((row.curr_native / maxVal) * 100, 100)}%`, backgroundColor: delta != null && delta > 5 ? 'var(--alert)' : delta != null && delta < -5 ? 'var(--good)' : 'var(--ink)' }} />
                   </div>
                 </div>
               </div>
@@ -881,11 +883,11 @@ function MonthlyTrendChart({ snapshot }: { snapshot: Record<string, unknown> }) 
       <h3 className="text-base font-semibold text-gray-900 mb-3">Monatlicher Verbrauchsverlauf</h3>
       <ResponsiveContainer width="100%" height={200}>
         <BarChart data={data} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--surface-2)" />
           <XAxis dataKey="monat" tick={{ fontSize: 11 }} />
           <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
           <Tooltip formatter={(v: number) => [`${v.toLocaleString('de-DE')} kWh`]} />
-          <Bar dataKey="kWh" fill="#1B5E7B" radius={[2, 2, 0, 0]} />
+          <Bar dataKey="kWh" fill="var(--ink)" radius={[2, 2, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -928,7 +930,7 @@ function CostSection({ snapshot }: { snapshot: Record<string, unknown> }) {
       {monthlyCostData.length > 0 && (
         <ResponsiveContainer width="100%" height={180}>
           <BarChart data={monthlyCostData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--surface-2)" />
             <XAxis dataKey="monat" tick={{ fontSize: 11 }} />
             <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${v} €`} />
             <Tooltip formatter={(v: number) => [`${v.toLocaleString('de-DE')} €`]} />
@@ -989,7 +991,7 @@ function EnergyByTypeSection({ snapshot }: { snapshot: Record<string, unknown> }
       </p>
       <div className="space-y-6">
         {Object.entries(energyByType).map(([key, et]) => {
-          const color = et.color || (ENERGY_TYPE_COLORS as Record<string, string>)[key] || '#1B5E7B';
+          const color = et.color || (ENERGY_TYPE_COLORS as Record<string, string>)[key] || 'var(--ink)';
           const chartData = et.monthly_trend
             .filter((d) => d.consumption_native > 0)
             .map((d) => ({
@@ -1071,7 +1073,7 @@ function EnergyByTypeSection({ snapshot }: { snapshot: Record<string, unknown> }
                 {chartData.length > 0 && (
                   <ResponsiveContainer width="100%" height={160}>
                     <BarChart data={chartData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--surface-2)" />
                       <XAxis dataKey="monat" tick={{ fontSize: 10 }} />
                       <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
                       <Tooltip formatter={(v: number) => [`${v.toLocaleString('de-DE')} ${et.unit}`]} />
@@ -1123,7 +1125,7 @@ function SchemaStrandsSection({ snapshot }: { snapshot: Record<string, unknown> 
           </thead>
           <tbody>
             {strands.map((strand) => {
-              const color = (ENERGY_TYPE_COLORS as Record<string, string>)[strand.energy_type] || '#1B5E7B';
+              const color = (ENERGY_TYPE_COLORS as Record<string, string>)[strand.energy_type] || 'var(--ink)';
               return (
                 <tr key={strand.root_meter_id} className="border-b last:border-0">
                   <td className="py-2">
@@ -1220,7 +1222,7 @@ function SustainabilitySection({ snapshot }: { snapshot: Record<string, unknown>
   const hasContent = (enpis?.length || 0) + (objectives?.length || 0) + (buildings?.length || 0) > 0;
   if (!hasContent) return null;
 
-  const AMPEL_COLORS = { gruen: '#16A34A', rot: '#DC2626', grau: '#9CA3AF' };
+  const AMPEL_COLORS = { gruen: 'var(--good)', rot: 'var(--alert)', grau: 'var(--ink-4)' };
   const AMPEL_LABELS = { gruen: 'Ziel erreicht', rot: 'Ziel verfehlt', grau: 'Kein Wert' };
 
   return (
@@ -1290,7 +1292,7 @@ function SustainabilitySection({ snapshot }: { snapshot: Record<string, unknown>
           <div className="space-y-3">
             {objectives.map((obj, i) => {
               const prog = obj.progress_percent ?? 0;
-              const barColor = prog >= 80 ? '#16A34A' : prog >= 40 ? '#F59E0B' : '#1B5E7B';
+              const barColor = prog >= 80 ? 'var(--good)' : prog >= 40 ? 'var(--fw-strom)' : 'var(--ink)';
               return (
                 <div key={i} className="rounded-lg border border-gray-200 p-3">
                   <div className="flex items-start justify-between gap-2">
@@ -1415,7 +1417,7 @@ function SustainabilitySection({ snapshot }: { snapshot: Record<string, unknown>
                   <div className="relative w-8 bg-gray-100 rounded-t" style={{ height: '60px' }}>
                     <div
                       className="absolute bottom-0 w-full rounded-t"
-                      style={{ height: `${pct}%`, backgroundColor: '#1B5E7B' }}
+                      style={{ height: `${pct}%`, backgroundColor: 'var(--ink)' }}
                     />
                   </div>
                   <span className="text-xs font-mono text-gray-700">{(entry.co2_kg / 1000).toFixed(1)}t</span>
@@ -1506,7 +1508,7 @@ function ReportViewer({
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {energyByType && Object.entries(energyByType).map(([key, et]) => (
                   <div key={key} className="rounded-lg border p-3 text-center">
-                    <p className="text-xl font-bold" style={{ color: et.color || '#1B5E7B' }}>
+                    <p className="text-xl font-bold" style={{ color: et.color || 'var(--ink)' }}>
                       {et.total_native.toLocaleString('de-DE', { maximumFractionDigits: 0 })}
                     </p>
                     <p className="text-xs text-gray-400">{et.unit}</p>
@@ -1647,7 +1649,7 @@ function ReportViewer({
                   const pct = ((tc.consumption_kwh as number) / maxVal) * 100;
                   const native = tc.consumption_native as number | null;
                   const unit = (tc.unit as string) || 'kWh';
-                  const etColor = (ENERGY_TYPE_COLORS as Record<string, string>)[tc.energy_type as string] || '#1B5E7B';
+                  const etColor = (ENERGY_TYPE_COLORS as Record<string, string>)[tc.energy_type as string] || 'var(--ink)';
                   const displayVal = native != null && native > 0
                     ? `${native.toLocaleString('de-DE', { maximumFractionDigits: 1 })} ${unit}`
                     : `${formatNumber(tc.consumption_kwh as number)} kWh`;
@@ -1791,7 +1793,7 @@ function ReportViewer({
                   {prog != null && (
                     <div className="mt-1.5 flex items-center gap-2">
                       <div className="flex-1 h-1.5 rounded-full bg-gray-100">
-                        <div className="h-1.5 rounded-full" style={{ width: `${Math.min(prog, 100)}%`, backgroundColor: prog >= 80 ? '#16A34A' : prog >= 40 ? '#F59E0B' : '#1B5E7B' }} />
+                        <div className="h-1.5 rounded-full" style={{ width: `${Math.min(prog, 100)}%`, backgroundColor: prog >= 80 ? 'var(--good)' : prog >= 40 ? 'var(--fw-strom)' : 'var(--ink)' }} />
                       </div>
                       <span className="text-xs text-gray-500 w-8 text-right">{prog.toFixed(0)}%</span>
                     </div>

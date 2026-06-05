@@ -41,8 +41,8 @@ export default function ShareBar({
           {segments.map((s) => (
             <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, display: 'inline-block' }} />
-              <span style={{ color: '#0A0A0B', fontWeight: 500 }}>{s.label}</span>
-              <span style={{ color: '#8A8A8A' }}>{((s.value / total) * 100).toFixed(1)}%</span>
+              <span style={{ color: 'var(--ink)', fontWeight: 500 }}>{s.label}</span>
+              <span style={{ color: 'var(--ink-3)' }}>{((s.value / total) * 100).toFixed(1)}%</span>
             </div>
           ))}
         </div>

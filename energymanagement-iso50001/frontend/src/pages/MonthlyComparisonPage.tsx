@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { RefreshCw, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { apiClient } from '@/utils/api';
+import PageHead from '@/components/ui/PageHead';
 
 /* ── Typen ── */
 
@@ -127,14 +128,10 @@ export default function MonthlyComparisonPage({ siteId }: { siteId?: string }) {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="page-title">Monatlicher Jahresvergleich</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Verbrauchsvergleich zweier Jahre nach Energieträgern – grafisch und tabellarisch
-          </p>
-        </div>
-      </div>
+      <PageHead eyebrow="Analyse" title="Monatlicher Jahresvergleich" />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
+        Verbrauchsvergleich zweier Jahre nach Energieträgern – grafisch und tabellarisch
+      </p>
 
       {/* Filter-Panel */}
       <div className="card p-4 flex flex-wrap gap-4 items-end">
@@ -250,7 +247,7 @@ export default function MonthlyComparisonPage({ siteId }: { siteId?: string }) {
               </h2>
               <ResponsiveContainer width="100%" height={300}>
                 <ComposedChart data={chartData} margin={{ top: 10, right: 40, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                   <YAxis
                     yAxisId="left"
@@ -262,7 +259,7 @@ export default function MonthlyComparisonPage({ siteId }: { siteId?: string }) {
                   <YAxis
                     yAxisId="right"
                     orientation="right"
-                    tick={{ fontSize: 10, fill: '#6B7280' }}
+                    tick={{ fontSize: 10, fill: 'var(--ink-3)' }}
                     tickFormatter={(v: number) => `${v > 0 ? '+' : ''}${v.toFixed(0)}%`}
                     domain={['auto', 'auto']}
                   />
@@ -277,11 +274,11 @@ export default function MonthlyComparisonPage({ siteId }: { siteId?: string }) {
                     }}
                   />
                   <ReferenceLine yAxisId="right" y={0} stroke="#D1D5DB" />
-                  <Bar yAxisId="left" dataKey={String(yearA)} fill="#9CA3AF" name={String(yearA)} radius={[2, 2, 0, 0]} />
+                  <Bar yAxisId="left" dataKey={String(yearA)} fill="var(--ink-4)" name={String(yearA)} radius={[2, 2, 0, 0]} />
                   <Bar
                     yAxisId="left"
                     dataKey={String(yearB)}
-                    fill={activeEtMeta?.color ?? '#1B5E7B'}
+                    fill={activeEtMeta?.color ?? 'var(--ink)'}
                     name={String(yearB)}
                     radius={[2, 2, 0, 0]}
                   />
@@ -289,9 +286,9 @@ export default function MonthlyComparisonPage({ siteId }: { siteId?: string }) {
                     yAxisId="right"
                     type="monotone"
                     dataKey="delta_pct"
-                    stroke="#DC2626"
+                    stroke="var(--alert)"
                     strokeWidth={1.5}
-                    dot={{ r: 3, fill: '#DC2626' }}
+                    dot={{ r: 3, fill: 'var(--alert)' }}
                     name="Δ %"
                     connectNulls={false}
                   />
@@ -303,7 +300,7 @@ export default function MonthlyComparisonPage({ siteId }: { siteId?: string }) {
           {/* Tabelle: alle Energieträger × Monate */}
           <div className="card overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-[#1B5E7B] text-white">
+              <thead className="bg-[var(--ink)] text-white">
                 <tr>
                   <th className="px-3 py-2 text-left font-semibold">Monat</th>
                   {data.energy_types.map(et => (
@@ -312,7 +309,7 @@ export default function MonthlyComparisonPage({ siteId }: { siteId?: string }) {
                     </th>
                   ))}
                 </tr>
-                <tr className="bg-[#155068] text-white text-xs">
+                <tr className="bg-[var(--ink)] text-white text-xs">
                   <th className="px-3 py-2 text-left">&nbsp;</th>
                   {data.energy_types.map(et => (
                     <>

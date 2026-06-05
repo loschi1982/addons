@@ -35,7 +35,7 @@ const ENERGY_ICONS: Record<string, typeof Zap> = {
 };
 
 function MeterNodeComponent({ data }: { data: MeterNodeData }) {
-  const color = ENERGY_TYPE_COLORS[data.energyType as EnergyType] || '#6B7280';
+  const color = ENERGY_TYPE_COLORS[data.energyType as EnergyType] || 'var(--ink-3)';
   const label = ENERGY_TYPE_LABELS[data.energyType as EnergyType] || data.energyType;
   const Icon = ENERGY_ICONS[data.energyType] || Gauge;
 

@@ -3,6 +3,7 @@ import { apiClient } from '@/utils/api';
 import type { PaginatedResponse } from '@/types';
 import { useSiteHierarchy } from '@/hooks/useSiteHierarchy';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import PageHead from '@/components/ui/PageHead';
 
 // ── Typen ──
 
@@ -284,17 +285,18 @@ export default function ConsumersPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="page-title">Verbraucher</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            {total} Verbraucher insgesamt – Großverbraucher und energetisch relevante Anlagen
-          </p>
-        </div>
-        <button onClick={handleCreate} className="btn-primary">
-          + Neuer Verbraucher
-        </button>
-      </div>
+      <PageHead
+        eyebrow="Stammdaten"
+        title="Verbraucher"
+        actions={
+          <button onClick={handleCreate} className="btn-primary">
+            + Neuer Verbraucher
+          </button>
+        }
+      />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
+        {total} Verbraucher insgesamt – Großverbraucher und energetisch relevante Anlagen
+      </p>
 
       {/* Filter */}
       <div className="card mt-4 flex gap-4">

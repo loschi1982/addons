@@ -10,6 +10,8 @@ import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/t
 import InfoTip from '@/components/ui/InfoTip';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import PageTabs, { ANALYSIS_TABS } from '@/components/layout/PageTabs';
+import PageHead from '@/components/ui/PageHead';
+import SegControl from '@/components/ui/SegControl';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine,
@@ -177,35 +179,25 @@ export default function EnergyReviewPage() {
   return (
     <div>
       <PageTabs tabs={ANALYSIS_TABS} />
-      <div>
-        <h1 className="page-title">Energiebewertung</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          ISO 50001 Kap. 6.3–6.5: SEU, EnPI, Baseline und relevante Variablen
-        </p>
-      </div>
-
-      <div className="mt-4 border-b border-gray-200">
-        <nav className="flex gap-6">
-          {([
-            ['seu', 'Wesentliche Energieeinsätze'],
-            ['enpi', 'Energieleistungskennzahlen'],
-            ['baseline', 'Energetische Ausgangsbasis'],
-            ['variables', 'Relevante Variablen'],
-          ] as [Tab, string][]).map(([key, label]) => (
-            <button
-              key={key}
-              className={`pb-2 text-sm font-medium ${
-                activeTab === key
-                  ? 'border-b-2 border-primary-600 text-primary-600'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-              onClick={() => setActiveTab(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <PageHead
+        eyebrow="Analyse · ISO 50001 Kap. 6.3–6.5"
+        title="Energiebewertung"
+        actions={
+          <SegControl<Tab>
+            value={activeTab}
+            onChange={setActiveTab}
+            options={[
+              { value: 'seu', label: 'SEU' },
+              { value: 'enpi', label: 'EnPI' },
+              { value: 'baseline', label: 'Baseline' },
+              { value: 'variables', label: 'Variablen' },
+            ]}
+          />
+        }
+      />
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
+        SEU, EnPI, Baseline und relevante Variablen
+      </p>
 
       {/* Erklärungsbox */}
       <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50/50 p-4">
@@ -687,9 +679,9 @@ function EnPITab() {
                       <XAxis dataKey="period_start" tick={{ fontSize: 10 }} />
                       <YAxis tick={{ fontSize: 10 }} />
                       <Tooltip />
-                      <Line type="monotone" dataKey="enpi_value" stroke="#1B5E7B" strokeWidth={2} dot={{ r: 3 }} name="EnPI" />
+                      <Line type="monotone" dataKey="enpi_value" stroke="var(--ink)" strokeWidth={2} dot={{ r: 3 }} name="EnPI" />
                       {trendData[0]?.baseline_value != null && (
-                        <ReferenceLine y={Number(trendData[0].baseline_value)} stroke="#F59E0B" strokeDasharray="5 5" label="Baseline" />
+                        <ReferenceLine y={Number(trendData[0].baseline_value)} stroke="var(--fw-strom)" strokeDasharray="5 5" label="Baseline" />
                       )}
                     </LineChart>
                   </ResponsiveContainer>
@@ -892,8 +884,8 @@ function BaselineTab() {
                   <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip />
-                  <Bar dataKey="baseline" fill="#94a3b8" name="Baseline" />
-                  <Bar dataKey="aktuell" fill="#1B5E7B" name="Aktuell" />
+                  <Bar dataKey="baseline" fill="var(--ink-3)" name="Baseline" />
+                  <Bar dataKey="aktuell" fill="var(--ink)" name="Aktuell" />
                 </BarChart>
               </ResponsiveContainer>
             </div>

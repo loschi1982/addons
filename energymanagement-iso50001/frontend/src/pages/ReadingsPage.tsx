@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import PageHead from '@/components/ui/PageHead';
 
 // ── Typen ──
 
@@ -348,22 +349,20 @@ export default function ReadingsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="page-title">Zählerstände</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Zählerstände erfassen und Verbrauch analysieren
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={handleOpenBulk} className="btn-secondary">
-            Monatsablesung
-          </button>
-          <button onClick={handleOpenSingle} className="btn-primary">
-            + Neuer Zählerstand
-          </button>
-        </div>
-      </div>
+      <PageHead
+        eyebrow="Stammdaten"
+        title="Zählerstände"
+        actions={
+          <>
+            <button onClick={handleOpenBulk} className="btn-secondary">
+              Monatsablesung
+            </button>
+            <button onClick={handleOpenSingle} className="btn-primary">
+              + Neuer Zählerstand
+            </button>
+          </>
+        }
+      />
 
       {/* Banner: direkter Sprung zu markiertem Messwert */}
       {highlightReadingId && (
