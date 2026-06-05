@@ -35,6 +35,8 @@ interface NavItem {
   path: string;
   labelKey: string;
   icon: LucideIcon;
+  /** Zusatzpfade, die diesen Eintrag als aktiv markieren (Sub-Tabs). */
+  alsoActiveFor?: string[];
 }
 
 interface NavGroup {
@@ -61,13 +63,25 @@ const navGroups: NavGroup[] = [
   {
     labelKey: 'nav.group.analysis',
     items: [
-      { path: '/energy-review', labelKey: 'nav.analysis', icon: Activity },
+      {
+        path: '/energy-review',
+        labelKey: 'nav.analysis',
+        icon: Activity,
+        alsoActiveFor: ['/analytics', '/load-profile', '/data-quality', '/monthly-comparison', '/energy-balance'],
+      },
       { path: '/reports', labelKey: 'nav.reports', icon: FileText },
     ],
   },
   {
     labelKey: 'nav.group.costs',
-    items: [{ path: '/economics', labelKey: 'nav.costsEconomy', icon: Euro }],
+    items: [
+      {
+        path: '/economics',
+        labelKey: 'nav.costsEconomy',
+        icon: Euro,
+        alsoActiveFor: ['/cost-allocation', '/contracts'],
+      },
+    ],
   },
   {
     labelKey: 'nav.group.environment',
@@ -210,7 +224,7 @@ export default function Sidebar() {
               )}
 
               {(!isCollapsed || !sidebarOpen) &&
-                group.items.map(({ path, labelKey, icon: Icon }) => (
+                group.items.map(({ path, labelKey, icon: Icon, alsoActiveFor }) => (
                   <NavLink
                     key={path}
                     to={path}
@@ -220,8 +234,11 @@ export default function Sidebar() {
                       if (backupLocked) e.preventDefault();
                     }}
                     className="flex items-center gap-[10px] px-[18px] transition-all"
-                    style={({ isActive }) =>
-                      isActive
+                    style={({ isActive }) => {
+                      const subActive = alsoActiveFor?.some((p) =>
+                        window.location.hash.startsWith(`#${p}`)
+                      ) ?? false;
+                      return (isActive || subActive)
                         ? {
                             color: '#FFFFFF',
                             background: 'rgba(232, 154, 60, 0.08)',
@@ -237,8 +254,8 @@ export default function Sidebar() {
                             borderLeft: '2px solid transparent',
                             paddingTop: 7,
                             paddingBottom: 7,
-                          }
-                    }
+                          };
+                    }}
                   >
                     <Icon size={15} aria-hidden="true" />
                     {sidebarOpen && <span style={{ fontSize: 13 }}>{t(labelKey)}</span>}

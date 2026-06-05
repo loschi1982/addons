@@ -18,25 +18,43 @@ export const ANALYSIS_TABS: TabItem[] = [
   { path: '/data-quality', label: 'Datenqualität' },
 ];
 
+/**
+ * Page-Tab-Bar im Designsystem-Look — Ink-aktiv, neutraler Hover,
+ * Underline über Token-Border. Bündelt mehrere Routen unter einer
+ * Sidebar-Kategorie (z. B. Kosten & Wirtschaft).
+ */
 export default function PageTabs({ tabs }: { tabs: TabItem[] }) {
   const navigate = useNavigate();
   const location = useLocation();
   const current = location.pathname;
 
   return (
-    <div className="mb-4 border-b border-gray-200">
-      <nav className="-mb-px flex gap-1">
+    <div style={{ marginBottom: 16, borderBottom: '1px solid var(--line)' }}>
+      <nav className="flex" style={{ gap: 4, marginBottom: -1 }}>
         {tabs.map((t) => {
           const active = current === t.path;
           return (
             <button
               key={t.path}
+              type="button"
               onClick={() => navigate(t.path)}
-              className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-                active
-                  ? 'border-primary-600 text-primary-700'
-                  : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-              }`}
+              style={{
+                padding: '8px 14px',
+                fontSize: 13,
+                fontWeight: active ? 600 : 500,
+                color: active ? 'var(--ink)' : 'var(--ink-3)',
+                background: 'transparent',
+                border: 'none',
+                borderBottom: active ? '2px solid var(--ink)' : '2px solid transparent',
+                cursor: 'pointer',
+                transition: 'color 160ms ease, border-color 200ms cubic-bezier(0.22, 1, 0.36, 1)',
+              }}
+              onMouseEnter={(e) => {
+                if (!active) e.currentTarget.style.color = 'var(--ink)';
+              }}
+              onMouseLeave={(e) => {
+                if (!active) e.currentTarget.style.color = 'var(--ink-3)';
+              }}
             >
               {t.label}
             </button>
