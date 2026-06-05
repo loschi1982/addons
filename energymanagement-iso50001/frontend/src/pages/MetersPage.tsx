@@ -7,6 +7,8 @@ import { useSiteHierarchy } from '@/hooks/useSiteHierarchy';
 import DiscoveryModal from '@/components/DiscoveryModal';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import PageHead from '@/components/ui/PageHead';
+import SegControl from '@/components/ui/SegControl';
+import MetersWorkshop from '@/components/meters/MetersWorkshop';
 
 // ── Typen ──
 
@@ -108,9 +110,24 @@ const DATA_SOURCES: Record<string, string> = {
 
 // ── Hauptkomponente ──
 
+type ViewMode = 'workshop' | 'table';
+
 export default function MetersPage() {
   const [allMeters, setAllMeters] = useState<Meter[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mode, setMode] = useState<ViewMode>(() => {
+    try {
+      const stored = localStorage.getItem('em_meters_mode');
+      return stored === 'table' ? 'table' : 'workshop';
+    } catch {
+      return 'workshop';
+    }
+  });
+
+  // Mode persistieren – User-Präferenz bleibt session-übergreifend.
+  useEffect(() => {
+    try { localStorage.setItem('em_meters_mode', mode); } catch { /* ignore */ }
+  }, [mode]);
 
   const [showDiscovery, setShowDiscovery] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -323,6 +340,14 @@ export default function MetersPage() {
         title="Zähler"
         actions={
           <>
+            <SegControl<ViewMode>
+              value={mode}
+              onChange={setMode}
+              options={[
+                { value: 'workshop', label: 'Werkstatt' },
+                { value: 'table', label: 'Tabelle' },
+              ]}
+            />
             <Link
               to="/meter-map"
               className="btn-secondary"
@@ -337,9 +362,26 @@ export default function MetersPage() {
           </>
         }
       />
-      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>{allMeters.length} Zähler insgesamt</p>
+      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
+        {allMeters.length} Zähler insgesamt
+        {(() => {
+          const inboxCount = allMeters.filter((m) => !m.usage_unit_id && !m.parent_meter_id && !m.is_virtual).length;
+          if (inboxCount > 0) {
+            return (
+              <span style={{ marginLeft: 12 }}>
+                · <strong style={{ color: 'var(--info)' }}>{inboxCount}</strong> im Eingang
+              </span>
+            );
+          }
+          return null;
+        })()}
+      </p>
 
-      <MeterNetworkView
+      {mode === 'workshop' && !loading && (
+        <MetersWorkshop meters={allMeters} onReload={loadMeters} />
+      )}
+
+      {mode === 'table' && <MeterNetworkView
         meters={allMeters}
         loading={loading}
         onReload={loadMeters}
@@ -347,7 +389,7 @@ export default function MetersPage() {
         onDelete={handleDelete}
         onPoll={handlePoll}
         onTestConnection={handleTestConnection}
-      />
+      />}
 
       {showDiscovery && (
         <DiscoveryModal

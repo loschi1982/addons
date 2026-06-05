@@ -1,0 +1,622 @@
+/**
+ * MetersWorkshop – 3-Spalten-Werkstatt-Modus für die MetersPage nach
+ * Claude-Design-Handoff.
+ *
+ *   ┌────────────────┬────────────────────────┬──────────────────┐
+ *   │   Eingang      │   Physikalische        │     Detail       │
+ *   │  (Inbox)       │   Struktur (Tree)      │    (Selektion)   │
+ *   │                │                        │                  │
+ *   │  Cards         │  Standort →            │  Stammdaten      │
+ *   │  draggable     │   Gebäude →            │  Position-Pfad   │
+ *   │                │    NE (Drop-Ziel) →    │  Aktionen        │
+ *   │                │     Zähler-Kette       │                  │
+ *   └────────────────┴────────────────────────┴──────────────────┘
+ *
+ * Der Eingang enthält Zähler ohne `usage_unit_id` (= noch nicht in die
+ * Hierarchie eingeordnet). Drag&Drop auf eine NE setzt `usage_unit_id`
+ * (+ `building_id` + `site_id`) via PUT /meters/{id}. Drag auf einen
+ * vorhandenen Hauptzähler hängt den gezogenen Zähler als Sub-Meter
+ * (`parent_meter_id`) über PATCH /meters/{id}/parent.
+ *
+ * Energie-Typ-Match: das Drop wird nur akzeptiert, wenn die Energieart
+ * des gezogenen Zählers zum Kontext passt (auf eine Chain: gleiche
+ * Energieart; auf eine NE: jede).
+ */
+
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { ChevronRight, Pin, Building2, DoorOpen, GripVertical, Search, Info } from 'lucide-react';
+import { apiClient } from '@/utils/api';
+import EnergyChip from '@/components/ui/EnergyChip';
+import Pill from '@/components/ui/Pill';
+import { resolveEnergyKey, EM_ENERGY, type EnergyKey } from '@/utils/energyPalette';
+
+// ── Typen ──────────────────────────────────────────────────────────────
+
+interface Meter {
+  id: string;
+  name: string;
+  meter_number: string | null;
+  energy_type: string;
+  unit: string;
+  data_source: string;
+  site_id: string | null;
+  site_name: string | null;
+  building_id: string | null;
+  usage_unit_id: string | null;
+  parent_meter_id: string | null;
+  is_active: boolean;
+  is_virtual: boolean;
+  created_at: string;
+}
+
+interface Site { id: string; name: string; short_code?: string | null; }
+interface Building { id: string; name: string; site_id: string; building_type?: string | null; }
+interface UsageUnit { id: string; name: string; building_id: string; usage_type?: string | null; }
+
+type SelectedKind =
+  | { kind: 'inbox'; meter: Meter }
+  | { kind: 'placed'; meter: Meter }
+  | { kind: 'chain'; chainMeter: Meter; chainSubs: Meter[]; unit: UsageUnit }
+  | null;
+
+interface Props {
+  /** Alle Meters (von MetersPage geliefert, damit kein Doppel-Fetch). */
+  meters: Meter[];
+  /** Reload-Trigger nach erfolgreichem Drop. */
+  onReload: () => void;
+}
+
+// ── Hilfsfunktionen ────────────────────────────────────────────────────
+
+function relAge(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const diff = Date.now() - d.getTime();
+  const min = Math.floor(diff / 60_000);
+  if (min < 60) return `${min} Min.`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} Std.`;
+  const day = Math.floor(h / 24);
+  if (day < 30) return `${day} Tg.`;
+  const month = Math.floor(day / 30);
+  if (month < 12) return `${month} Mon.`;
+  return `${Math.floor(day / 365)} J.`;
+}
+
+function shortSource(s: string): string {
+  return ({ manual: 'MAN', spie: 'SPIE', modbus: 'MODB', mqtt: 'MQTT', knx: 'KNX', bacnet: 'BACN', shelly: 'SHEL', homeassistant: 'HA', virtual: 'VIRT' }[s] || s.slice(0, 4).toUpperCase());
+}
+
+// ── Komponente ─────────────────────────────────────────────────────────
+
+export default function MetersWorkshop({ meters, onReload }: Props) {
+  // Hierarchie aus separaten Endpunkten zusammen-fetchen.
+  const [sites, setSites] = useState<Site[]>([]);
+  const [buildings, setBuildings] = useState<Building[]>([]);
+  const [units, setUnits] = useState<UsageUnit[]>([]);
+  const [loadingHier, setLoadingHier] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const pick = <T,>(d: { items: T[] } | T[]): T[] => (Array.isArray(d) ? d : d.items ?? []);
+
+        // 1) Sites
+        const siRes = await apiClient.get<{ items: Site[] } | Site[]>('/api/v1/sites?page=1&page_size=100');
+        if (cancelled) return;
+        const siteList = pick(siRes.data);
+        setSites(siteList);
+
+        // 2) Buildings pro Site (parallel)
+        const buildingResults = await Promise.all(
+          siteList.map((s) =>
+            apiClient
+              .get<{ items: Building[] } | Building[]>(`/api/v1/sites/${s.id}/buildings`)
+              .then((r) => pick(r.data).map((b) => ({ ...b, site_id: s.id })))
+              .catch(() => [] as Building[]),
+          ),
+        );
+        if (cancelled) return;
+        const allBuildings = buildingResults.flat();
+        setBuildings(allBuildings);
+
+        // 3) Units pro (Site, Building) parallel
+        const unitResults = await Promise.all(
+          allBuildings.map((b) =>
+            apiClient
+              .get<{ items: UsageUnit[] } | UsageUnit[]>(`/api/v1/sites/${b.site_id}/buildings/${b.id}/units`)
+              .then((r) => pick(r.data).map((u) => ({ ...u, building_id: b.id })))
+              .catch(() => [] as UsageUnit[]),
+          ),
+        );
+        if (cancelled) return;
+        setUnits(unitResults.flat());
+      } catch {
+        /* interceptor */
+      } finally {
+        if (!cancelled) setLoadingHier(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Inbox = Meters ohne usage_unit_id (und ohne parent_meter_id, da Sub-Zähler
+  // die Position des Hauptzählers erben können). Virtuelle Zähler werden NICHT
+  // im Eingang gezeigt — sie sind Berechnungen und gehören in den Tree.
+  const inboxMeters = useMemo(
+    () => meters.filter((m) => !m.usage_unit_id && !m.parent_meter_id && !m.is_virtual),
+    [meters],
+  );
+
+  // Filter + Suche
+  const [query, setQuery] = useState('');
+  const [energyFilter, setEnergyFilter] = useState<Set<EnergyKey>>(new Set());
+
+  const filteredInbox = useMemo(() => {
+    return inboxMeters.filter((m) => {
+      const key = resolveEnergyKey(m.energy_type);
+      if (energyFilter.size > 0 && (!key || !energyFilter.has(key))) return false;
+      if (query.trim()) {
+        const q = query.toLowerCase();
+        const hay = `${m.name} ${m.meter_number ?? ''} ${m.data_source}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [inboxMeters, energyFilter, query]);
+
+  const toggleEnergy = (k: EnergyKey) => {
+    setEnergyFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+  };
+
+  // Tree-Open-Status
+  const [openSet, setOpenSet] = useState<Set<string>>(new Set());
+  const toggleOpen = (id: string) =>
+    setOpenSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  // Selection + Drag-State
+  const [selected, setSelected] = useState<SelectedKind>(null);
+  const [dragMeter, setDragMeter] = useState<Meter | null>(null);
+  const [dragOverNeId, setDragOverNeId] = useState<string | null>(null);
+  const [dragOverChainMeterId, setDragOverChainMeterId] = useState<string | null>(null);
+
+  const handleDropOnUnit = useCallback(async (m: Meter, unitId: string, buildingId: string, siteId: string) => {
+    try {
+      await apiClient.put(`/api/v1/meters/${m.id}`, {
+        site_id: siteId,
+        building_id: buildingId,
+        usage_unit_id: unitId,
+        parent_meter_id: null,
+      });
+      onReload();
+    } catch {
+      /* interceptor */
+    }
+  }, [onReload]);
+
+  const handleDropOnMain = useCallback(async (m: Meter, mainMeter: Meter) => {
+    try {
+      // Parent setzen — Backend übernimmt site_id/building_id/usage_unit_id
+      // vom Parent ggf. nicht, daher gleich mit-setzen, falls bekannt.
+      await apiClient.put(`/api/v1/meters/${m.id}`, {
+        parent_meter_id: mainMeter.id,
+        site_id: mainMeter.site_id,
+        building_id: mainMeter.building_id,
+        usage_unit_id: mainMeter.usage_unit_id,
+      });
+      onReload();
+    } catch {
+      /* interceptor */
+    }
+  }, [onReload]);
+
+  // ── Render ───────────────────────────────────────────────────────────
+
+  if (loadingHier) {
+    return (
+      <div style={{ padding: 32, textAlign: 'center', color: 'var(--ink-3)', fontSize: 13 }}>
+        Hierarchie wird geladen…
+      </div>
+    );
+  }
+
+  return (
+    <div className="workshop">
+      {/* ── Spalte 1: Eingang ───────────────────────────── */}
+      <div className="col">
+        <div className="col-head">
+          <span className="col-head-title">Eingang</span>
+          <span className="col-head-count">{filteredInbox.length}</span>
+        </div>
+        <div className="col-body" style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          {/* Suche + Energie-Filter */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 4px 10px' }}>
+            <div className="search-input2" style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              border: '1px solid var(--line)',
+              background: 'var(--surface)',
+              borderRadius: 'var(--r-sm)',
+              padding: '4px 8px',
+            }}>
+              <Search size={12} style={{ color: 'var(--ink-4)' }} />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Code, Nummer, Quelle …"
+                style={{
+                  border: 'none', outline: 'none', background: 'transparent',
+                  width: '100%', fontSize: 12, color: 'var(--ink)', fontFamily: 'inherit',
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {(['fernwaerme', 'strom', 'kaelte', 'wasser'] as EnergyKey[]).map((k) => (
+                <Pill
+                  key={k}
+                  active={energyFilter.has(k)}
+                  dotColor={EM_ENERGY[k].color}
+                  onClick={() => toggleEnergy(k)}
+                  className="!text-[11px]"
+                >
+                  {EM_ENERGY[k].label}
+                </Pill>
+              ))}
+            </div>
+          </div>
+
+          {filteredInbox.length === 0 ? (
+            <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 12 }}>
+              {inboxMeters.length === 0 ? (
+                <>
+                  <strong style={{ display: 'block', color: 'var(--ink)', marginBottom: 4 }}>
+                    Eingang leer
+                  </strong>
+                  Alle Zähler sind eingeordnet.
+                </>
+              ) : (
+                <>Keine Treffer für Filter/Suche.</>
+              )}
+            </div>
+          ) : (
+            filteredInbox.map((m) => {
+              const key = resolveEnergyKey(m.energy_type);
+              const color = key ? EM_ENERGY[key].color : 'var(--ink-3)';
+              const isSel = selected?.kind === 'inbox' && selected.meter.id === m.id;
+              return (
+                <div
+                  key={m.id}
+                  className={`inbox-row${isSel ? ' selected' : ''}`}
+                  draggable
+                  onDragStart={(e) => {
+                    setDragMeter(m);
+                    e.dataTransfer.effectAllowed = 'move';
+                  }}
+                  onDragEnd={() => {
+                    setDragMeter(null);
+                    setDragOverNeId(null);
+                    setDragOverChainMeterId(null);
+                  }}
+                  onClick={() => setSelected({ kind: 'inbox', meter: m })}
+                >
+                  <div className="inbox-stripe" style={{ background: color }} />
+                  <div className="inbox-body">
+                    <div className="inbox-row-top">
+                      <div className="inbox-code" title={m.name}>
+                        {m.meter_number || m.name}
+                      </div>
+                      <span className="inbox-source">{shortSource(m.data_source)}</span>
+                    </div>
+                    <div className="inbox-row-meta">
+                      <EnergyChip type={m.energy_type} size="sm" />
+                      {m.meter_number && (
+                        <span className="num">№ {m.meter_number}</span>
+                      )}
+                      <span className="age">vor {relAge(m.created_at)}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* ── Spalte 2: Physikalische Struktur ────────────── */}
+      <div className="col">
+        <div className="col-head">
+          <span className="col-head-title">Physikalische Struktur</span>
+          <span className="col-head-count">
+            {sites.length} Standorte · {meters.length - inboxMeters.length} zugeordnet
+          </span>
+        </div>
+        <div className="col-body">
+          <div className="tree2">
+            {sites.map((s) => {
+              const sBuildings = buildings.filter((b) => b.site_id === s.id);
+              const sMeters = meters.filter((m) => m.site_id === s.id);
+              const isOpen = openSet.has(s.id);
+              return (
+                <div key={s.id} className={`t-standort ${isOpen ? 'open' : 'collapsed'}`}>
+                  <div className="t-standort-head" onClick={() => toggleOpen(s.id)}>
+                    <span className="t-chev">
+                      <ChevronRight size={11} />
+                    </span>
+                    <Pin size={13} />
+                    <span>{s.name}</span>
+                    {s.short_code && <span className="t-shortcode">{s.short_code}</span>}
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
+                      {sMeters.length} Z
+                    </span>
+                  </div>
+                  {isOpen && (
+                    <div className="t-gebaeude-list">
+                      {sBuildings.map((g) => {
+                        const gUnits = units.filter((u) => u.building_id === g.id);
+                        const gMeters = sMeters.filter((m) => m.building_id === g.id);
+                        const gOpen = openSet.has(g.id);
+                        return (
+                          <div key={g.id} className={`t-gebaeude ${gOpen ? 'open' : ''}`}>
+                            <div className="t-gebaeude-head" onClick={() => toggleOpen(g.id)}>
+                              <span className="t-chev"><ChevronRight size={11} /></span>
+                              <Building2 size={13} />
+                              <span>{g.name}</span>
+                              {g.building_type && (
+                                <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>· {g.building_type}</span>
+                              )}
+                              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
+                                {gMeters.length}
+                              </span>
+                            </div>
+                            {gOpen && (
+                              <div className="t-ne-list">
+                                {gUnits.length === 0 && (
+                                  <div className="empty-ne">
+                                    <Info size={12} />
+                                    <div>Keine Nutzungseinheiten</div>
+                                  </div>
+                                )}
+                                {gUnits.map((u) => {
+                                  const unitMeters = meters.filter((m) => m.usage_unit_id === u.id);
+                                  const mains = unitMeters.filter((m) => !m.parent_meter_id);
+                                  const uOpen = openSet.has(u.id);
+                                  const isDragOver = dragOverNeId === u.id && !!dragMeter;
+                                  return (
+                                    <div
+                                      key={u.id}
+                                      className={`t-ne${isDragOver ? ' drop-active' : ''}`}
+                                      onDragOver={(e) => {
+                                        if (dragMeter) {
+                                          e.preventDefault();
+                                          setDragOverNeId(u.id);
+                                        }
+                                      }}
+                                      onDragLeave={() => {
+                                        if (dragOverNeId === u.id) setDragOverNeId(null);
+                                      }}
+                                      onDrop={(e) => {
+                                        e.preventDefault();
+                                        if (dragMeter) {
+                                          handleDropOnUnit(dragMeter, u.id, g.id, s.id);
+                                          setDragOverNeId(null);
+                                        }
+                                      }}
+                                    >
+                                      <div className="t-ne-head" onClick={() => toggleOpen(u.id)}>
+                                        <span className="t-chev"><ChevronRight size={11} /></span>
+                                        <DoorOpen size={12} />
+                                        <span className="name">{u.name}</span>
+                                        {u.usage_type && <span className="ne-typ">· {u.usage_type}</span>}
+                                        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
+                                          {unitMeters.length}
+                                        </span>
+                                      </div>
+                                      {uOpen && (
+                                        <div className="t-ne-chains">
+                                          {mains.length === 0 && (
+                                            <div className="empty-ne">
+                                              <Info size={12} />
+                                              <div>Keine Zähler. <strong>Zähler hier hineinziehen</strong>.</div>
+                                            </div>
+                                          )}
+                                          {mains.map((main) => {
+                                            const subs = unitMeters.filter((m) => m.parent_meter_id === main.id);
+                                            const key = resolveEnergyKey(main.energy_type);
+                                            const tone = key ? EM_ENERGY[key] : null;
+                                            const matches = dragMeter && resolveEnergyKey(dragMeter.energy_type) === key;
+                                            const isChainDragOver = dragOverChainMeterId === main.id && matches;
+                                            return (
+                                              <div
+                                                key={main.id}
+                                                className={`chain${isChainDragOver ? ' drop-target' : ''}`}
+                                                onDragOver={(e) => {
+                                                  if (matches) {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    setDragOverChainMeterId(main.id);
+                                                  }
+                                                }}
+                                                onDragLeave={(e) => {
+                                                  e.stopPropagation();
+                                                  if (dragOverChainMeterId === main.id) setDragOverChainMeterId(null);
+                                                }}
+                                                onDrop={(e) => {
+                                                  if (matches) {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    handleDropOnMain(dragMeter!, main);
+                                                    setDragOverChainMeterId(null);
+                                                  }
+                                                }}
+                                              >
+                                                <div
+                                                  className="chain-head"
+                                                  onClick={() => setSelected({ kind: 'chain', chainMeter: main, chainSubs: subs, unit: u })}
+                                                >
+                                                  <span className="e-mark" style={{ background: tone?.bg, color: tone?.text }}>
+                                                    <span style={{ fontSize: 9 }}>●</span>
+                                                  </span>
+                                                  <span className="label">{main.meter_number || main.name}</span>
+                                                  <span className="summary">{subs.length + 1} Z</span>
+                                                </div>
+                                                <div className="chain-body">
+                                                  <div
+                                                    className={`chain-meter${selected?.kind === 'placed' && selected.meter.id === main.id ? ' selected' : ''}`}
+                                                    onClick={() => setSelected({ kind: 'placed', meter: main })}
+                                                  >
+                                                    <span className="role-tag">HZ</span>
+                                                    <span className="name">{main.meter_number || main.name}</span>
+                                                    <span className="src-tag">{shortSource(main.data_source)}</span>
+                                                    <span className="e-dot" style={{ background: tone?.color }} />
+                                                  </div>
+                                                  {subs.map((sub) => {
+                                                    const sKey = resolveEnergyKey(sub.energy_type);
+                                                    const sTone = sKey ? EM_ENERGY[sKey] : null;
+                                                    return (
+                                                      <div
+                                                        key={sub.id}
+                                                        className={`chain-meter${selected?.kind === 'placed' && selected.meter.id === sub.id ? ' selected' : ''}`}
+                                                        onClick={() => setSelected({ kind: 'placed', meter: sub })}
+                                                      >
+                                                        <span className="grip"><GripVertical size={11} /></span>
+                                                        <span className="name">{sub.meter_number || sub.name}</span>
+                                                        <span className="src-tag">{shortSource(sub.data_source)}</span>
+                                                        <span className="e-dot" style={{ background: sTone?.color }} />
+                                                      </div>
+                                                    );
+                                                  })}
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Spalte 3: Detail ────────────────────────────── */}
+      <div className="col">
+        <div className="col-head">
+          <span className="col-head-title">Detail</span>
+        </div>
+        <div className="col-body detail-pane">
+          {!selected && (
+            <div className="detail-empty">
+              <strong>Keine Auswahl</strong>
+              Wähle einen Zähler aus dem Eingang oder der Struktur.
+            </div>
+          )}
+          {selected?.kind === 'inbox' && (
+            <DetailMeter meter={selected.meter} sites={sites} buildings={buildings} units={units} placed={false} />
+          )}
+          {selected?.kind === 'placed' && (
+            <DetailMeter meter={selected.meter} sites={sites} buildings={buildings} units={units} placed />
+          )}
+          {selected?.kind === 'chain' && (
+            <DetailMeter meter={selected.chainMeter} sites={sites} buildings={buildings} units={units} placed extraSubs={selected.chainSubs} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Sub-Komponente: Detail-Pane ────────────────────────────────────────
+
+function DetailMeter({ meter, sites, buildings, units, placed, extraSubs }: {
+  meter: Meter;
+  sites: Site[];
+  buildings: Building[];
+  units: UsageUnit[];
+  placed: boolean;
+  extraSubs?: Meter[];
+}) {
+  const site = sites.find((s) => s.id === meter.site_id);
+  const building = buildings.find((b) => b.id === meter.building_id);
+  const unit = units.find((u) => u.id === meter.usage_unit_id);
+
+  return (
+    <>
+      <div>
+        <div style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+          {placed ? 'Zugeordnet' : 'Im Eingang'}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>
+            {meter.meter_number || meter.name}
+          </h3>
+          <EnergyChip type={meter.energy_type} size="sm" />
+        </div>
+      </div>
+
+      <div className="detail-stammdaten">
+        <div className="row"><span className="l">Nummer</span><span className="v">{meter.meter_number || '—'}</span></div>
+        <div className="row"><span className="l">Name</span><span className="v" style={{ fontFamily: 'var(--font-sans)' }}>{meter.name}</span></div>
+        <div className="row"><span className="l">Einheit</span><span className="v">{meter.unit}</span></div>
+        <div className="row"><span className="l">Quelle</span><span className="v" style={{ fontFamily: 'var(--font-sans)' }}>{meter.data_source}</span></div>
+        {meter.is_virtual && (
+          <div className="row"><span className="l">Typ</span><span className="v" style={{ fontFamily: 'var(--font-sans)' }}>Virtueller Zähler</span></div>
+        )}
+      </div>
+
+      <div>
+        <div style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+          Physische Position
+        </div>
+        {placed && (site || building || unit) ? (
+          <div className="detail-path">
+            {site && <><Pin size={12} /><span>{site.name}</span></>}
+            {building && <><span className="sep">›</span><Building2 size={12} /><span>{building.name}</span></>}
+            {unit && <><span className="sep">›</span><DoorOpen size={12} /><span>{unit.name}</span></>}
+          </div>
+        ) : (
+          <div className="detail-path" style={{ color: 'var(--warn)' }}>
+            Noch nicht zugeordnet – per Drag&Drop einer Nutzungseinheit zuweisen.
+          </div>
+        )}
+      </div>
+
+      {extraSubs && extraSubs.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+            Sub-Zähler in dieser Kette
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {extraSubs.map((s) => (
+              <div key={s.id} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 10px', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)',
+                background: 'var(--surface-2)', fontSize: 12,
+              }}>
+                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--ink)' }}>{s.meter_number || s.name}</span>
+                <EnergyChip type={s.energy_type} size="sm" />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
