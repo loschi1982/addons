@@ -141,12 +141,30 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
     return () => { cancelled = true; };
   }, []);
 
-  // Inbox = Meters ohne usage_unit_id (und ohne parent_meter_id, da Sub-Zähler
-  // die Position des Hauptzählers erben können). Virtuelle Zähler werden NICHT
-  // im Eingang gezeigt — sie sind Berechnungen und gehören in den Tree.
+  // Alle parent_meter_ids einsammeln — Meters, an denen Sub-Zähler hängen,
+  // sind Hauptzähler einer Chain und gehören NICHT in den Eingang, auch
+  // wenn sie noch keiner NE zugeordnet sind (sie hängen dann direkt am
+  // Standort oder Gebäude).
+  const meterIdsWithSubs = useMemo(() => {
+    const s = new Set<string>();
+    for (const m of meters) {
+      if (m.parent_meter_id) s.add(m.parent_meter_id);
+    }
+    return s;
+  }, [meters]);
+
+  // Inbox = Meters ohne usage_unit_id, ohne parent_meter_id, nicht virtual,
+  // ohne Sub-Zähler. Virtuelle Zähler sind Berechnungen, Sub-Zähler erben
+  // die Position vom Hauptzähler, Hauptzähler mit Subs sind bereits Teil
+  // der Struktur (direkt am Standort/Gebäude, falls ohne NE).
   const inboxMeters = useMemo(
-    () => meters.filter((m) => !m.usage_unit_id && !m.parent_meter_id && !m.is_virtual),
-    [meters],
+    () => meters.filter((m) =>
+      !m.usage_unit_id
+      && !m.parent_meter_id
+      && !m.is_virtual
+      && !meterIdsWithSubs.has(m.id)
+    ),
+    [meters, meterIdsWithSubs],
   );
 
   // Filter + Suche
@@ -218,6 +236,83 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
       /* interceptor */
     }
   }, [onReload]);
+
+  // ── Chain-Renderer (wiederverwendbar an NE-, Gebäude- und Standort-Level) ──
+  const renderChain = (main: Meter, contextUnit?: UsageUnit) => {
+    const subs = meters.filter((m) => m.parent_meter_id === main.id);
+    const key = resolveEnergyKey(main.energy_type);
+    const tone = key ? EM_ENERGY[key] : null;
+    const matches = !!dragMeter && resolveEnergyKey(dragMeter.energy_type) === key;
+    const isChainDragOver = dragOverChainMeterId === main.id && matches;
+    return (
+      <div
+        key={main.id}
+        className={`chain${isChainDragOver ? ' drop-target' : ''}`}
+        onDragOver={(e) => {
+          if (matches) {
+            e.preventDefault();
+            e.stopPropagation();
+            setDragOverChainMeterId(main.id);
+          }
+        }}
+        onDragLeave={(e) => {
+          e.stopPropagation();
+          if (dragOverChainMeterId === main.id) setDragOverChainMeterId(null);
+        }}
+        onDrop={(e) => {
+          if (matches && dragMeter) {
+            e.preventDefault();
+            e.stopPropagation();
+            handleDropOnMain(dragMeter, main);
+            setDragOverChainMeterId(null);
+          }
+        }}
+      >
+        <div
+          className="chain-head"
+          onClick={() => setSelected({
+            kind: 'chain',
+            chainMeter: main,
+            chainSubs: subs,
+            unit: contextUnit ?? ({ id: '', name: '—', building_id: '' } as UsageUnit),
+          })}
+        >
+          <span className="e-mark" style={{ background: tone?.bg, color: tone?.text }}>
+            <span style={{ fontSize: 9 }}>●</span>
+          </span>
+          <span className="label">{main.meter_number || main.name}</span>
+          <span className="summary">{subs.length + 1} Z</span>
+        </div>
+        <div className="chain-body">
+          <div
+            className={`chain-meter${selected?.kind === 'placed' && selected.meter.id === main.id ? ' selected' : ''}`}
+            onClick={() => setSelected({ kind: 'placed', meter: main })}
+          >
+            <span className="role-tag">HZ</span>
+            <span className="name">{main.meter_number || main.name}</span>
+            <span className="src-tag">{shortSource(main.data_source)}</span>
+            <span className="e-dot" style={{ background: tone?.color }} />
+          </div>
+          {subs.map((sub) => {
+            const sKey = resolveEnergyKey(sub.energy_type);
+            const sTone = sKey ? EM_ENERGY[sKey] : null;
+            return (
+              <div
+                key={sub.id}
+                className={`chain-meter${selected?.kind === 'placed' && selected.meter.id === sub.id ? ' selected' : ''}`}
+                onClick={() => setSelected({ kind: 'placed', meter: sub })}
+              >
+                <span className="grip"><GripVertical size={11} /></span>
+                <span className="name">{sub.meter_number || sub.name}</span>
+                <span className="src-tag">{shortSource(sub.data_source)}</span>
+                <span className="e-dot" style={{ background: sTone?.color }} />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   // ── Render ───────────────────────────────────────────────────────────
 
@@ -359,6 +454,33 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
                   </div>
                   {isOpen && (
                     <div className="t-gebaeude-list">
+                      {/* Direkte Hauptzähler am Standort (ohne Gebäude, ohne NE) */}
+                      {(() => {
+                        const direct = sMeters.filter((m) =>
+                          !m.building_id
+                          && !m.usage_unit_id
+                          && !m.parent_meter_id
+                          && !m.is_virtual
+                          && meterIdsWithSubs.has(m.id)
+                        );
+                        if (direct.length === 0) return null;
+                        return (
+                          <div className="t-gebaeude" style={{ background: 'var(--surface-2)' }}>
+                            <div className="t-gebaeude-head" style={{ cursor: 'default' }}>
+                              <Info size={12} style={{ color: 'var(--ink-3)' }} />
+                              <span style={{ color: 'var(--ink-3)', fontStyle: 'italic' }}>
+                                Direkt am Standort (ohne Gebäude)
+                              </span>
+                              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
+                                {direct.length}
+                              </span>
+                            </div>
+                            <div style={{ padding: '6px 10px 8px 18px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              {direct.map((main) => renderChain(main))}
+                            </div>
+                          </div>
+                        );
+                      })()}
                       {sBuildings.map((g) => {
                         const gUnits = units.filter((u) => u.building_id === g.id);
                         const gMeters = sMeters.filter((m) => m.building_id === g.id);
@@ -378,6 +500,32 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
                             </div>
                             {gOpen && (
                               <div className="t-ne-list">
+                                {/* Direkte Hauptzähler am Gebäude (ohne NE) */}
+                                {(() => {
+                                  const direct = gMeters.filter((m) =>
+                                    !m.usage_unit_id
+                                    && !m.parent_meter_id
+                                    && !m.is_virtual
+                                    && meterIdsWithSubs.has(m.id)
+                                  );
+                                  if (direct.length === 0) return null;
+                                  return (
+                                    <div className="t-ne" style={{ background: 'var(--surface-2)' }}>
+                                      <div className="t-ne-head" style={{ cursor: 'default' }}>
+                                        <Info size={12} style={{ color: 'var(--ink-3)' }} />
+                                        <span className="name" style={{ color: 'var(--ink-3)', fontStyle: 'italic' }}>
+                                          Direkt am Gebäude (ohne NE)
+                                        </span>
+                                        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
+                                          {direct.length}
+                                        </span>
+                                      </div>
+                                      <div className="t-ne-chains">
+                                        {direct.map((main) => renderChain(main))}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                                 {gUnits.length === 0 && (
                                   <div className="empty-ne">
                                     <Info size={12} />
@@ -427,76 +575,7 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
                                               <div>Keine Zähler. <strong>Zähler hier hineinziehen</strong>.</div>
                                             </div>
                                           )}
-                                          {mains.map((main) => {
-                                            const subs = unitMeters.filter((m) => m.parent_meter_id === main.id);
-                                            const key = resolveEnergyKey(main.energy_type);
-                                            const tone = key ? EM_ENERGY[key] : null;
-                                            const matches = dragMeter && resolveEnergyKey(dragMeter.energy_type) === key;
-                                            const isChainDragOver = dragOverChainMeterId === main.id && matches;
-                                            return (
-                                              <div
-                                                key={main.id}
-                                                className={`chain${isChainDragOver ? ' drop-target' : ''}`}
-                                                onDragOver={(e) => {
-                                                  if (matches) {
-                                                    e.preventDefault();
-                                                    e.stopPropagation();
-                                                    setDragOverChainMeterId(main.id);
-                                                  }
-                                                }}
-                                                onDragLeave={(e) => {
-                                                  e.stopPropagation();
-                                                  if (dragOverChainMeterId === main.id) setDragOverChainMeterId(null);
-                                                }}
-                                                onDrop={(e) => {
-                                                  if (matches) {
-                                                    e.preventDefault();
-                                                    e.stopPropagation();
-                                                    handleDropOnMain(dragMeter!, main);
-                                                    setDragOverChainMeterId(null);
-                                                  }
-                                                }}
-                                              >
-                                                <div
-                                                  className="chain-head"
-                                                  onClick={() => setSelected({ kind: 'chain', chainMeter: main, chainSubs: subs, unit: u })}
-                                                >
-                                                  <span className="e-mark" style={{ background: tone?.bg, color: tone?.text }}>
-                                                    <span style={{ fontSize: 9 }}>●</span>
-                                                  </span>
-                                                  <span className="label">{main.meter_number || main.name}</span>
-                                                  <span className="summary">{subs.length + 1} Z</span>
-                                                </div>
-                                                <div className="chain-body">
-                                                  <div
-                                                    className={`chain-meter${selected?.kind === 'placed' && selected.meter.id === main.id ? ' selected' : ''}`}
-                                                    onClick={() => setSelected({ kind: 'placed', meter: main })}
-                                                  >
-                                                    <span className="role-tag">HZ</span>
-                                                    <span className="name">{main.meter_number || main.name}</span>
-                                                    <span className="src-tag">{shortSource(main.data_source)}</span>
-                                                    <span className="e-dot" style={{ background: tone?.color }} />
-                                                  </div>
-                                                  {subs.map((sub) => {
-                                                    const sKey = resolveEnergyKey(sub.energy_type);
-                                                    const sTone = sKey ? EM_ENERGY[sKey] : null;
-                                                    return (
-                                                      <div
-                                                        key={sub.id}
-                                                        className={`chain-meter${selected?.kind === 'placed' && selected.meter.id === sub.id ? ' selected' : ''}`}
-                                                        onClick={() => setSelected({ kind: 'placed', meter: sub })}
-                                                      >
-                                                        <span className="grip"><GripVertical size={11} /></span>
-                                                        <span className="name">{sub.meter_number || sub.name}</span>
-                                                        <span className="src-tag">{shortSource(sub.data_source)}</span>
-                                                        <span className="e-dot" style={{ background: sTone?.color }} />
-                                                      </div>
-                                                    );
-                                                  })}
-                                                </div>
-                                              </div>
-                                            );
-                                          })}
+                                          {mains.map((main) => renderChain(main, u))}
                                         </div>
                                       )}
                                     </div>
