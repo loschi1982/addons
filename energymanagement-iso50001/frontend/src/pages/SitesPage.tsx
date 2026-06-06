@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { ChevronRight, Zap, Building2, Settings, Trash2, Activity, Wifi, Plus, Search } from 'lucide-react';
+import { ChevronRight, Zap, Building2, Settings, Trash2, Activity, Wifi, Plus, Search, DoorOpen } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type PaginatedResponse } from '@/types';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
@@ -44,7 +44,10 @@ interface SiteConsumptionSummary {
   site_id: string; site_name: string; by_energy: Record<string, number>;
 }
 
-type SelectedNode = { type: 'site' } | { type: 'building'; id: string };
+type SelectedNode =
+  | { type: 'site' }
+  | { type: 'building'; id: string }
+  | { type: 'unit'; id: string; buildingId: string };
 
 // ── Forms ──
 interface SiteForm { name: string; street: string; zip_code: string; city: string; country: string; latitude: string; longitude: string; }
@@ -308,6 +311,7 @@ export default function SitesPage() {
   const [selectedSite, setSelectedSite] = useState<Site | null>(null);
   const [selectedNode, setSelectedNode] = useState<SelectedNode>({ type: 'site' });
   const [buildingsExpanded, setBuildingsExpanded] = useState(true);
+  const [expandedBuildings, setExpandedBuildings] = useState<Set<string>>(new Set());
 
   // Detail-Daten
   const [siteBuildings, setSiteBuildings] = useState<Building[]>([]);
@@ -755,6 +759,8 @@ export default function SitesPage() {
 
   const panelMeters = selectedNode.type === 'building'
     ? flatMeters.filter(m => m.building_id === selectedNode.id)
+    : selectedNode.type === 'unit'
+    ? flatMeters.filter(m => m.usage_unit_id === selectedNode.id)
     : flatMeters;
   const filteredPanelMeters = meterEnergyFilter
     ? panelMeters.filter(m => m.energy_type === meterEnergyFilter)
@@ -942,15 +948,51 @@ export default function SitesPage() {
                 {siteBuildings.map(b => {
                   const bCount = flatMeters.filter(m => m.building_id === b.id).length;
                   const isSel = selectedNode.type === 'building' && selectedNode.id === b.id;
+                  const bUnits = allSiteUnits.filter(u => u.building_id === b.id);
+                  const isExpanded = expandedBuildings.has(b.id);
                   return (
-                    <div key={b.id} className="tree-node">
+                    <div key={b.id} className={`tree-node${isExpanded && bUnits.length > 0 ? ' open' : ''}`}>
                       <div className={`tree-row tree-level-gebaeude${isSel ? ' selected' : ''}`}
                         onClick={() => handleBuildingNodeClick(b)}>
-                        <div className="tree-chev empty" />
+                        <div
+                          className={`tree-chev${bUnits.length === 0 ? ' empty' : ''}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (bUnits.length === 0) return;
+                            setExpandedBuildings((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(b.id)) next.delete(b.id); else next.add(b.id);
+                              return next;
+                            });
+                          }}
+                        >
+                          {bUnits.length > 0 && <ChevronRight size={12} />}
+                        </div>
                         <div className="tree-ico"><Building2 size={12} /></div>
                         <span className="tree-label">{b.name}</span>
                         <span className="tree-meta">{bCount}</span>
                       </div>
+                      {isExpanded && bUnits.length > 0 && (
+                        <div className="tree-children">
+                          {bUnits.map((u) => {
+                            const uCount = flatMeters.filter((m) => m.usage_unit_id === u.id).length;
+                            const isUnitSel = selectedNode.type === 'unit' && selectedNode.id === u.id;
+                            return (
+                              <div key={u.id} className="tree-node">
+                                <div
+                                  className={`tree-row${isUnitSel ? ' selected' : ''}`}
+                                  onClick={() => setSelectedNode({ type: 'unit', id: u.id, buildingId: b.id })}
+                                >
+                                  <div className="tree-chev empty" />
+                                  <div className="tree-ico"><DoorOpen size={12} /></div>
+                                  <span className="tree-label">{u.name}</span>
+                                  <span className="tree-meta">{uCount}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1036,7 +1078,38 @@ export default function SitesPage() {
                 </div>
               )}
             </>
-          ) : panelBuilding ? (
+          ) : selectedNode.type === 'unit' ? (() => {
+            const unit = allSiteUnits.find((u) => u.id === selectedNode.id);
+            const parentBuilding = siteBuildings.find((b) => b.id === selectedNode.buildingId);
+            if (!unit) return null;
+            return (
+              <div className="entity-head">
+                <div className="entity-crumb">
+                  <button style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', color: 'var(--ink-3)', padding: 0 }}
+                    onClick={() => setSelectedNode({ type: 'site' })}>{selectedSite.name}</button>
+                  {parentBuilding && (
+                    <>
+                      <span style={{ color: 'var(--ink-4)' }}>›</span>
+                      <button style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', color: 'var(--ink-3)', padding: 0 }}
+                        onClick={() => setSelectedNode({ type: 'building', id: parentBuilding.id })}>{parentBuilding.name}</button>
+                    </>
+                  )}
+                  <span style={{ color: 'var(--ink-4)' }}>›</span>
+                  <span style={{ color: 'var(--ink)' }}>{unit.name}</span>
+                </div>
+                <div className="entity-title-row">
+                  <h2>{unit.name}</h2>
+                  <span className="entity-kind">Nutzungseinheit</span>
+                </div>
+                <div className="entity-meta">
+                  {unit.usage_type && <div className="item"><span className="item-label">Typ</span><span className="item-val">{unit.usage_type}</span></div>}
+                  {unit.area_m2 != null && <div className="item"><span className="item-label">Fläche</span><span className="item-val">{Number(unit.area_m2).toLocaleString('de-DE')} m²</span></div>}
+                  {unit.floor != null && <div className="item"><span className="item-label">Etage</span><span className="item-val">{unit.floor}</span></div>}
+                  <div className="item"><span className="item-label">Zähler</span><span className="item-val">{panelMeters.length}</span></div>
+                </div>
+              </div>
+            );
+          })() : panelBuilding ? (
             <>
               {/* Gebäude Entity-Head */}
               <div className="entity-head">
@@ -1107,6 +1180,10 @@ export default function SitesPage() {
                 <div className="panel-card-sub">
                   {filteredPanelMeters.length} von {panelMeters.length}
                   {selectedNode.type === 'building' && panelBuilding ? ` · ${panelBuilding.name}` : ''}
+                  {selectedNode.type === 'unit' ? (() => {
+                    const u = allSiteUnits.find((x) => x.id === selectedNode.id);
+                    return u ? ` · ${u.name}` : '';
+                  })() : ''}
                 </div>
               </div>
               <button className="btn-primary" style={{ fontSize: 12, padding: '5px 10px' }} onClick={openNewMeter}>
