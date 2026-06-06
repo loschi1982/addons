@@ -211,11 +211,49 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
       return next;
     });
 
-  // Selection + Drag-State
+  // Selection + Drag-State. Drop-Ziele existieren auf drei Ebenen:
+  // Standort (nur site_id), Gebäude (site+building), NE (alle drei).
   const [selected, setSelected] = useState<SelectedKind>(null);
   const [dragMeter, setDragMeter] = useState<Meter | null>(null);
+  const [dragOverSiteId, setDragOverSiteId] = useState<string | null>(null);
+  const [dragOverBuildingId, setDragOverBuildingId] = useState<string | null>(null);
   const [dragOverNeId, setDragOverNeId] = useState<string | null>(null);
   const [dragOverChainMeterId, setDragOverChainMeterId] = useState<string | null>(null);
+
+  const clearDragOver = useCallback(() => {
+    setDragOverSiteId(null);
+    setDragOverBuildingId(null);
+    setDragOverNeId(null);
+    setDragOverChainMeterId(null);
+  }, []);
+
+  const handleDropOnSite = useCallback(async (m: Meter, siteId: string) => {
+    try {
+      await apiClient.put(`/api/v1/meters/${m.id}`, {
+        site_id: siteId,
+        building_id: null,
+        usage_unit_id: null,
+        parent_meter_id: null,
+      });
+      onReload();
+    } catch {
+      /* interceptor */
+    }
+  }, [onReload]);
+
+  const handleDropOnBuilding = useCallback(async (m: Meter, buildingId: string, siteId: string) => {
+    try {
+      await apiClient.put(`/api/v1/meters/${m.id}`, {
+        site_id: siteId,
+        building_id: buildingId,
+        usage_unit_id: null,
+        parent_meter_id: null,
+      });
+      onReload();
+    } catch {
+      /* interceptor */
+    }
+  }, [onReload]);
 
   const handleDropOnUnit = useCallback(async (m: Meter, unitId: string, buildingId: string, siteId: string) => {
     try {
@@ -359,8 +397,7 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
             onDragEnd={(e) => {
               e.stopPropagation();
               setDragMeter(null);
-              setDragOverNeId(null);
-              setDragOverChainMeterId(null);
+              clearDragOver();
             }}
             onClick={() => setSelected({ kind: 'placed', meter: main })}
             style={{ cursor: 'grab' }}
@@ -491,8 +528,7 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
                   }}
                   onDragEnd={() => {
                     setDragMeter(null);
-                    setDragOverNeId(null);
-                    setDragOverChainMeterId(null);
+                    clearDragOver();
                   }}
                   onClick={() => setSelected({ kind: 'inbox', meter: m })}
                 >
@@ -535,7 +571,28 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
               const isOpen = openSet.has(s.id);
               return (
                 <div key={s.id} className={`t-standort ${isOpen ? 'open' : 'collapsed'}`}>
-                  <div className="t-standort-head" onClick={() => toggleOpen(s.id)}>
+                  <div
+                    className={`t-standort-head${dragOverSiteId === s.id && dragMeter ? ' drop-active' : ''}`}
+                    onClick={() => toggleOpen(s.id)}
+                    onDragOver={(e) => {
+                      if (dragMeter) {
+                        e.preventDefault();
+                        setDragOverSiteId(s.id);
+                        setDragOverBuildingId(null);
+                        setDragOverNeId(null);
+                      }
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverSiteId === s.id) setDragOverSiteId(null);
+                    }}
+                    onDrop={(e) => {
+                      if (dragMeter) {
+                        e.preventDefault();
+                        handleDropOnSite(dragMeter, s.id);
+                        clearDragOver();
+                      }
+                    }}
+                  >
                     <span className="t-chev">
                       <ChevronRight size={11} />
                     </span>
@@ -581,7 +638,31 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
                         const gOpen = openSet.has(g.id);
                         return (
                           <div key={g.id} className={`t-gebaeude ${gOpen ? 'open' : ''}`}>
-                            <div className="t-gebaeude-head" onClick={() => toggleOpen(g.id)}>
+                            <div
+                              className={`t-gebaeude-head${dragOverBuildingId === g.id && dragMeter ? ' drop-active' : ''}`}
+                              onClick={() => toggleOpen(g.id)}
+                              onDragOver={(e) => {
+                                if (dragMeter) {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setDragOverBuildingId(g.id);
+                                  setDragOverSiteId(null);
+                                  setDragOverNeId(null);
+                                }
+                              }}
+                              onDragLeave={(e) => {
+                                e.stopPropagation();
+                                if (dragOverBuildingId === g.id) setDragOverBuildingId(null);
+                              }}
+                              onDrop={(e) => {
+                                if (dragMeter) {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  handleDropOnBuilding(dragMeter, g.id, s.id);
+                                  clearDragOver();
+                                }
+                              }}
+                            >
                               <span className="t-chev"><ChevronRight size={11} /></span>
                               <Building2 size={13} />
                               <span>{g.name}</span>
@@ -638,14 +719,19 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
                                       onDragOver={(e) => {
                                         if (dragMeter) {
                                           e.preventDefault();
+                                          e.stopPropagation();
                                           setDragOverNeId(u.id);
+                                          setDragOverSiteId(null);
+                                          setDragOverBuildingId(null);
                                         }
                                       }}
-                                      onDragLeave={() => {
+                                      onDragLeave={(e) => {
+                                        e.stopPropagation();
                                         if (dragOverNeId === u.id) setDragOverNeId(null);
                                       }}
                                       onDrop={(e) => {
                                         e.preventDefault();
+                                        e.stopPropagation();
                                         if (dragMeter) {
                                           handleDropOnUnit(dragMeter, u.id, g.id, s.id);
                                           setDragOverNeId(null);
@@ -789,7 +875,7 @@ function DetailMeter({ meter, sites, buildings, units, placed, extraSubs, onUnpl
           </div>
         ) : (
           <div className="detail-path" style={{ color: 'var(--warn)' }}>
-            Noch nicht zugeordnet – per Drag&Drop einer Nutzungseinheit zuweisen.
+            Noch nicht zugeordnet – per Drag&Drop auf einen Standort, ein Gebäude oder eine Nutzungseinheit ziehen.
           </div>
         )}
       </div>

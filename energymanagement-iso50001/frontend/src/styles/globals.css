@@ -1472,6 +1472,14 @@ nav.flex.gap-6 > button.pb-2:hover { color: var(--ink); }
   transition: background 120ms ease;
 }
 .t-standort-head:hover, .t-gebaeude-head:hover, .t-ne-head:hover { background: var(--surface-2); }
+/* Drop-Active auf Standort-/Gebäude-Ebene (Zähler ohne NE landen hier) */
+.t-standort-head.drop-active,
+.t-gebaeude-head.drop-active {
+  background: color-mix(in srgb, var(--good) 14%, transparent);
+  outline: 2px dashed var(--good);
+  outline-offset: -2px;
+  border-radius: var(--r-sm);
+}
 .t-standort-head span:not(.t-chev):not(.t-shortcode) { font-weight: 600; color: var(--ink); }
 .t-standort-head .t-shortcode {
   font-family: var(--font-mono);
