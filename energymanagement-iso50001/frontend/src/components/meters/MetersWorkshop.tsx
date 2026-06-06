@@ -237,6 +237,58 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
     }
   }, [onReload]);
 
+  // Action: Position eines bereits zugeordneten Zählers entfernen →
+  // landet wieder im Eingang. Bei einem HZ mit Sub-Zählern hängt Backend
+  // die Subs in der Regel ab; wir informieren den User explizit.
+  const handleUnplace = useCallback(async (m: Meter) => {
+    const hasSubs = meters.some((x) => x.parent_meter_id === m.id);
+    const msg = hasSubs
+      ? `Zähler hat ${meters.filter((x) => x.parent_meter_id === m.id).length} Sub-Zähler. Trotzdem zurück in den Eingang?`
+      : 'Zähler zurück in den Eingang verschieben?';
+    if (!window.confirm(msg)) return;
+    try {
+      await apiClient.put(`/api/v1/meters/${m.id}`, {
+        site_id: null,
+        building_id: null,
+        usage_unit_id: null,
+        parent_meter_id: null,
+      });
+      setSelected(null);
+      onReload();
+    } catch {
+      /* interceptor */
+    }
+  }, [meters, onReload]);
+
+  // Action: Sub-Zähler vom Hauptzähler lösen — er bleibt in der NE,
+  // wird aber zum eigenständigen Hauptzähler.
+  const handleDetachFromMain = useCallback(async (m: Meter) => {
+    if (!window.confirm('Vom Hauptzähler lösen? Wird zum eigenständigen Zähler in der Nutzungseinheit.')) return;
+    try {
+      await apiClient.put(`/api/v1/meters/${m.id}`, {
+        parent_meter_id: null,
+      });
+      onReload();
+    } catch {
+      /* interceptor */
+    }
+  }, [onReload]);
+
+  // Drag-Ghost: DOM-Element mit Code + Energy-Dot, das beim Drag dem Cursor
+  // folgt statt dem Browser-Default-Image (das ist meist halbtransparent
+  // und unleserlich, vor allem mit langen Mono-Codes).
+  const buildDragGhost = useCallback((m: Meter): HTMLElement => {
+    const key = resolveEnergyKey(m.energy_type);
+    const color = key ? EM_ENERGY[key].color : '#9A968B';
+    const el = document.createElement('div');
+    el.className = 'drag-ghost';
+    el.innerHTML = `<span class="ghost-dot" style="background:${color}"></span><span class="ghost-code">${(m.meter_number || m.name || '').replace(/[<>&]/g, '')}</span>`;
+    document.body.appendChild(el);
+    // Element nach dem Render-Frame entfernen (das Browser-Snapshot ist da)
+    setTimeout(() => { el.remove(); }, 0);
+    return el;
+  }, []);
+
   // ── Chain-Renderer (wiederverwendbar an NE-, Gebäude- und Standort-Level) ──
   const renderChain = (main: Meter, contextUnit?: UsageUnit) => {
     const subs = meters.filter((m) => m.parent_meter_id === main.id);
@@ -286,7 +338,22 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
         <div className="chain-body">
           <div
             className={`chain-meter${selected?.kind === 'placed' && selected.meter.id === main.id ? ' selected' : ''}`}
+            draggable
+            onDragStart={(e) => {
+              e.stopPropagation();
+              setDragMeter(main);
+              e.dataTransfer.effectAllowed = 'move';
+              const ghost = buildDragGhost(main);
+              e.dataTransfer.setDragImage(ghost, 12, 16);
+            }}
+            onDragEnd={(e) => {
+              e.stopPropagation();
+              setDragMeter(null);
+              setDragOverNeId(null);
+              setDragOverChainMeterId(null);
+            }}
             onClick={() => setSelected({ kind: 'placed', meter: main })}
+            style={{ cursor: 'grab' }}
           >
             <span className="role-tag">HZ</span>
             <span className="name">{main.meter_number || main.name}</span>
@@ -300,7 +367,22 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
               <div
                 key={sub.id}
                 className={`chain-meter${selected?.kind === 'placed' && selected.meter.id === sub.id ? ' selected' : ''}`}
+                draggable
+                onDragStart={(e) => {
+                  e.stopPropagation();
+                  setDragMeter(sub);
+                  e.dataTransfer.effectAllowed = 'move';
+                  const ghost = buildDragGhost(sub);
+                  e.dataTransfer.setDragImage(ghost, 12, 16);
+                }}
+                onDragEnd={(e) => {
+                  e.stopPropagation();
+                  setDragMeter(null);
+                  setDragOverNeId(null);
+                  setDragOverChainMeterId(null);
+                }}
                 onClick={() => setSelected({ kind: 'placed', meter: sub })}
+                style={{ cursor: 'grab' }}
               >
                 <span className="grip"><GripVertical size={11} /></span>
                 <span className="name">{sub.meter_number || sub.name}</span>
@@ -394,6 +476,8 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
                   onDragStart={(e) => {
                     setDragMeter(m);
                     e.dataTransfer.effectAllowed = 'move';
+                    const ghost = buildDragGhost(m);
+                    e.dataTransfer.setDragImage(ghost, 12, 16);
                   }}
                   onDragEnd={() => {
                     setDragMeter(null);
@@ -608,13 +692,32 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
             </div>
           )}
           {selected?.kind === 'inbox' && (
-            <DetailMeter meter={selected.meter} sites={sites} buildings={buildings} units={units} placed={false} />
+            <DetailMeter
+              meter={selected.meter}
+              sites={sites} buildings={buildings} units={units}
+              placed={false}
+              onUnplace={handleUnplace}
+              onDetachFromMain={handleDetachFromMain}
+            />
           )}
           {selected?.kind === 'placed' && (
-            <DetailMeter meter={selected.meter} sites={sites} buildings={buildings} units={units} placed />
+            <DetailMeter
+              meter={selected.meter}
+              sites={sites} buildings={buildings} units={units}
+              placed
+              onUnplace={handleUnplace}
+              onDetachFromMain={handleDetachFromMain}
+            />
           )}
           {selected?.kind === 'chain' && (
-            <DetailMeter meter={selected.chainMeter} sites={sites} buildings={buildings} units={units} placed extraSubs={selected.chainSubs} />
+            <DetailMeter
+              meter={selected.chainMeter}
+              sites={sites} buildings={buildings} units={units}
+              placed
+              extraSubs={selected.chainSubs}
+              onUnplace={handleUnplace}
+              onDetachFromMain={handleDetachFromMain}
+            />
           )}
         </div>
       </div>
@@ -624,17 +727,21 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
 
 // ── Sub-Komponente: Detail-Pane ────────────────────────────────────────
 
-function DetailMeter({ meter, sites, buildings, units, placed, extraSubs }: {
+function DetailMeter({ meter, sites, buildings, units, placed, extraSubs, onUnplace, onDetachFromMain }: {
   meter: Meter;
   sites: Site[];
   buildings: Building[];
   units: UsageUnit[];
   placed: boolean;
   extraSubs?: Meter[];
+  onUnplace: (m: Meter) => void;
+  onDetachFromMain: (m: Meter) => void;
 }) {
   const site = sites.find((s) => s.id === meter.site_id);
   const building = buildings.find((b) => b.id === meter.building_id);
   const unit = units.find((u) => u.id === meter.usage_unit_id);
+  const isSubMeter = !!meter.parent_meter_id;
+  const hasAnyPosition = placed && (meter.site_id || meter.building_id || meter.usage_unit_id || meter.parent_meter_id);
 
   return (
     <>
@@ -694,6 +801,38 @@ function DetailMeter({ meter, sites, buildings, units, placed, extraSubs }: {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Aktions-Footer — nur für zugeordnete Zähler. */}
+      {hasAnyPosition && (
+        <div style={{
+          marginTop: 'auto',
+          paddingTop: 12,
+          borderTop: '1px solid var(--line)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+        }}>
+          {isSubMeter && (
+            <button
+              type="button"
+              onClick={() => onDetachFromMain(meter)}
+              className="btn-secondary"
+              style={{ justifyContent: 'flex-start' }}
+            >
+              Vom Hauptzähler lösen
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onUnplace(meter)}
+            className="btn-secondary"
+            style={{ justifyContent: 'flex-start', color: 'var(--alert)' }}
+            title="Zähler-Position zurücksetzen; landet wieder im Eingang."
+          >
+            Zurück in den Eingang
+          </button>
         </div>
       )}
     </>
