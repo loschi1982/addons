@@ -53,6 +53,14 @@ interface Site { id: string; name: string; short_code?: string | null; }
 interface Building { id: string; name: string; site_id: string; building_type?: string | null; }
 interface UsageUnit { id: string; name: string; building_id: string; usage_type?: string | null; }
 
+// Building-Detail-Response des Backends — `usage_units` ist optional inline.
+interface BuildingDetailResponse {
+  id: string;
+  name: string;
+  building_type?: string | null;
+  usage_units?: UsageUnit[];
+}
+
 type SelectedKind =
   | { kind: 'inbox'; meter: Meter }
   | { kind: 'placed'; meter: Meter }
@@ -121,12 +129,14 @@ export default function MetersWorkshop({ meters, onReload }: Props) {
         const allBuildings = buildingResults.flat();
         setBuildings(allBuildings);
 
-        // 3) Units pro (Site, Building) parallel
+        // 3) Units pro Building über das Building-Detail laden.
+        //    Der separate /units-Endpoint liefert auf manchen Backends leer
+        //    zurück; usage_units kommen nur über das Building-Detail inline.
         const unitResults = await Promise.all(
           allBuildings.map((b) =>
             apiClient
-              .get<{ items: UsageUnit[] } | UsageUnit[]>(`/api/v1/sites/${b.site_id}/buildings/${b.id}/units`)
-              .then((r) => pick(r.data).map((u) => ({ ...u, building_id: b.id })))
+              .get<BuildingDetailResponse>(`/api/v1/sites/${b.site_id}/buildings/${b.id}`)
+              .then((r) => (r.data.usage_units ?? []).map((u) => ({ ...u, building_id: b.id })))
               .catch(() => [] as UsageUnit[]),
           ),
         );
