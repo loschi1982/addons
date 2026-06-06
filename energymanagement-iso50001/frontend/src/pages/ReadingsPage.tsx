@@ -1,9 +1,11 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { Search, Pencil, Trash2, Plus, Grid2x2, MapPin, Gauge } from 'lucide-react';
 import { apiClient } from '@/utils/api';
-import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
+import { type PaginatedResponse } from '@/types';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import PageHead from '@/components/ui/PageHead';
+import { resolveEnergyKey, EM_ENERGY, type EnergyKey } from '@/utils/energyPalette';
 
 // ── Typen ──
 
@@ -16,6 +18,20 @@ interface Meter {
   data_source: string;
   is_active: boolean;
   is_delivery_based: boolean;
+  site_name?: string | null;
+  latest_reading?: number | null;
+  latest_reading_date?: string | null;
+}
+
+// Zähler-Ablesestatus aus dem Datum der letzten Ablesung.
+type MeterStatus = { kind: 'good' | 'warn' | 'alert'; label: string };
+
+function meterStatus(m: Meter): MeterStatus {
+  if (!m.latest_reading_date) return { kind: 'alert', label: 'keine Ablesung' };
+  const days = (Date.now() - new Date(m.latest_reading_date).getTime()) / 86_400_000;
+  if (days <= 40) return { kind: 'good', label: 'aktuell' };
+  if (days <= 70) return { kind: 'warn', label: 'fällig' };
+  return { kind: 'alert', label: 'überfällig' };
 }
 
 interface Reading {
@@ -79,6 +95,10 @@ export default function ReadingsPage() {
   // Zähler-Liste
   const [meters, setMeters] = useState<Meter[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState(searchParams.get('meter_id') ?? '');
+
+  // Master-Liste: Suche + Energie-Filter
+  const [query, setQuery] = useState('');
+  const [energyFilter, setEnergyFilter] = useState<Set<EnergyKey>>(new Set());
 
   // Readings-Liste
   const [readings, setReadings] = useState<Reading[]>([]);
@@ -347,210 +367,358 @@ export default function ReadingsPage() {
   const isDelivery = selectedMeter?.is_delivery_based ?? false;
   const totalPages = Math.ceil(total / pageSize);
 
+  // Gefilterte Master-Liste (Suche über Name/Nummer/Standort + Energie-Pills)
+  const filteredMeters = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return meters.filter((m) => {
+      const key = resolveEnergyKey(m.energy_type);
+      if (energyFilter.size > 0 && (!key || !energyFilter.has(key))) return false;
+      if (q) {
+        const hay = `${m.name} ${m.meter_number ?? ''} ${m.site_name ?? ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [meters, query, energyFilter]);
+
+  const toggleEnergy = (k: EnergyKey) =>
+    setEnergyFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      return next;
+    });
+
+  // KPI-Kennzahlen aus den geladenen Ständen des gewählten Zählers.
+  // readings ist absteigend sortiert (neueste zuerst).
+  const kpi = useMemo(() => {
+    const latest = readings[0];
+    const prev = readings[1];
+    const consDelta = latest?.consumption != null && prev?.consumption != null && prev.consumption !== 0
+      ? ((latest.consumption - prev.consumption) / Math.abs(prev.consumption)) * 100
+      : null;
+    const withCost = readings.filter((r) => r.cost_gross != null);
+    const avgCost = withCost.length
+      ? withCost.reduce((a, r) => a + (r.cost_gross ?? 0), 0) / withCost.length
+      : null;
+    return { latest, consDelta, avgCost };
+  }, [readings]);
+
+  // Verlaufsbalken: letzte 12 Stände mit Verbrauch, ältester links.
+  const verlaufRows = useMemo(() => {
+    const withCons = readings.filter((r) => r.consumption != null).slice(0, 12).reverse();
+    const max = Math.max(...withCons.map((r) => Math.abs(r.consumption ?? 0)), 1);
+    return { rows: withCons, max };
+  }, [readings]);
+
+  // Header-Pips: manuelle Zähler gesamt, Stände (gewählt), fällige Zähler
+  const dueCount = useMemo(
+    () => meters.filter((m) => meterStatus(m).kind !== 'good').length,
+    [meters],
+  );
+
+  const selKey = resolveEnergyKey(selectedMeter?.energy_type);
+  const selTone = selKey ? EM_ENERGY[selKey] : null;
+
   return (
     <div>
       <PageHead
         eyebrow="Stammdaten"
-        title="Zählerstände"
+        title="Ablesungen"
         actions={
           <>
             <button onClick={handleOpenBulk} className="btn-secondary">
-              Monatsablesung
+              <Grid2x2 className="h-4 w-4" /> Monatserfassung
             </button>
             <button onClick={handleOpenSingle} className="btn-primary">
-              + Neuer Zählerstand
+              <Plus className="h-4 w-4" /> Neue Ablesung
             </button>
           </>
         }
       />
+      <div className="abl-head-sub">
+        <span className="pip"><span className="dot" style={{ background: 'var(--ink)' }} /> <strong>{meters.length}</strong>&nbsp;manuelle Zähler</span>
+        {selectedMeterId && <span className="pip"><span className="dot" /> <strong>{total}</strong>&nbsp;Stände erfasst</span>}
+        {dueCount > 0 && <span className="pip warn"><span className="dot" /> <strong>{dueCount}</strong>&nbsp;Ablesung fällig</span>}
+      </div>
 
       {/* Banner: direkter Sprung zu markiertem Messwert */}
       {highlightReadingId && (
-        <div className="mt-4 flex items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="mt-4 flex items-center gap-3 rounded-lg px-4 py-3 text-sm"
+          style={{ background: 'color-mix(in srgb, var(--fw-strom) 14%, var(--surface))', border: '1px solid color-mix(in srgb, var(--fw-strom) 40%, transparent)', color: 'var(--ink-2)' }}>
           <span className="text-lg">⚑</span>
-          <span>Springe direkt zum markierten Ausreißer-Messwert – dieser ist <strong>gelb hervorgehoben</strong>.</span>
+          <span>Springe direkt zum markierten Ausreißer-Messwert – dieser ist <strong>hervorgehoben</strong>.</span>
         </div>
       )}
 
-      {/* Zähler-Auswahl */}
-      <div className="card mt-4">
-        <label className="label">Zähler auswählen</label>
-        <select
-          className="input max-w-md"
-          value={selectedMeterId}
-          onChange={(e) => { setSelectedMeterId(e.target.value); setPage(1); }}
-        >
-          <option value="">– Zähler wählen –</option>
-          {meters.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.name} ({ENERGY_TYPE_LABELS[m.energy_type as EnergyType] || m.energy_type}
-              {m.meter_number ? ` – ${m.meter_number}` : ''})
-            </option>
-          ))}
-        </select>
+      {/* ── Master/Detail ── */}
+      <div className="abl">
+        {/* Linke Spalte: Zählerliste */}
+        <div className="meter-list">
+          <div className="ml-head">
+            <div className="ml-title">Manuelle Zähler <span className="badge-n">{filteredMeters.length}</span></div>
+            <div className="ml-sub">Hauptzähler EVU · Verbrauch &amp; Kosten erfassen</div>
+          </div>
+          <div className="ml-tools">
+            <div className="ml-search">
+              <Search size={13} style={{ color: 'var(--ink-4)' }} />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Zähler oder Standort suchen…" />
+            </div>
+            <div className="ml-pills">
+              {(['fernwaerme', 'strom', 'kaelte', 'wasser'] as EnergyKey[]).map((k) => (
+                <button key={k} className={`epill${energyFilter.has(k) ? ' active' : ''}`} onClick={() => toggleEnergy(k)}>
+                  <span className="dot" style={{ background: EM_ENERGY[k].color }} />{EM_ENERGY[k].label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="ml-body">
+            {filteredMeters.length === 0 && (
+              <div style={{ padding: '28px 14px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 12 }}>
+                Keine Zähler in dieser Auswahl.
+              </div>
+            )}
+            {filteredMeters.map((m) => {
+              const key = resolveEnergyKey(m.energy_type);
+              const tone = key ? EM_ENERGY[key] : null;
+              const st = meterStatus(m);
+              return (
+                <div key={m.id} className={`meter-row${m.id === selectedMeterId ? ' selected' : ''}`}
+                  onClick={() => { setSelectedMeterId(m.id); setPage(1); }}>
+                  <div className="mr-accent" style={{ background: tone?.color ?? 'var(--ink-4)' }} />
+                  <div className="mr-body">
+                    <div className="mr-top">
+                      <span className="mr-name">{m.name}</span>
+                      {tone && (
+                        <span className="e-chip" style={{ background: tone.bg, color: tone.text }}>
+                          <span className="dot" style={{ background: tone.color }} />
+                        </span>
+                      )}
+                    </div>
+                    <div className="mr-meta">
+                      <MapPin size={11} style={{ color: 'var(--ink-4)', flexShrink: 0 }} />
+                      <span className="mr-pos">{m.site_name || m.meter_number || '—'}</span>
+                    </div>
+                    <div className="mr-foot">
+                      <span className="mr-last">
+                        {m.latest_reading_date ? formatDateShort(m.latest_reading_date) : '—'}
+                      </span>
+                      <span className={`status-dot ${st.kind}`}><span className="dot" />{st.label}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
-        {selectedMeter && (
-          <div className="mt-2 flex gap-4 text-sm text-gray-500">
-            <span>Einheit: <b>{selectedMeter.unit}</b></span>
-            <span>
-              Energieart:{' '}
-              <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
-                {ENERGY_TYPE_LABELS[selectedMeter.energy_type as EnergyType] || selectedMeter.energy_type}
-              </span>
-            </span>
-            <span>Stände gesamt: <b>{total}</b></span>
+        {/* Rechte Spalte: Detail */}
+        {!selectedMeter ? (
+          <div className="detail-empty">
+            <div className="mark"><Gauge size={22} /></div>
+            <strong>Kein Zähler ausgewählt</strong>
+            <p>Wähle links einen manuellen Zähler, um Zählerstände, Verbrauch und Kosten zu erfassen und den Verlauf zu sehen.</p>
+          </div>
+        ) : (
+          <div className="detail">
+            {/* Kopf + KPI-Strip */}
+            <div className="acard">
+              <div className="d-head">
+                <div className="d-head-l">
+                  <div className="d-mark" style={{ background: selTone?.bg ?? 'var(--surface-2)', color: selTone?.color ?? 'var(--ink-3)' }}>
+                    <Gauge size={20} />
+                  </div>
+                  <div className="d-titlewrap">
+                    <div className="d-title">{selectedMeter.name}</div>
+                    {selectedMeter.meter_number && <div className="d-code">{selectedMeter.meter_number}</div>}
+                    <div className="d-chips">
+                      {selTone && (
+                        <span className="e-chip" style={{ background: selTone.bg, color: selTone.text }}>
+                          <span className="dot" style={{ background: selTone.color }} />
+                          {selTone.label}
+                        </span>
+                      )}
+                      {(() => { const st = meterStatus(selectedMeter); return (
+                        <span className={`status-dot ${st.kind}`}><span className="dot" />{st.label}</span>
+                      ); })()}
+                      {selectedMeter.site_name && (
+                        <span className="d-pos"><MapPin size={11} style={{ color: 'var(--ink-4)' }} />{selectedMeter.site_name}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="d-head-r">
+                  <span className="d-unit-label">Einheit</span>
+                  <span className="d-unit-val">{selectedMeter.unit}</span>
+                </div>
+              </div>
+
+              <div className="kpi-strip">
+                <div className="kpi">
+                  <span className="kpi-label">{isDelivery ? 'Letzte Liefermenge' : 'Aktueller Zählerstand'}</span>
+                  <span className="kpi-val">
+                    <span className="kpi-num">{kpi.latest ? formatNumber(kpi.latest.value) : '—'}</span>
+                    <span className="kpi-unit">{selectedMeter.unit}</span>
+                  </span>
+                  <span className="kpi-meta">{kpi.latest ? `Stand ${formatDateShort(kpi.latest.timestamp)}` : 'keine Ablesung'}</span>
+                </div>
+                <div className="kpi">
+                  <span className="kpi-label">Verbrauch (letzter Stand)</span>
+                  <span className="kpi-val">
+                    <span className="kpi-num">{kpi.latest?.consumption != null ? formatNumber(kpi.latest.consumption) : '—'}</span>
+                    <span className="kpi-unit">{selectedMeter.unit}</span>
+                  </span>
+                  <span className="kpi-meta">
+                    {kpi.consDelta != null ? (
+                      <>
+                        <span className={`kpi-delta ${kpi.consDelta <= 0 ? 'good' : 'bad'}`}>
+                          {kpi.consDelta <= 0 ? '▾' : '▴'} {Math.abs(kpi.consDelta).toFixed(1).replace('.', ',')}%
+                        </span>
+                        ggü. Vorperiode
+                      </>
+                    ) : '—'}
+                  </span>
+                </div>
+                <div className="kpi">
+                  <span className="kpi-label">Kosten (letzter Stand)</span>
+                  <span className="kpi-val">
+                    <span className="kpi-num">{kpi.latest?.cost_gross != null ? formatNumber(kpi.latest.cost_gross, 0) : '—'}</span>
+                    <span className="kpi-unit">€ brutto</span>
+                  </span>
+                  <span className="kpi-meta">{kpi.latest ? formatDateShort(kpi.latest.timestamp) : '—'}</span>
+                </div>
+                <div className="kpi">
+                  <span className="kpi-label">Ø Kosten / Stand</span>
+                  <span className="kpi-val">
+                    <span className="kpi-num">{kpi.avgCost != null ? formatNumber(kpi.avgCost, 0) : '—'}</span>
+                    <span className="kpi-unit">€ brutto</span>
+                  </span>
+                  <span className="kpi-meta">aus {readings.filter((r) => r.cost_gross != null).length} Ständen</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Verbrauchsverlauf */}
+            {verlaufRows.rows.length > 0 && (
+              <div className="acard verlauf-card">
+                <div className="vc-head">
+                  <span className="vc-title">Verbrauchsverlauf</span>
+                  <span className="vc-legend">letzte {verlaufRows.rows.length} Stände · {selectedMeter.unit}</span>
+                </div>
+                <div className="bars">
+                  {verlaufRows.rows.map((r, i) => {
+                    const h = (Math.abs(r.consumption ?? 0) / verlaufRows.max) * 100;
+                    return (
+                      <div className="bar-col" key={r.id}>
+                        <div className="bar-track">
+                          <div className="bar"
+                            title={`${formatNumber(r.consumption ?? 0)} ${selectedMeter.unit}`}
+                            style={{ height: `${h}%`, background: selTone?.color ?? 'var(--ink-3)', animationDelay: `${i * 45}ms` }} />
+                        </div>
+                        <span className="bar-x">{formatDateShort(r.timestamp).slice(0, 6)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Tabelle */}
+            <div className="acard table-card">
+              <div className="tc-bar">
+                <span className="t">{isDelivery ? 'Lieferungen' : 'Zählerstände'} <span className="count">{total}</span></span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn-secondary" onClick={handleOpenBulk}><Grid2x2 size={12} /> Monatserfassung</button>
+                  <button className="btn-primary" onClick={handleOpenSingle}><Plus size={12} /> Neue Ablesung</button>
+                </div>
+              </div>
+
+              {loading ? (
+                <LoadingSpinner />
+              ) : readings.length === 0 ? (
+                <div style={{ padding: 32, textAlign: 'center', color: 'var(--ink-3)', fontSize: 13 }}>
+                  Noch keine Zählerstände erfasst.
+                </div>
+              ) : (
+                <div className="tbl">
+                  <div className="tr head">
+                    <span>Zeitpunkt</span>
+                    <span className="right">{isDelivery ? 'Liefermenge' : 'Zählerstand'}</span>
+                    <span className="right">{isDelivery ? 'Menge' : 'Verbrauch'}</span>
+                    <span className="right">Kosten brutto</span>
+                    <span className="col-src">Quelle</span>
+                    <span className="col-note">Notiz</span>
+                    <span className="right">Aktionen</span>
+                  </div>
+                  {readings.map((r) => (
+                    <div className={`tr${r.id === highlightReadingId ? ' highlight' : ''}`} key={r.id}
+                      ref={r.id === highlightReadingId ? highlightRef : undefined}>
+                      <span className="date">{formatDate(r.timestamp)}</span>
+                      <span className="num mono reading">
+                        {editingId === r.id ? (
+                          <input type="text" className="input w-28 text-right"
+                            value={editForm.value}
+                            onChange={(e) => setEditForm({ ...editForm, value: e.target.value })} />
+                        ) : (
+                          <span title={r.quality === 'estimated' ? 'Zählerstand geschätzt (aus Verbrauchsangabe)' : undefined}
+                            style={r.quality === 'estimated' ? { color: 'var(--warn)' } : undefined}>
+                            {formatNumber(r.value)}<span className="u">{selectedMeter.unit}</span>
+                            {r.quality === 'estimated' && <span style={{ marginLeft: 2 }}>~</span>}
+                          </span>
+                        )}
+                      </span>
+                      <span className={`num mono cons${r.consumption != null && r.consumption < 0 ? ' neg' : ''}`}>
+                        {r.consumption != null ? (
+                          <>{r.consumption >= 0 ? '+' : ''}{formatNumber(r.consumption)}<span className="u">{selectedMeter.unit}</span></>
+                        ) : <span style={{ color: 'var(--ink-4)' }}>–</span>}
+                      </span>
+                      <span className="num mono cost">
+                        {r.cost_gross != null ? (
+                          <span title={r.cost_net != null ? `Netto: ${formatNumber(r.cost_net)} € (${r.vat_rate}% MwSt)` : ''}>
+                            {formatNumber(r.cost_gross, 0)} €
+                          </span>
+                        ) : <span style={{ color: 'var(--ink-4)' }}>–</span>}
+                      </span>
+                      <span className="col-src"><span className="src-tag">{SOURCE_LABELS[r.source] || r.source}</span></span>
+                      <span className={`col-note note${r.notes ? '' : ' empty'}`}>
+                        {editingId === r.id ? (
+                          <input type="text" className="input w-full"
+                            value={editForm.notes}
+                            onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                            placeholder="Notiz…" />
+                        ) : (r.notes || '—')}
+                      </span>
+                      <span className="acts">
+                        {editingId === r.id ? (
+                          <>
+                            <button className="icon-btn" title="Speichern" onClick={() => handleEditSave(r.id)} style={{ color: 'var(--good)' }}>✓</button>
+                            <button className="icon-btn" title="Abbrechen" onClick={() => setEditingId(null)}>✕</button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="icon-btn" title="Bearbeiten" onClick={() => handleEdit(r)}><Pencil size={13} /></button>
+                            <button className="icon-btn danger" title="Löschen" onClick={() => handleDelete(r)}><Trash2 size={13} /></button>
+                          </>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Pagination innerhalb der Tabellen-Karte */}
+              {totalPages > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', borderTop: '1px solid var(--line)' }}>
+                  <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>Seite {page} von {totalPages}</span>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn-secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>Zurück</button>
+                    <button className="btn-secondary" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Weiter</button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
-
-      {/* Tabelle */}
-      {selectedMeterId && (
-        <div className="card mt-4 overflow-hidden p-0">
-          {loading ? (
-            <LoadingSpinner />
-          ) : readings.length === 0 ? (
-            <div className="p-8 text-center text-gray-400">
-              Keine Zählerstände vorhanden. Erfassen Sie den ersten Stand.
-            </div>
-          ) : (
-            <table className="w-full text-left text-sm">
-              <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-                <tr>
-                  <th className="px-4 py-3">Zeitpunkt</th>
-                  <th className="px-4 py-3 text-right">{isDelivery ? 'Liefermenge' : 'Zählerstand'}</th>
-                  <th className="px-4 py-3 text-right">{isDelivery ? 'Menge' : 'Verbrauch'}</th>
-                  <th className="px-4 py-3 text-right">Kosten (brutto)</th>
-                  <th className="px-4 py-3">Quelle</th>
-                  <th className="px-4 py-3">Notizen</th>
-                  <th className="px-4 py-3 text-right">Aktionen</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {readings.map((r) => (
-                  <tr
-                    key={r.id}
-                    ref={r.id === highlightReadingId ? highlightRef : undefined}
-                    className={r.id === highlightReadingId
-                      ? 'bg-amber-50 ring-2 ring-inset ring-amber-400'
-                      : 'hover:bg-gray-50'}
-                  >
-                    <td className="px-4 py-3 whitespace-nowrap">{formatDate(r.timestamp)}</td>
-                    <td className="px-4 py-3 text-right font-mono">
-                      {editingId === r.id ? (
-                        <input
-                          type="text"
-                          className="input w-28 text-right"
-                          value={editForm.value}
-                          onChange={(e) => setEditForm({ ...editForm, value: e.target.value })}
-                        />
-                      ) : (
-                        <span title={r.quality === 'estimated' ? 'Zählerstand geschätzt (aus Verbrauchsangabe)' : undefined}
-                          className={r.quality === 'estimated' ? 'text-amber-600' : undefined}>
-                          {formatNumber(r.value)} {selectedMeter?.unit}
-                          {r.quality === 'estimated' && <span className="ml-1 text-xs">~</span>}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono">
-                      {r.consumption != null ? (
-                        <span className={r.consumption >= 0 ? 'text-green-600' : 'text-red-500'}>
-                          {r.consumption >= 0 ? '+' : ''}{formatNumber(r.consumption)} {selectedMeter?.unit}
-                        </span>
-                      ) : (
-                        <span className="text-gray-300">–</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-gray-500">
-                      {r.cost_gross != null ? (
-                        <span title={r.cost_net != null ? `Netto: ${formatNumber(r.cost_net)} € (${r.vat_rate}% MwSt)` : ''}>
-                          {formatNumber(r.cost_gross)} €
-                        </span>
-                      ) : (
-                        <span className="text-gray-300">–</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500">
-                      {SOURCE_LABELS[r.source] || r.source}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500 max-w-[200px] truncate">
-                      {editingId === r.id ? (
-                        <input
-                          type="text"
-                          className="input w-full"
-                          value={editForm.notes}
-                          onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
-                          placeholder="Notizen..."
-                        />
-                      ) : (
-                        r.notes || '–'
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap">
-                      {editingId === r.id ? (
-                        <>
-                          <button
-                            onClick={() => handleEditSave(r.id)}
-                            className="mr-2 text-green-600 hover:text-green-800"
-                          >
-                            Speichern
-                          </button>
-                          <button
-                            onClick={() => setEditingId(null)}
-                            className="text-gray-500 hover:text-gray-700"
-                          >
-                            Abbrechen
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => handleEdit(r)}
-                            className="mr-2 text-primary-600 hover:text-primary-800"
-                          >
-                            Bearbeiten
-                          </button>
-                          <button
-                            onClick={() => handleDelete(r)}
-                            className="text-red-500 hover:text-red-700"
-                          >
-                            Löschen
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="mt-4 flex items-center justify-between">
-          <p className="text-sm text-gray-500">
-            Seite {page} von {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <button className="btn-secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-              Zurück
-            </button>
-            <button className="btn-secondary" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
-              Weiter
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Kein Zähler ausgewählt */}
-      {!selectedMeterId && (
-        <div className="card mt-4">
-          <div className="py-12 text-center text-gray-400">
-            Bitte wählen Sie einen Zähler aus, um dessen Stände anzuzeigen.
-          </div>
-        </div>
-      )}
 
       {/* ── Modal: Einzelerfassung ── */}
       {showSingleModal && (
@@ -564,25 +732,26 @@ export default function ReadingsPage() {
 
             {/* Eingabemodus-Toggle */}
             {!meters.find((m) => m.id === singleForm.meter_id)?.is_delivery_based && (
-              <div className="mb-4 flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+              <div className="mb-4 flex gap-1 text-sm">
                 <button
                   type="button"
                   onClick={() => setSingleInputMode('meter_reading')}
-                  className={`flex-1 px-3 py-2 font-medium transition-colors ${singleInputMode === 'meter_reading' ? 'bg-primary-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                  className={`abl-seg${singleInputMode === 'meter_reading' ? ' active' : ''}`}
                 >
                   Zählerstand
                 </button>
                 <button
                   type="button"
                   onClick={() => setSingleInputMode('consumption')}
-                  className={`flex-1 px-3 py-2 font-medium transition-colors ${singleInputMode === 'consumption' ? 'bg-primary-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                  className={`abl-seg${singleInputMode === 'consumption' ? ' active' : ''}`}
                 >
                   Nur Verbrauch
                 </button>
               </div>
             )}
             {singleInputMode === 'consumption' && (
-              <p className="mb-4 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <p className="mb-4 rounded-lg px-3 py-2 text-xs"
+                style={{ color: 'var(--warn)', background: 'color-mix(in srgb, var(--warn) 12%, var(--surface))', border: '1px solid color-mix(in srgb, var(--warn) 38%, transparent)' }}>
                 Der Zählerstand wird aus dem letzten bekannten Stand geschätzt und als "~" markiert.
                 Geeignet für Monatsabrechnungen, bei denen nur der Verbrauch angegeben ist.
               </p>
@@ -732,18 +901,18 @@ export default function ReadingsPage() {
             <h2 className="mb-1 text-lg font-bold">Monatserfassung</h2>
 
             {/* Eingabemodus-Toggle */}
-            <div className="mb-4 flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+            <div className="mb-4 flex gap-1 text-sm">
               <button
                 type="button"
                 onClick={() => setBulkInputMode('meter_reading')}
-                className={`flex-1 px-3 py-2 font-medium transition-colors ${bulkInputMode === 'meter_reading' ? 'bg-primary-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                className={`abl-seg${bulkInputMode === 'meter_reading' ? ' active' : ''}`}
               >
                 Zählerstände
               </button>
               <button
                 type="button"
                 onClick={() => setBulkInputMode('consumption')}
-                className={`flex-1 px-3 py-2 font-medium transition-colors ${bulkInputMode === 'consumption' ? 'bg-primary-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                className={`abl-seg${bulkInputMode === 'consumption' ? ' active' : ''}`}
               >
                 Verbrauch + Kosten
               </button>
@@ -888,6 +1057,11 @@ function formatDate(iso: string): string {
   });
 }
 
-function formatNumber(val: number): string {
-  return val.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Kurzform „Mär 25" für Listen-/Balken-/KPI-Beschriftung.
+function formatDateShort(iso: string): string {
+  return new Date(iso).toLocaleDateString('de-DE', { month: 'short', year: '2-digit' });
+}
+
+function formatNumber(val: number, decimals = 2): string {
+  return val.toLocaleString('de-DE', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
