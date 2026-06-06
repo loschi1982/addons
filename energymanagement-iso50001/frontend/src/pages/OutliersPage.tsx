@@ -1,9 +1,13 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Trash2, Flag, TrendingDown, RefreshCw, ChevronUp, ChevronDown, ExternalLink } from 'lucide-react';
+import {
+  AlertTriangle, Trash2, Flag, TrendingDown, RefreshCw,
+  ExternalLink, ChevronDown, Check, Search, X, Info,
+} from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS } from '@/types';
 import PageHead from '@/components/ui/PageHead';
+import { resolveEnergyKey, EM_ENERGY } from '@/utils/energyPalette';
 
 // ── Typen ──
 
@@ -21,15 +25,13 @@ interface OutlierItem {
 }
 
 type Action = 'delete' | 'flag' | 'interpolate';
-type SortField = 'factor' | 'meter_name' | 'timestamp' | 'consumption';
+type SortField = 'meter_name' | 'timestamp' | 'consumption' | 'median' | 'factor';
 
-const ENERGY_TYPE_COLORS: Record<string, string> = {
-  electricity: 'bg-yellow-100 text-yellow-800',
-  gas: 'bg-blue-100 text-blue-800',
-  district_heating: 'bg-red-100 text-red-800',
-  district_cooling: 'bg-cyan-100 text-cyan-800',
-  water: 'bg-teal-100 text-teal-800',
-};
+interface AnalyzeParams {
+  energy: string;
+  factor: string;
+  minVal: string;
+}
 
 const ACTION_LABELS: Record<Action, string> = {
   delete: 'Löschen',
@@ -37,11 +39,25 @@ const ACTION_LABELS: Record<Action, string> = {
   interpolate: 'Interpolieren',
 };
 
-const ACTION_DESCRIPTIONS: Record<Action, string> = {
-  delete: 'Messwert dauerhaft löschen',
-  flag: 'Als Ausreißer markieren, Verbrauch auf NULL setzen',
-  interpolate: 'Verbrauch durch Mittelwert der Nachbarwerte ersetzen',
-};
+// Schweregrad aus dem Faktor — Farbgebung + Pill-Gruppierung.
+type Severity = { key: 'extrem' | 'hoch' | 'auffaellig'; kind: 'alert' | 'warn' | 'info'; label: string };
+function severityOf(factor: number): Severity {
+  if (factor >= 50) return { key: 'extrem', kind: 'alert', label: 'Extrem' };
+  if (factor >= 20) return { key: 'hoch', kind: 'warn', label: 'Hoch' };
+  return { key: 'auffaellig', kind: 'info', label: 'Auffällig' };
+}
+
+// Aktueller Mess-Status aus dem quality-Feld.
+function stateOf(quality: string): { cls: 'neutral' | 'alert' | 'info'; label: string } {
+  if (quality === 'interpolated') return { cls: 'info', label: 'Interpoliert' };
+  if (quality === 'outlier') return { cls: 'alert', label: 'Markiert' };
+  return { cls: 'neutral', label: 'Offen' };
+}
+
+const fmtVal = (n: number) => n.toLocaleString('de-DE', { maximumFractionDigits: 1 });
+const fmtFactor = (n: number) => '×' + n.toLocaleString('de-DE', { maximumFractionDigits: 1 });
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 // ── Komponente ──
 
@@ -51,58 +67,68 @@ export default function OutliersPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Filter
-  const [factorThreshold, setFactorThreshold] = useState(10);
-  const [minValue, setMinValue] = useState(100);
-  const [energyTypeFilter, setEnergyTypeFilter] = useState('');
+  // Parameter: Entwurf (Eingabe) + angewandt. "Analysieren" übernimmt.
+  const initParams: AnalyzeParams = { energy: '', factor: '10', minVal: '100' };
+  const [draft, setDraft] = useState<AnalyzeParams>(initParams);
+  const [applied, setApplied] = useState<AnalyzeParams>(initParams);
+  const dirty = draft.energy !== applied.energy || draft.factor !== applied.factor || draft.minVal !== applied.minVal;
 
   // Sortierung
   const [sortField, setSortField] = useState<SortField>('factor');
   const [sortAsc, setSortAsc] = useState(false);
 
-  // Selektion
+  // Selektion + Aktionsstatus
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  // Aktionsstatus
   const [actionLoading, setActionLoading] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // Ausreißer laden
-  const loadOutliers = useCallback(async () => {
+  // Detail-Modal + Toast
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 5000);
+  };
+
+  // Ausreißer laden (mit den angewandten Parametern)
+  const loadOutliers = useCallback(async (params: AnalyzeParams) => {
     setLoading(true);
     setError(null);
     setSelectedIds(new Set());
     try {
-      const params = new URLSearchParams({
-        factor_threshold: factorThreshold.toString(),
-        min_value: minValue.toString(),
+      const qp = new URLSearchParams({
+        factor_threshold: params.factor.replace(',', '.') || '10',
+        min_value: params.minVal.replace(',', '.') || '0',
       });
-      if (energyTypeFilter) params.set('energy_type', energyTypeFilter);
-      const res = await apiClient.get<OutlierItem[]>(`/api/v1/readings/outliers?${params}`);
+      if (params.energy) qp.set('energy_type', params.energy);
+      const res = await apiClient.get<OutlierItem[]>(`/api/v1/readings/outliers?${qp}`);
       setOutliers(res.data);
     } catch {
       setError('Ausreißer konnten nicht geladen werden.');
     } finally {
       setLoading(false);
     }
-  }, [factorThreshold, minValue, energyTypeFilter]);
+  }, []);
 
-  useEffect(() => {
-    loadOutliers();
-  }, [loadOutliers]);
+  useEffect(() => { loadOutliers(initParams); /* initial */ // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const analyze = () => { setApplied({ ...draft }); loadOutliers(draft); };
 
   // Einzelaktion
   const handleAction = async (readingId: string, action: Action) => {
     setActionLoading((prev) => new Set(prev).add(readingId));
-    setSuccessMsg(null);
     try {
       await apiClient.post(`/api/v1/readings/outliers/${readingId}/action`, { action });
       setOutliers((prev) => prev.filter((o) => o.reading_id !== readingId));
       setSelectedIds((prev) => { const s = new Set(prev); s.delete(readingId); return s; });
-      setSuccessMsg(`Aktion "${ACTION_LABELS[action]}" erfolgreich ausgeführt.`);
+      if (detailId === readingId) setDetailId(null);
+      showToast(`Aktion „${ACTION_LABELS[action]}" ausgeführt.`);
     } catch {
-      setError(`Aktion "${ACTION_LABELS[action]}" fehlgeschlagen.`);
+      setError(`Aktion „${ACTION_LABELS[action]}" fehlgeschlagen.`);
     } finally {
       setActionLoading((prev) => { const s = new Set(prev); s.delete(readingId); return s; });
     }
@@ -112,13 +138,12 @@ export default function OutliersPage() {
   const handleBulkAction = async (action: 'delete' | 'flag') => {
     if (selectedIds.size === 0) return;
     setBulkLoading(true);
-    setSuccessMsg(null);
     setError(null);
     try {
       const ids = Array.from(selectedIds);
       await apiClient.post(`/api/v1/readings/outliers/bulk-action?action=${action}`, ids);
       setOutliers((prev) => prev.filter((o) => !selectedIds.has(o.reading_id)));
-      setSuccessMsg(`${ids.length} Messwert(e) "${ACTION_LABELS[action]}" erfolgreich.`);
+      showToast(`${ids.length} Messwert(e) „${ACTION_LABELS[action]}" ausgeführt.`);
       setSelectedIds(new Set());
     } catch {
       setError('Massenaktion fehlgeschlagen.');
@@ -133,352 +158,360 @@ export default function OutliersPage() {
     else { setSortField(field); setSortAsc(false); }
   };
 
-  const sorted = [...outliers].sort((a, b) => {
-    let cmp = 0;
-    if (sortField === 'factor') cmp = a.factor - b.factor;
-    else if (sortField === 'meter_name') cmp = a.meter_name.localeCompare(b.meter_name);
-    else if (sortField === 'timestamp') cmp = a.timestamp.localeCompare(b.timestamp);
-    else if (sortField === 'consumption') cmp = a.consumption - b.consumption;
-    return sortAsc ? cmp : -cmp;
+  const sorted = useMemo(() => {
+    const arr = [...outliers];
+    const dir = sortAsc ? 1 : -1;
+    arr.sort((a, b) => {
+      switch (sortField) {
+        case 'meter_name': return dir * a.meter_name.localeCompare(b.meter_name);
+        case 'timestamp':  return dir * a.timestamp.localeCompare(b.timestamp);
+        case 'consumption':return dir * (a.consumption - b.consumption);
+        case 'median':     return dir * (a.median_consumption - b.median_consumption);
+        default:           return dir * (a.factor - b.factor);
+      }
+    });
+    return arr;
+  }, [outliers, sortField, sortAsc]);
+
+  // Schweregrad-Aggregate
+  const sev = useMemo(() => {
+    const c = { extrem: 0, hoch: 0, auffaellig: 0 };
+    outliers.forEach((o) => { c[severityOf(o.factor).key]++; });
+    return c;
+  }, [outliers]);
+  const resolvedCount = useMemo(() => outliers.filter((o) => o.quality !== 'measured').length, [outliers]);
+
+  // Selektion
+  const allSelected = sorted.length > 0 && sorted.every((o) => selectedIds.has(o.reading_id));
+  const toggleAll = () => setSelectedIds(allSelected ? new Set() : new Set(sorted.map((o) => o.reading_id)));
+  const toggleOne = (id: string) => setSelectedIds((prev) => {
+    const s = new Set(prev);
+    if (s.has(id)) s.delete(id); else s.add(id);
+    return s;
   });
 
-  const allSelected = sorted.length > 0 && sorted.every((o) => selectedIds.has(o.reading_id));
-  const toggleAll = () => {
-    if (allSelected) setSelectedIds(new Set());
-    else setSelectedIds(new Set(sorted.map((o) => o.reading_id)));
-  };
-  const toggleOne = (id: string) => {
-    setSelectedIds((prev) => {
-      const s = new Set(prev);
-      if (s.has(id)) s.delete(id); else s.add(id);
-      return s;
-    });
-  };
+  const detailObj = detailId ? outliers.find((o) => o.reading_id === detailId) ?? null : null;
+  useEffect(() => { if (detailId && !detailObj) setDetailId(null); }, [detailId, detailObj]);
 
-  const SortIcon = ({ field }: { field: SortField }) => {
-    if (sortField !== field) return <ChevronDown className="w-3 h-3 opacity-30" />;
-    return sortAsc ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />;
-  };
+  const setDraftField = (k: keyof AnalyzeParams, v: string) => setDraft((p) => ({ ...p, [k]: v }));
 
-  const fmtDate = (iso: string) =>
-    new Date(iso).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-  const fmtNum = (n: number) => n.toLocaleString('de-DE', { maximumFractionDigits: 1 });
+  const Caret = ({ field }: { field: SortField }) => (
+    <span className="x-caret">{sortField === field ? (sortAsc ? '▴' : '▾') : '▾'}</span>
+  );
 
   return (
-    <div className="space-y-6">
-      <PageHead
-        eyebrow="Stammdaten"
-        title="Ausreißer-Erkennung"
-        actions={
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            padding: '4px 10px', borderRadius: 999,
-            background: 'color-mix(in srgb, var(--warn) 14%, transparent)',
-            color: 'var(--warn)',
-            border: '1px solid color-mix(in srgb, var(--warn) 38%, transparent)',
-            fontSize: 11, fontWeight: 600,
-          }}>
-            <AlertTriangle size={12} />
-            Messwerte mit hohem Verbrauch
-          </span>
-        }
-      />
+    <div className="outliers">
+      <PageHead eyebrow="Stammdaten" title="Ausreißer-Erkennung" />
+      <p className="ph-sub">Messwerte mit ungewöhnlich hohem Verbrauch erkennen und bereinigen</p>
 
-      {/* Filter-Panel */}
-      <div className="card p-4">
-        <div className="flex flex-wrap gap-4 items-end">
-          <div>
-            <label className="label">Energieart</label>
-            <select
-              className="input w-48"
-              value={energyTypeFilter}
-              onChange={(e) => setEnergyTypeFilter(e.target.value)}
-            >
-              <option value="">Alle Energiearten</option>
-              {Object.entries(ENERGY_TYPE_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
-              ))}
-            </select>
+      <div className="space-y-4" style={{ marginTop: 14 }}>
+        {/* Analyse-Kontrollen */}
+        <div className="x-controls">
+          <div className="xc-field">
+            <label>Energieart</label>
+            <div className="xc-select">
+              <select value={draft.energy} onChange={(e) => setDraftField('energy', e.target.value)}>
+                <option value="">Alle Energiearten</option>
+                {Object.entries(ENERGY_TYPE_LABELS).map(([k, v]) => (
+                  <option key={k} value={k}>{v}</option>
+                ))}
+              </select>
+              <ChevronDown size={14} style={{ color: 'var(--ink-4)' }} />
+            </div>
           </div>
-          <div>
-            <label className="label">Faktor-Schwellwert (× Median)</label>
-            <input
-              type="number"
-              className="input w-32"
-              value={factorThreshold}
-              min={2}
-              max={100}
-              onChange={(e) => setFactorThreshold(Number(e.target.value))}
-            />
+          <div className="xc-field">
+            <label>Faktor-Schwellwert <span className="dim">(× Median)</span></label>
+            <input className="xc-input mono" inputMode="decimal" value={draft.factor}
+              onChange={(e) => setDraftField('factor', e.target.value.replace(/[^\d.,]/g, ''))} />
           </div>
-          <div>
-            <label className="label">Mindestwert (kWh/m³)</label>
-            <input
-              type="number"
-              className="input w-32"
-              value={minValue}
-              min={0}
-              onChange={(e) => setMinValue(Number(e.target.value))}
-            />
+          <div className="xc-field">
+            <label>Mindestwert <span className="dim">(kWh/m³)</span></label>
+            <input className="xc-input mono" inputMode="decimal" value={draft.minVal}
+              onChange={(e) => setDraftField('minVal', e.target.value.replace(/[^\d.,]/g, ''))} />
           </div>
-          <button
-            className="btn-primary flex items-center gap-2"
-            onClick={loadOutliers}
-            disabled={loading}
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            Analysieren
+          <button className={`x-analyze${dirty ? ' dirty' : ''}`} onClick={analyze} disabled={loading}>
+            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} /> Analysieren
           </button>
+        </div>
+
+        {error && (
+          <div className="rounded-lg p-3 text-sm"
+            style={{ background: 'color-mix(in srgb, var(--alert) 12%, var(--surface))', border: '1px solid color-mix(in srgb, var(--alert) 38%, transparent)', color: 'var(--alert)' }}>
+            {error}
+          </div>
+        )}
+
+        {/* Summary */}
+        {!loading && (
+          <div className="x-summary">
+            <div className="xs-count">
+              <span className="n">{outliers.length}</span>
+              <span className="l">Ausreißer gefunden</span>
+            </div>
+            {outliers.length > 0 && (
+              <div className="xs-sev">
+                <span className="xs-pill alert"><span className="dot" />{sev.extrem} Extrem</span>
+                <span className="xs-pill warn"><span className="dot" />{sev.hoch} Hoch</span>
+                <span className="xs-pill info"><span className="dot" />{sev.auffaellig} Auffällig</span>
+              </div>
+            )}
+            {resolvedCount > 0 && (
+              <div className="xs-resolved"><Check size={13} /> {resolvedCount} bereinigt</div>
+            )}
+          </div>
+        )}
+
+        {/* Tabellen-Karte */}
+        <div className="x-table-card">
+          {selectedIds.size > 0 ? (
+            <div className="x-bulkbar">
+              <span className="bb-count">{selectedIds.size} ausgewählt</span>
+              <div className="bb-actions">
+                <button className="x-act amber" onClick={() => handleBulkAction('flag')} disabled={bulkLoading}>
+                  <Flag size={13} /><span>Markieren</span>
+                </button>
+                <button className="x-act red" onClick={() => handleBulkAction('delete')} disabled={bulkLoading}>
+                  <Trash2 size={13} /><span>Löschen</span>
+                </button>
+              </div>
+              <button className="bb-clear" onClick={() => setSelectedIds(new Set())}>Auswahl aufheben</button>
+            </div>
+          ) : (
+            <div className="x-tablebar">
+              <span className="tb-t">Ergebnisse <span className="count">{sorted.length}</span></span>
+              <span className="tb-hint">Spalte klicken zum Sortieren · Zeile auswählen für Sammelaktionen</span>
+            </div>
+          )}
+
+          <div className="x-thead">
+            <label className="x-check head">
+              <input type="checkbox" checked={allSelected} onChange={toggleAll} />
+              <span className="box"><Check size={11} /></span>
+            </label>
+            <button className={`x-th${sortField === 'meter_name' ? ' active' : ''}`} onClick={() => toggleSort('meter_name')}>
+              <span>Zähler</span><Caret field="meter_name" />
+            </button>
+            <span className="x-th static">Energieart</span>
+            <button className={`x-th${sortField === 'timestamp' ? ' active' : ''}`} onClick={() => toggleSort('timestamp')}>
+              <span>Zeitstempel</span><Caret field="timestamp" />
+            </button>
+            <button className={`x-th right${sortField === 'consumption' ? ' active' : ''}`} onClick={() => toggleSort('consumption')}>
+              <span>Verbrauch</span><Caret field="consumption" />
+            </button>
+            <button className={`x-th right${sortField === 'median' ? ' active' : ''}`} onClick={() => toggleSort('median')}>
+              <span>Median</span><Caret field="median" />
+            </button>
+            <button className={`x-th right${sortField === 'factor' ? ' active' : ''}`} onClick={() => toggleSort('factor')}>
+              <span>Faktor</span><Caret field="factor" />
+            </button>
+            <span className="x-th static">Status</span>
+            <span className="x-th static actions">Aktionen</span>
+          </div>
+
+          <div className="x-tbody">
+            {loading ? (
+              <div className="x-empty">
+                <div className="ico"><RefreshCw size={20} className="animate-spin" /></div>
+                <strong>Analysiere…</strong>
+              </div>
+            ) : sorted.length === 0 ? (
+              <div className="x-empty">
+                <div className="ico"><Search size={20} /></div>
+                <strong>Keine Ausreißer in dieser Auswahl</strong>
+                <p>Senke den Faktor-Schwellwert oder den Mindestwert und starte die Analyse erneut.</p>
+              </div>
+            ) : sorted.map((o) => {
+              const s = severityOf(o.factor);
+              const st = stateOf(o.quality);
+              const key = resolveEnergyKey(o.energy_type);
+              const tone = key ? EM_ENERGY[key] : null;
+              const isSel = selectedIds.has(o.reading_id);
+              const busy = actionLoading.has(o.reading_id);
+              return (
+                <div key={o.reading_id} className={`x-tr${isSel ? ' sel' : ''}${o.quality !== 'measured' ? ' resolved' : ''}`}>
+                  <label className="x-check">
+                    <input type="checkbox" checked={isSel} onChange={() => toggleOne(o.reading_id)} />
+                    <span className="box"><Check size={11} /></span>
+                  </label>
+                  <button className="x-code mono" title={o.meter_name}
+                    onClick={() => navigate(`/readings?meter_id=${o.meter_id}&highlight=${o.reading_id}`)}>
+                    {o.meter_name}
+                  </button>
+                  <div>
+                    {tone && (
+                      <span className="x-echip" style={{ background: tone.bg, color: tone.text }}>
+                        <span className="dot" style={{ background: tone.color }} />
+                        {tone.label}
+                      </span>
+                    )}
+                  </div>
+                  <div className="x-stamp mono">{fmtDate(o.timestamp)}</div>
+                  <div className="x-val mono">{fmtVal(o.consumption)}</div>
+                  <div className="x-med mono">{fmtVal(o.median_consumption)}</div>
+                  <div className={`x-factor mono ${s.kind}`}>{fmtFactor(o.factor)}</div>
+                  <div><span className={`x-state ${st.cls}`}>{st.label}</span></div>
+                  <div className="x-acts">
+                    <button className="x-act" title="Im Verlauf anzeigen" onClick={() => setDetailId(o.reading_id)}>
+                      <ExternalLink size={13} /><span>Anzeigen</span>
+                    </button>
+                    <button className="x-act blue" title="Mit Median interpolieren" disabled={busy}
+                      onClick={() => handleAction(o.reading_id, 'interpolate')}>
+                      <TrendingDown size={13} /><span>Interpolieren</span>
+                    </button>
+                    <button className="x-act amber" title="Zur Prüfung markieren" disabled={busy}
+                      onClick={() => handleAction(o.reading_id, 'flag')}>
+                      <Flag size={13} /><span>Markieren</span>
+                    </button>
+                    <button className="x-act red" title="Messwert löschen" disabled={busy}
+                      onClick={() => handleAction(o.reading_id, 'delete')}>
+                      <Trash2 size={13} /><span>Löschen</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* Statusmeldungen */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-sm">
-          {error}
-        </div>
-      )}
-      {successMsg && (
-        <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-green-700 text-sm">
-          {successMsg}
-        </div>
+      {detailObj && (
+        <DetailModal
+          o={detailObj}
+          onClose={() => setDetailId(null)}
+          onAction={(a) => handleAction(detailObj.reading_id, a)}
+        />
       )}
 
-      {/* Ergebnis-Header */}
-      {!loading && (
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-gray-600">
-            {outliers.length === 0
-              ? 'Keine Ausreißer gefunden – alle Messwerte im Normalbereich.'
-              : (
-                <>
-                  <span className="font-semibold text-orange-600">{outliers.length}</span> Ausreißer gefunden
-                  {selectedIds.size > 0 && (
-                    <span className="ml-2 text-gray-400">({selectedIds.size} ausgewählt)</span>
-                  )}
-                </>
-              )}
-          </div>
-
-          {/* Massenaktionen */}
-          {selectedIds.size > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500 mr-1">{selectedIds.size} ausgewählt:</span>
-              <button
-                className="flex items-center gap-1 px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded text-sm font-medium transition"
-                onClick={() => handleBulkAction('delete')}
-                disabled={bulkLoading}
-              >
-                <Trash2 className="w-3.5 h-3.5" /> Alle löschen
-              </button>
-              <button
-                className="flex items-center gap-1 px-3 py-1.5 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded text-sm font-medium transition"
-                onClick={() => handleBulkAction('flag')}
-                disabled={bulkLoading}
-              >
-                <Flag className="w-3.5 h-3.5" /> Alle markieren
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Tabelle */}
-      {!loading && outliers.length > 0 && (
-        <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-3 py-3 text-left w-8">
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={toggleAll}
-                      className="rounded"
-                    />
-                  </th>
-                  <th
-                    className="px-3 py-3 text-left cursor-pointer hover:bg-gray-100 select-none"
-                    onClick={() => toggleSort('meter_name')}
-                  >
-                    <span className="flex items-center gap-1">Zähler <SortIcon field="meter_name" /></span>
-                  </th>
-                  <th className="px-3 py-3 text-left">Energieart</th>
-                  <th
-                    className="px-3 py-3 text-left cursor-pointer hover:bg-gray-100 select-none"
-                    onClick={() => toggleSort('timestamp')}
-                  >
-                    <span className="flex items-center gap-1">Zeitstempel <SortIcon field="timestamp" /></span>
-                  </th>
-                  <th
-                    className="px-3 py-3 text-right cursor-pointer hover:bg-gray-100 select-none"
-                    onClick={() => toggleSort('consumption')}
-                  >
-                    <span className="flex items-center gap-1 justify-end">Verbrauch <SortIcon field="consumption" /></span>
-                  </th>
-                  <th className="px-3 py-3 text-right">Median</th>
-                  <th
-                    className="px-3 py-3 text-right cursor-pointer hover:bg-gray-100 select-none"
-                    onClick={() => toggleSort('factor')}
-                  >
-                    <span className="flex items-center gap-1 justify-end">Faktor <SortIcon field="factor" /></span>
-                  </th>
-                  <th className="px-3 py-3 text-center">Status</th>
-                  <th className="px-3 py-3 text-right">Aktionen</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {sorted.map((o) => {
-                  const isProcessing = actionLoading.has(o.reading_id);
-                  const isSelected = selectedIds.has(o.reading_id);
-                  const factorColor =
-                    o.factor >= 100 ? 'text-red-700 font-bold' :
-                    o.factor >= 50  ? 'text-red-600 font-semibold' :
-                    o.factor >= 20  ? 'text-orange-600 font-semibold' :
-                                      'text-orange-500';
-                  return (
-                    <tr
-                      key={o.reading_id}
-                      className={`${isSelected ? 'bg-orange-50' : 'hover:bg-gray-50'} transition`}
-                    >
-                      <td className="px-3 py-2.5">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleOne(o.reading_id)}
-                          className="rounded"
-                        />
-                      </td>
-                      <td className="px-3 py-2.5 font-medium max-w-xs truncate" title={`${o.meter_name} – Klicken um zum Messwert zu springen`}>
-                        <button
-                          onClick={() => navigate(`/readings?meter_id=${o.meter_id}&highlight=${o.reading_id}`)}
-                          className="text-primary-700 hover:text-primary-900 hover:underline text-left truncate w-full"
-                        >
-                          {o.meter_name}
-                        </button>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ENERGY_TYPE_COLORS[o.energy_type] || 'bg-gray-100 text-gray-700'}`}>
-                          {ENERGY_TYPE_LABELS[o.energy_type as keyof typeof ENERGY_TYPE_LABELS] || o.energy_type}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">
-                        {fmtDate(o.timestamp)}
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-gray-900">
-                        {fmtNum(o.consumption)}
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-mono text-gray-500">
-                        {fmtNum(o.median_consumption)}
-                      </td>
-                      <td className={`px-3 py-2.5 text-right font-mono ${factorColor}`}>
-                        ×{fmtNum(o.factor)}
-                      </td>
-                      <td className="px-3 py-2.5 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium
-                          ${o.quality === 'outlier' ? 'bg-red-100 text-red-700' :
-                            o.quality === 'interpolated' ? 'bg-blue-100 text-blue-700' :
-                            'bg-gray-100 text-gray-600'}`}>
-                          {o.quality === 'outlier' ? 'Ausreißer' :
-                           o.quality === 'interpolated' ? 'Interpoliert' :
-                           o.quality === 'measured' ? 'Gemessen' : o.quality}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex justify-end gap-1.5">
-                          <ActionButton
-                            icon={<ExternalLink className="w-3.5 h-3.5" />}
-                            label="Anzeigen"
-                            title="Zum Messwert in der Zählerstands-Liste springen"
-                            color="gray"
-                            onClick={() => navigate(`/readings?meter_id=${o.meter_id}&highlight=${o.reading_id}`)}
-                          />
-                          <ActionButton
-                            icon={<TrendingDown className="w-3.5 h-3.5" />}
-                            label="Interpolieren"
-                            title={ACTION_DESCRIPTIONS.interpolate}
-                            color="blue"
-                            onClick={() => handleAction(o.reading_id, 'interpolate')}
-                            disabled={isProcessing}
-                          />
-                          <ActionButton
-                            icon={<Flag className="w-3.5 h-3.5" />}
-                            label="Markieren"
-                            title={ACTION_DESCRIPTIONS.flag}
-                            color="orange"
-                            onClick={() => handleAction(o.reading_id, 'flag')}
-                            disabled={isProcessing}
-                          />
-                          <ActionButton
-                            icon={<Trash2 className="w-3.5 h-3.5" />}
-                            label="Löschen"
-                            title={ACTION_DESCRIPTIONS.delete}
-                            color="red"
-                            onClick={() => handleAction(o.reading_id, 'delete')}
-                            disabled={isProcessing}
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {loading && (
-        <div className="flex justify-center py-16">
-          <div className="flex flex-col items-center gap-3 text-gray-500">
-            <RefreshCw className="w-8 h-8 animate-spin text-primary-500" />
-            <span className="text-sm">Analysiere {outliers.length > 0 ? `(${outliers.length} bisher)` : '...'}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Legende */}
-      {!loading && outliers.length > 0 && (
-        <div className="text-xs text-gray-400 space-y-1">
-          <p><strong>Interpolieren:</strong> Verbrauch wird durch den Mittelwert der beiden Nachbarwerte ersetzt, Status → "Interpoliert"</p>
-          <p><strong>Markieren:</strong> Messwert bleibt erhalten, Verbrauch wird auf NULL gesetzt, Status → "Ausreißer"</p>
-          <p><strong>Löschen:</strong> Messwert wird dauerhaft aus der Datenbank entfernt</p>
+      {toast && (
+        <div className="x-toast">
+          <Check size={14} style={{ opacity: 0.75 }} />
+          <span>{toast}</span>
         </div>
       )}
     </div>
   );
 }
 
-// ── ActionButton-Hilfskomponente ──
+// ── Detail-Modal mit echtem Verlaufschart ──
 
-interface ActionButtonProps {
-  icon: React.ReactNode;
-  label: string;
-  title: string;
-  color: 'red' | 'orange' | 'blue' | 'gray';
-  onClick: () => void;
-  disabled?: boolean;
-}
+interface ReadingPoint { id: string; timestamp: string; consumption: number | null; }
 
-function ActionButton({ icon, label, title, color, onClick, disabled }: ActionButtonProps) {
-  const colors = {
-    red: 'bg-red-50 hover:bg-red-100 text-red-600 border-red-200',
-    orange: 'bg-orange-50 hover:bg-orange-100 text-orange-600 border-orange-200',
-    blue: 'bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200',
-    gray: 'bg-gray-50 hover:bg-gray-100 text-gray-700 border-gray-200',
-  };
+function DetailModal({ o, onClose, onAction }: {
+  o: OutlierItem;
+  onClose: () => void;
+  onAction: (a: Action) => void;
+}) {
+  const [series, setSeries] = useState<ReadingPoint[]>([]);
+  const key = resolveEnergyKey(o.energy_type);
+  const tone = key ? EM_ENERGY[key] : null;
+  const sev = severityOf(o.factor);
+  const unit = ''; // Einheit ist je Zähler; im Outlier-DTO nicht enthalten
+
+  // Echte Nachbarwerte des Zählers laden (jüngste 25 Stände).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiClient.get<{ items: ReadingPoint[] }>(
+          `/api/v1/readings?meter_id=${o.meter_id}&page=1&page_size=25`,
+        );
+        if (cancelled) return;
+        // Aufsteigend nach Zeit, nur Stände mit Verbrauch
+        const pts = res.data.items
+          .filter((r) => r.consumption != null)
+          .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+        setSeries(pts);
+      } catch { /* interceptor */ }
+    })();
+    return () => { cancelled = true; };
+  }, [o.meter_id]);
+
+  // Fallback, falls noch keine Serie geladen: nur die Spitze + Median.
+  const chartPoints = series.length > 0
+    ? series
+    : [{ id: o.reading_id, timestamp: o.timestamp, consumption: o.consumption }];
+  const max = Math.max(...chartPoints.map((p) => Math.abs(p.consumption ?? 0)), o.median_consumption, 1);
+
   return (
-    <button
-      title={title}
-      onClick={onClick}
-      disabled={disabled}
-      className={`flex items-center gap-1 px-2 py-1 rounded border text-xs font-medium transition
-        ${colors[color]} disabled:opacity-40 disabled:cursor-not-allowed`}
-    >
-      {icon}
-      {label}
-    </button>
+    <div className="x-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="x-modal">
+        <div className="xm-head">
+          <div className="xm-head-l">
+            <span className="xm-mark" style={{ background: tone?.bg ?? 'var(--surface-2)', color: tone?.color ?? 'var(--ink-3)' }}>
+              <AlertTriangle size={18} />
+            </span>
+            <div>
+              <div className="xm-code mono">{o.meter_name}</div>
+              <div className="xm-meta">
+                {tone && (
+                  <span className="x-echip" style={{ background: tone.bg, color: tone.text }}>
+                    <span className="dot" style={{ background: tone.color }} />{tone.label}
+                  </span>
+                )}
+                <span className="xm-stamp">{fmtDate(o.timestamp)}</span>
+              </div>
+            </div>
+          </div>
+          <button className="xm-close" onClick={onClose}><X size={16} /></button>
+        </div>
+
+        <div className="xm-kpis">
+          <div className="xm-kpi">
+            <span className="l">Gemessener Verbrauch</span>
+            <span className="v alert">{fmtVal(o.consumption)}{unit && <span className="u">{unit}</span>}</span>
+          </div>
+          <div className="xm-kpi">
+            <span className="l">Median des Zählers</span>
+            <span className="v">{fmtVal(o.median_consumption)}</span>
+          </div>
+          <div className="xm-kpi">
+            <span className="l">Faktor</span>
+            <span className={`v ${sev.kind}`}>{fmtFactor(o.factor)}</span>
+          </div>
+          <div className="xm-kpi">
+            <span className="l">Schweregrad</span>
+            <span className="v">
+              <span className={`x-state ${sev.kind === 'info' ? 'info' : 'alert'}`} style={sev.kind === 'warn' ? { color: 'var(--warn)' } : undefined}>{sev.label}</span>
+            </span>
+          </div>
+        </div>
+
+        <div className="xm-chart">
+          <div className="xm-chart-head">
+            <span className="t">Verbrauch im Verlauf</span>
+            <span className="lg"><span className="lg-line" />Median {fmtVal(o.median_consumption)}</span>
+          </div>
+          <div className="xm-bars">
+            <div className="xm-median-line" style={{ bottom: `${(o.median_consumption / max) * 100}%` }} />
+            {chartPoints.map((p) => {
+              const spike = p.id === o.reading_id;
+              const h = Math.max(1.5, (Math.abs(p.consumption ?? 0) / max) * 100);
+              return (
+                <div className="xm-bar-col" key={p.id}>
+                  <div className="xm-bar-track">
+                    {spike && <div className="xm-interp" style={{ height: `${(o.median_consumption / max) * 100}%` }} title="Interpolationsvorschlag" />}
+                    <div className={`xm-bar${spike ? ' spike' : ''}`}
+                      style={{ height: `${h}%`, background: spike ? 'var(--alert)' : (tone?.color ?? 'var(--ink-3)') }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="xm-chart-foot">
+            <Info size={13} style={{ color: 'var(--ink-4)' }} />
+            Interpolation ersetzt den Wert durch <strong>{fmtVal(o.median_consumption)}</strong> (≈ Median benachbarter Ablesungen).
+          </div>
+        </div>
+
+        <div className="xm-foot">
+          <span className={`x-state ${stateOf(o.quality).cls}`}>{stateOf(o.quality).label}</span>
+          <div className="xm-foot-btns">
+            <button className="x-btn-soft red" onClick={() => onAction('delete')}><Trash2 size={13} /> Löschen</button>
+            <button className="x-btn-soft amber" onClick={() => onAction('flag')}><Flag size={13} /> Markieren</button>
+            <button className="x-btn-info" onClick={() => onAction('interpolate')}><TrendingDown size={13} /> Interpolieren</button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
