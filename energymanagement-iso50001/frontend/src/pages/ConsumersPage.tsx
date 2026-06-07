@@ -1,9 +1,14 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import {
+  Search, Table2, LayoutGrid, Plus, Pencil, Power, RefreshCw,
+  Fan, Lightbulb, Factory, Wind, Snowflake, Gauge, Cog, Server, Box,
+  X, Sparkles, Shield, MapPin, History, type LucideIcon,
+} from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import type { PaginatedResponse } from '@/types';
 import { useSiteHierarchy } from '@/hooks/useSiteHierarchy';
-import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import PageHead from '@/components/ui/PageHead';
+import { EM_ENERGY, type EnergyKey } from '@/utils/energyPalette';
 
 // ── Typen ──
 
@@ -14,8 +19,12 @@ interface Consumer {
   rated_power_kw: number | null;
   operating_hours_per_year: number | null;
   estimated_annual_kwh: number | null;
+  expected_lifetime_years: number | null;
   priority: string;
   usage_unit_id: string | null;
+  usage_unit_name?: string | null;
+  building_name?: string | null;
+  site_name?: string | null;
   description: string | null;
   meter_ids: string[];
   manufacturer: string | null;
@@ -28,11 +37,7 @@ interface Consumer {
   created_at: string;
 }
 
-interface MeterOption {
-  id: string;
-  name: string;
-  energy_type: string;
-}
+interface MeterOption { id: string; name: string; energy_type: string; }
 
 interface ConsumerForm {
   name: string;
@@ -51,805 +56,736 @@ interface ConsumerForm {
 }
 
 const emptyForm: ConsumerForm = {
-  name: '',
-  category: 'hvac',
-  rated_power_kw: '',
-  operating_hours_per_year: '',
-  priority: 'normal',
-  description: '',
-  meter_ids: [],
-  manufacturer: '',
-  model: '',
-  serial_number: '',
-  commissioned_at: '',
-  decommissioned_at: '',
-  replaced_by_id: '',
+  name: '', category: 'hvac', rated_power_kw: '', operating_hours_per_year: '',
+  priority: 'normal', description: '', meter_ids: [], manufacturer: '', model: '',
+  serial_number: '', commissioned_at: '', decommissioned_at: '', replaced_by_id: '',
 };
 
-const CATEGORIES: Record<string, string> = {
-  hvac: 'Heizung/Lüftung/Klima',
-  lighting: 'Beleuchtung',
-  production: 'Produktion',
-  compressed_air: 'Druckluft',
-  cooling: 'Kälte',
-  pumps: 'Pumpen',
-  drives: 'Antriebe',
-  it: 'IT / Rechenzentrum',
-  other: 'Sonstige',
+// Kategorie-Meta: Label, Energieart (für Chip/Akzent), erwartete Nutzungsdauer (Jahre), Icon.
+interface CatMeta { label: string; energy: EnergyKey; life: number; icon: LucideIcon; }
+const CAT_META: Record<string, CatMeta> = {
+  hvac:           { label: 'Heizung/Lüftung/Klima', energy: 'fernwaerme', life: 20, icon: Fan },
+  lighting:       { label: 'Beleuchtung',            energy: 'strom',      life: 12, icon: Lightbulb },
+  production:     { label: 'Produktion',             energy: 'strom',      life: 20, icon: Factory },
+  compressed_air: { label: 'Druckluft',              energy: 'strom',      life: 15, icon: Wind },
+  cooling:        { label: 'Kälte',                  energy: 'kaelte',     life: 18, icon: Snowflake },
+  pumps:          { label: 'Pumpen',                 energy: 'strom',      life: 15, icon: Gauge },
+  drives:         { label: 'Antriebe',               energy: 'strom',      life: 25, icon: Cog },
+  it:             { label: 'IT / Rechenzentrum',     energy: 'strom',      life: 6,  icon: Server },
+  other:          { label: 'Sonstige',               energy: 'strom',      life: 15, icon: Box },
 };
+const catMeta = (k: string): CatMeta => CAT_META[k] ?? CAT_META.other;
+const CATEGORY_ORDER = Object.keys(CAT_META);
 
-const PRIORITIES: Record<string, string> = {
-  high: 'Hoch',
-  normal: 'Normal',
-  low: 'Niedrig',
-};
+const PRIORITIES: Record<string, string> = { high: 'Hoch', normal: 'Normal', low: 'Niedrig' };
 
-const PRIORITY_COLORS: Record<string, string> = {
-  high: 'bg-red-50 text-red-700',
-  normal: 'bg-gray-100 text-gray-700',
-  low: 'bg-green-50 text-green-700',
+// ── Helper ──
+
+const estAnnualKwh = (c: Consumer): number => {
+  if (c.estimated_annual_kwh != null) return c.estimated_annual_kwh;
+  return Math.round((c.rated_power_kw ?? 0) * (c.operating_hours_per_year ?? 0));
 };
+const isActive = (c: Consumer): boolean => !c.decommissioned_at;
+const isSEU = (c: Consumer): boolean => isActive(c) && (c.priority === 'high' || estAnnualKwh(c) >= 300_000);
+
+function lifePct(c: Consumer): number {
+  if (!c.commissioned_at) return 0;
+  const start = new Date(c.commissioned_at).getTime();
+  const end = c.decommissioned_at ? new Date(c.decommissioned_at).getTime() : Date.now();
+  const years = (end - start) / (365.25 * 24 * 3600 * 1000);
+  const life = c.expected_lifetime_years ?? catMeta(c.category).life;
+  return years / life;
+}
+type Life = 'ok' | 'soon' | 'eol' | 'off';
+function lifeStatus(c: Consumer): Life {
+  if (!isActive(c)) return 'off';
+  const p = lifePct(c);
+  if (p >= 1) return 'eol';
+  if (p >= 0.8) return 'soon';
+  return 'ok';
+}
+
+const fmt = (n: number) => Math.round(n).toLocaleString('de-DE');
+function fmtEnergy(kwh: number): { val: string; unit: string } {
+  if (kwh >= 1_000_000) return { val: (kwh / 1_000_000).toLocaleString('de-DE', { maximumFractionDigits: 2 }), unit: 'Mio. kWh' };
+  if (kwh >= 10_000) return { val: (kwh / 1_000).toLocaleString('de-DE', { maximumFractionDigits: 0 }), unit: 'MWh' };
+  return { val: kwh.toLocaleString('de-DE'), unit: 'kWh' };
+}
+const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString('de-DE') : '—');
 
 // ── Komponente ──
 
+type ViewMode = 'table' | 'cards';
+
+// Lädt alle Seiten eines Status (Backend cappt page_size auf 100).
+async function fetchAllConsumers(status: string): Promise<Consumer[]> {
+  const all: Consumer[] = [];
+  let page = 1;
+  let total = 0;
+  do {
+    const res = await apiClient.get<PaginatedResponse<Consumer>>(
+      `/api/v1/consumers?status=${status}&page=${page}&page_size=100`,
+    );
+    all.push(...res.data.items);
+    total = res.data.total;
+    page++;
+  } while (all.length < total && page < 50);
+  return all;
+}
+
 export default function ConsumersPage() {
-  const [consumers, setConsumers] = useState<Consumer[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [filterCategory, setFilterCategory] = useState('');
-  const [filterStatus, setFilterStatus] = useState('active');
+  // Anzeige-Liste (server-seitig nach Status gefiltert) + aktive Liste für KPIs.
+  const [list, setList] = useState<Consumer[]>([]);
+  const [activeList, setActiveList] = useState<Consumer[]>([]);
+  const [allTotal, setAllTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  // Modal-State
-  const [showModal, setShowModal] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingConsumer, setEditingConsumer] = useState<Consumer | null>(null);
-  const [form, setForm] = useState<ConsumerForm>(emptyForm);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [view, setView] = useState<ViewMode>(() => {
+    try { return localStorage.getItem('em_consumers_view') === 'cards' ? 'cards' : 'table'; } catch { return 'table'; }
+  });
+  useEffect(() => { try { localStorage.setItem('em_consumers_view', view); } catch { /* ignore */ } }, [view]);
 
-  // Ersetzen-Modal
-  const [showReplaceModal, setShowReplaceModal] = useState(false);
-  const [replacingConsumer, setReplacingConsumer] = useState<Consumer | null>(null);
-  const [replaceForm, setReplaceForm] = useState<ConsumerForm>(emptyForm);
+  const [query, setQuery] = useState('');
+  const [catFilter, setCatFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'active' | 'all' | 'decommissioned'>('active');
 
-  const pageSize = 25;
+  // Modals
+  const [modal, setModal] = useState<{ editing: Consumer | null } | null>(null);
+  const [replaceTarget, setReplaceTarget] = useState<Consumer | null>(null);
+  const [decommissionTarget, setDecommissionTarget] = useState<Consumer | null>(null);
 
+  // Anzeige-Liste server-seitig nach Status laden; aktive Liste + Gesamtzahl
+  // separat für den KPI-Strip (das DTO erlaubt keine zuverlässige Aktiv-
+  // Erkennung über status=all).
   const loadConsumers = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({
-        page: page.toString(),
-        page_size: pageSize.toString(),
-      });
-      if (search) params.append('search', search);
-      if (filterCategory) params.append('category', filterCategory);
-      if (filterStatus) params.append('status', filterStatus);
+      const active = await fetchAllConsumers('active');
+      setActiveList(active);
 
-      const response = await apiClient.get<PaginatedResponse<Consumer>>(
-        `/api/v1/consumers?${params}`
-      );
-      setConsumers(response.data.items);
-      setTotal(response.data.total);
+      const allHead = await apiClient.get<PaginatedResponse<Consumer>>('/api/v1/consumers?status=all&page=1&page_size=1');
+      setAllTotal(allHead.data.total);
+
+      const display = statusFilter === 'active'
+        ? active
+        : await fetchAllConsumers(statusFilter);
+      setList(display);
     } catch {
-      // Fehler wird vom Interceptor behandelt
+      /* interceptor */
     } finally {
       setLoading(false);
     }
-  }, [page, search, filterCategory, filterStatus]);
+  }, [statusFilter]);
 
-  useEffect(() => {
-    loadConsumers();
-  }, [loadConsumers]);
+  useEffect(() => { loadConsumers(); }, [loadConsumers]);
 
-  const handleCreate = () => {
-    setEditingId(null);
-    setEditingConsumer(null);
-    setForm(emptyForm);
-    setFormError(null);
-    setShowModal(true);
-  };
-
-  const handleEdit = (consumer: Consumer) => {
-    setEditingId(consumer.id);
-    setEditingConsumer(consumer);
-    setForm({
-      name: consumer.name,
-      category: consumer.category,
-      rated_power_kw: consumer.rated_power_kw?.toString() || '',
-      operating_hours_per_year: consumer.operating_hours_per_year?.toString() || '',
-      priority: consumer.priority || 'normal',
-      description: consumer.description || '',
-      meter_ids: consumer.meter_ids || [],
-      manufacturer: consumer.manufacturer || '',
-      model: consumer.model || '',
-      serial_number: consumer.serial_number || '',
-      commissioned_at: consumer.commissioned_at || '',
-      decommissioned_at: consumer.decommissioned_at || '',
-      replaced_by_id: consumer.replaced_by_id || '',
-    });
-    setFormError(null);
-    setShowModal(true);
-  };
-
-  const handleReplace = (consumer: Consumer) => {
-    setReplacingConsumer(consumer);
-    setReplaceForm({
-      ...emptyForm,
-      name: consumer.name + ' (Nachfolger)',
-      category: consumer.category,
-      rated_power_kw: consumer.rated_power_kw?.toString() || '',
-      operating_hours_per_year: consumer.operating_hours_per_year?.toString() || '',
-      priority: consumer.priority || 'normal',
-      description: '',
-      meter_ids: consumer.meter_ids || [],
-      manufacturer: '',
-      model: '',
-      serial_number: '',
-      commissioned_at: new Date().toISOString().split('T')[0],
-      decommissioned_at: '',
-      replaced_by_id: '',
-    });
-    setFormError(null);
-    setShowReplaceModal(true);
-  };
-
-  const handleDelete = async (consumer: Consumer) => {
-    if (!confirm(`Verbraucher "${consumer.name}" wirklich deaktivieren?`)) return;
-    try {
-      await apiClient.delete(`/api/v1/consumers/${consumer.id}`);
-      loadConsumers();
-    } catch {
-      // Fehler wird vom Interceptor behandelt
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent, unitId: string, meterIds: string[]) => {
-    e.preventDefault();
-    setFormError(null);
-    setSaving(true);
-
-    const payload: Record<string, unknown> = {
-      name: form.name,
-      category: form.category,
-      priority: form.priority,
-      usage_unit_id: unitId || null,
-      meter_ids: meterIds,
-    };
-    if (form.rated_power_kw) payload.rated_power_kw = parseFloat(form.rated_power_kw);
-    if (form.operating_hours_per_year) payload.operating_hours_per_year = parseInt(form.operating_hours_per_year, 10);
-    if (form.description) payload.description = form.description;
-    if (form.manufacturer) payload.manufacturer = form.manufacturer;
-    if (form.model) payload.model = form.model;
-    if (form.serial_number) payload.serial_number = form.serial_number;
-    if (form.commissioned_at) payload.commissioned_at = form.commissioned_at;
-    if (form.decommissioned_at) payload.decommissioned_at = form.decommissioned_at;
-    if (form.replaced_by_id) payload.replaced_by_id = form.replaced_by_id;
-
-    try {
-      if (editingId) {
-        await apiClient.put(`/api/v1/consumers/${editingId}`, payload);
-      } else {
-        await apiClient.post('/api/v1/consumers', payload);
+  // Client-seitig nur Suche + Kategorie filtern (Status kommt vom Server).
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return list.filter((c) => {
+      if (catFilter && c.category !== catFilter) return false;
+      if (q) {
+        const hay = `${c.name} ${c.manufacturer ?? ''} ${c.model ?? ''} ${catMeta(c.category).label}`.toLowerCase();
+        if (!hay.includes(q)) return false;
       }
-      setShowModal(false);
-      loadConsumers();
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setFormError(error.response?.data?.detail || 'Fehler beim Speichern');
-    } finally {
-      setSaving(false);
-    }
-  };
+      return true;
+    }).sort((a, b) => {
+      const aa = isActive(a), ba = isActive(b);
+      if (aa !== ba) return aa ? -1 : 1;
+      return estAnnualKwh(b) - estAnnualKwh(a);
+    });
+  }, [list, query, catFilter]);
 
-  const handleReplaceSubmit = async (e: React.FormEvent, unitId: string, meterIds: string[]) => {
-    e.preventDefault();
-    if (!replacingConsumer) return;
-    setFormError(null);
-    setSaving(true);
+  const maxEst = useMemo(() => Math.max(1, ...filtered.map(estAnnualKwh)), [filtered]);
 
-    const payload: Record<string, unknown> = {
-      name: replaceForm.name,
-      category: replaceForm.category,
-      priority: replaceForm.priority,
-      usage_unit_id: unitId || replacingConsumer.usage_unit_id || null,
-      meter_ids: meterIds,
+  // KPI-Aggregate: Gesamtzahl vom Server, aktive Kennzahlen aus activeList.
+  const kpi = useMemo(() => {
+    const totalEst = activeList.reduce((a, c) => a + estAnnualKwh(c), 0);
+    return {
+      total: allTotal,
+      active: activeList.length,
+      inactive: Math.max(0, allTotal - activeList.length),
+      totalEst: fmtEnergy(totalEst),
+      seu: activeList.filter(isSEU).length,
+      eol: activeList.filter((c) => lifeStatus(c) !== 'ok').length,
     };
-    if (replaceForm.rated_power_kw) payload.rated_power_kw = parseFloat(replaceForm.rated_power_kw);
-    if (replaceForm.operating_hours_per_year) payload.operating_hours_per_year = parseInt(replaceForm.operating_hours_per_year, 10);
-    if (replaceForm.description) payload.description = replaceForm.description;
-    if (replaceForm.manufacturer) payload.manufacturer = replaceForm.manufacturer;
-    if (replaceForm.model) payload.model = replaceForm.model;
-    if (replaceForm.serial_number) payload.serial_number = replaceForm.serial_number;
-    if (replaceForm.commissioned_at) payload.commissioned_at = replaceForm.commissioned_at;
+  }, [activeList, allTotal]);
 
+  const handleDecommission = async (c: Consumer, date: string) => {
     try {
-      await apiClient.post(`/api/v1/consumers/${replacingConsumer.id}/replace`, payload);
-      setShowReplaceModal(false);
+      await apiClient.put(`/api/v1/consumers/${c.id}`, { decommissioned_at: date });
+      setDecommissionTarget(null);
       loadConsumers();
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } } };
-      setFormError(error.response?.data?.detail || 'Fehler beim Ersetzen');
-    } finally {
-      setSaving(false);
-    }
+    } catch { /* interceptor */ }
   };
 
-  const totalPages = Math.ceil(total / pageSize);
+  const StatusBadge = ({ c }: { c: Consumer }) => {
+    if (!isActive(c)) return <span className="v-status v-status--off"><span className="dot" />Außer Betrieb</span>;
+    const ls = lifeStatus(c);
+    if (ls === 'eol') return <span className="v-status v-status--eol"><span className="dot" />Lebensende</span>;
+    if (ls === 'soon') return <span className="v-status v-status--soon"><span className="dot" />Ersatz prüfen</span>;
+    return <span className="v-status v-status--on"><span className="dot" />In Betrieb</span>;
+  };
 
-  const formatDate = (d: string | null) => {
-    if (!d) return null;
-    return new Date(d).toLocaleDateString('de-DE');
+  const EnergyChip = ({ category, compact }: { category: string; compact?: boolean }) => {
+    const tone = EM_ENERGY[catMeta(category).energy];
+    return (
+      <span className="v-echip" style={{ background: tone.bg, color: tone.text }}>
+        <span className="dot" style={{ background: tone.color }} />
+        {!compact && tone.label}
+      </span>
+    );
   };
 
   return (
-    <div>
+    <div className="consumers">
       <PageHead
         eyebrow="Stammdaten"
         title="Verbraucher"
         actions={
-          <button onClick={handleCreate} className="btn-primary">
-            + Neuer Verbraucher
+          <button onClick={() => setModal({ editing: null })} className="btn-primary">
+            <Plus className="h-4 w-4" /> Neuer Verbraucher
           </button>
         }
       />
       <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
-        {total} Verbraucher insgesamt – Großverbraucher und energetisch relevante Anlagen
+        Großverbraucher und energetisch relevante Anlagen nach ISO&nbsp;50001
       </p>
 
-      {/* Filter */}
-      <div className="card mt-4 flex gap-4">
-        <input
-          type="text"
-          className="input flex-1"
-          placeholder="Suche nach Name, Beschreibung, Hersteller, Modell..."
-          value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-        />
-        <select
-          className="input w-48"
-          value={filterCategory}
-          onChange={(e) => { setFilterCategory(e.target.value); setPage(1); }}
-        >
-          <option value="">Alle Kategorien</option>
-          {Object.entries(CATEGORIES).map(([key, label]) => (
-            <option key={key} value={key}>{label}</option>
-          ))}
-        </select>
-        <select
-          className="input w-48"
-          value={filterStatus}
-          onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}
-        >
-          <option value="active">Nur aktive</option>
-          <option value="decommissioned">Außer Betrieb</option>
-          <option value="all">Alle</option>
-        </select>
-      </div>
+      <div className="vb-content" style={{ marginTop: 14 }}>
+        {/* KPI-Strip */}
+        <div className="stats-strip">
+          <div className="stats-cell">
+            <div className="stats-label">Verbraucher gesamt</div>
+            <div className="stats-value">{kpi.total}</div>
+            <div className="stats-sub">{kpi.active} aktiv · {kpi.inactive} außer Betrieb</div>
+          </div>
+          <div className="stats-cell accent">
+            <div className="stats-label">Geschätzter Jahresverbrauch</div>
+            <div className="stats-value">{kpi.totalEst.val}<span className="u">{kpi.totalEst.unit}</span></div>
+            <div className="stats-sub">Nennleistung × Betriebsstunden, aktive Anlagen</div>
+          </div>
+          <div className="stats-cell">
+            <div className="stats-label">Wesentliche Einsätze (SEU)</div>
+            <div className="stats-value">{kpi.seu}</div>
+            <div className="stats-sub">nach ISO 50001 priorisiert</div>
+          </div>
+          <div className="stats-cell">
+            <div className="stats-label">Lebenszyklus-Hinweise</div>
+            <div className="stats-value" style={{ color: kpi.eol > 0 ? 'var(--warn)' : 'var(--ink)' }}>{kpi.eol}</div>
+            <div className="stats-sub">Ersatz prüfen / Lebensende erreicht</div>
+          </div>
+        </div>
 
-      {/* Tabelle */}
-      <div className="card mt-4 overflow-hidden p-0">
+        {/* Toolbar */}
+        <div className="vb-toolbar">
+          <div className="search-input">
+            <Search size={14} style={{ color: 'var(--ink-4)' }} />
+            <input value={query} onChange={(e) => setQuery(e.target.value)}
+              placeholder="Suche nach Name, Beschreibung, Hersteller, Modell…" />
+          </div>
+          <select className="vb-select" value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
+            <option value="">Alle Kategorien</option>
+            {CATEGORY_ORDER.map((k) => <option key={k} value={k}>{CAT_META[k].label}</option>)}
+          </select>
+          <select className="vb-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}>
+            <option value="active">Nur aktive</option>
+            <option value="all">Alle Status</option>
+            <option value="decommissioned">Außer Betrieb</option>
+          </select>
+          <div className="view-toggle">
+            <button className={view === 'table' ? 'active' : ''} onClick={() => setView('table')}><Table2 size={13} /> Tabelle</button>
+            <button className={view === 'cards' ? 'active' : ''} onClick={() => setView('cards')}><LayoutGrid size={13} /> Karten</button>
+          </div>
+        </div>
+
         {loading ? (
-          <LoadingSpinner />
-        ) : consumers.length === 0 ? (
-          <div className="p-8 text-center text-gray-400">
-            Keine Verbraucher gefunden. Legen Sie den ersten Verbraucher an.
+          <div className="vb-empty"><div className="ico"><RefreshCw size={22} className="animate-spin" /></div><strong>Lade Verbraucher…</strong></div>
+        ) : filtered.length === 0 ? (
+          <div className="vb-empty">
+            <div className="ico"><Box size={22} /></div>
+            <strong>Keine Verbraucher gefunden</strong>
+            <p>{allTotal === 0 ? 'Legen Sie den ersten Verbraucher an.' : 'Passen Sie Suche oder Filter an, um Einträge zu sehen.'}</p>
+            <button className="btn-primary" style={{ margin: '0 auto' }} onClick={() => setModal({ editing: null })}>
+              <Plus size={14} /> Neuer Verbraucher
+            </button>
+          </div>
+        ) : view === 'table' ? (
+          <div className="vb-table">
+            <div className="vb-tr head">
+              <div className="vb-stripe" />
+              <div>Verbraucher</div>
+              <div>Energieart</div>
+              <div>Leistung</div>
+              <div>Jahresverbrauch (geschätzt)</div>
+              <div>Position</div>
+              <div>Status</div>
+              <div style={{ textAlign: 'right', paddingRight: 18 }}>Aktionen</div>
+            </div>
+            {filtered.map((c) => {
+              const cm = catMeta(c.category);
+              const tone = EM_ENERGY[cm.energy];
+              const est = fmtEnergy(estAnnualKwh(c));
+              const pct = Math.max(3, (estAnnualKwh(c) / maxEst) * 100);
+              const active = isActive(c);
+              const Icon = cm.icon;
+              return (
+                <div key={c.id} className={`vb-tr row${active ? '' : ' inactive'}`} onClick={() => setModal({ editing: c })}>
+                  <div className="vb-stripe" style={{ background: tone.color }} />
+                  <div className="vb-name-cell">
+                    <div className="vb-name">
+                      <span className="txt">{c.name}</span>
+                      {isSEU(c) && <span className="v-seu">SEU</span>}
+                    </div>
+                    <div className="vb-name-sub">
+                      <span className="cat-ico"><Icon size={12} /></span>
+                      {cm.label}
+                      {c.meter_ids?.length > 0 && (
+                        <span className="vb-meter-tag"><Gauge size={11} /> {c.meter_ids.length} Zähler</span>
+                      )}
+                    </div>
+                  </div>
+                  <div><EnergyChip category={c.category} /></div>
+                  <div className="vb-power">
+                    <div><span className="kw">{c.rated_power_kw != null ? fmt(c.rated_power_kw) : '—'}</span> kW</div>
+                    <div className="h">{c.operating_hours_per_year ? fmt(c.operating_hours_per_year) + ' h/a' : '—'}</div>
+                  </div>
+                  <div className="vb-cons">
+                    <div className="vb-cons-val">{est.val}<span className="u">{est.unit}</span></div>
+                    <div className="vb-cons-bar"><div className="vb-cons-fill" style={{ width: `${pct}%`, background: tone.color }} /></div>
+                  </div>
+                  <div className="vb-pos">
+                    <div className="b">{c.building_name || c.site_name || '— keine Zuordnung —'}</div>
+                    {c.usage_unit_name && <div className="u">{c.usage_unit_name}</div>}
+                  </div>
+                  <div className="vb-status-cell"><StatusBadge c={c} /></div>
+                  <div className="vb-actions" onClick={(e) => e.stopPropagation()}>
+                    <button className="vb-iconbtn" title="Bearbeiten" onClick={() => setModal({ editing: c })}><Pencil size={14} /></button>
+                    {active && (
+                      <>
+                        <button className="vb-iconbtn" title="Durch Nachfolger ersetzen" onClick={() => setReplaceTarget(c)}><RefreshCw size={14} /></button>
+                        <button className="vb-iconbtn warn" title="Außer Betrieb nehmen" onClick={() => setDecommissionTarget(c)}><Power size={14} /></button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : (
-          <table className="w-full text-left text-sm">
-            <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-              <tr>
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Kategorie</th>
-                <th className="px-4 py-3 text-right">Nennleistung</th>
-                <th className="px-4 py-3 text-right">Betriebsstunden/a</th>
-                <th className="px-4 py-3">Priorität</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Aktionen</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {consumers.map((consumer) => {
-                const isDecommissioned = !!consumer.decommissioned_at;
-                return (
-                  <tr
-                    key={consumer.id}
-                    className={isDecommissioned ? 'bg-gray-50 text-gray-400' : 'hover:bg-gray-50'}
-                  >
-                    <td className="px-4 py-3">
-                      <div className={`font-medium ${isDecommissioned ? 'line-through text-gray-400' : ''}`}>
-                        {consumer.name}
+          <div className="vb-grid">
+            {filtered.map((c) => {
+              const cm = catMeta(c.category);
+              const tone = EM_ENERGY[cm.energy];
+              const est = fmtEnergy(estAnnualKwh(c));
+              const active = isActive(c);
+              const Icon = cm.icon;
+              const ls = lifeStatus(c);
+              const pct = Math.min(100, Math.max(0, lifePct(c) * 100));
+              return (
+                <div key={c.id} className={`vb-card${active ? '' : ' inactive'}`}
+                  style={{ ['--card-accent' as string]: tone.color }} onClick={() => setModal({ editing: c })}>
+                  <div className="vb-card-head">
+                    <div style={{ minWidth: 0 }}>
+                      <div className="vb-card-title">{c.name}</div>
+                      <div className="vb-card-cat"><span className="cat-ico"><Icon size={12} /></span>{cm.label}</div>
+                    </div>
+                    <EnergyChip category={c.category} compact />
+                  </div>
+                  <div className="vb-card-cons">
+                    <span className="n">{est.val}</span><span className="u">{est.unit}</span>
+                    <span className="lbl">geschätzter Jahresverbrauch</span>
+                  </div>
+                  <div className="vb-card-meta">
+                    <div><div className="l">Nennleistung</div><div className="v">{c.rated_power_kw != null ? fmt(c.rated_power_kw) : '—'} kW</div></div>
+                    <div><div className="l">Betriebsstunden</div><div className="v">{c.operating_hours_per_year ? fmt(c.operating_hours_per_year) + ' h/a' : '—'}</div></div>
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <div className="l">Position</div>
+                      <div className="v" style={{ fontFamily: 'var(--font-sans)' }}>
+                        {c.building_name || c.site_name || '—'}{c.usage_unit_name ? ' · ' + c.usage_unit_name : ''}
                       </div>
-                      {consumer.manufacturer && (
-                        <div className="text-xs text-gray-400">
-                          {consumer.manufacturer}
-                          {consumer.model ? ` – ${consumer.model}` : ''}
-                        </div>
+                    </div>
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <div className="l">Zähler</div>
+                      <div className="v" style={{ fontFamily: 'var(--font-sans)' }}>
+                        {c.meter_ids?.length > 0
+                          ? <span className="vb-meter-tag"><Gauge size={12} /> {c.meter_ids.length} zugeordnet</span>
+                          : <span style={{ color: 'var(--ink-4)' }}>keine Zuordnung</span>}
+                      </div>
+                    </div>
+                  </div>
+                  {c.commissioned_at && (
+                    <div className="v-life">
+                      <div className="v-life-track"><div className={`v-life-fill v-life-fill--${active ? ls : 'off'}`} style={{ width: `${active ? pct : 100}%` }} /></div>
+                      <div className="v-life-meta">
+                        <span>Inbetriebnahme {fmtDate(c.commissioned_at)}</span>
+                        <span>{active ? `${Math.round(pct)}% der Nutzungsdauer` : 'außer Betrieb'}</span>
+                      </div>
+                    </div>
+                  )}
+                  <div className="vb-card-foot">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <StatusBadge c={c} />
+                      {isSEU(c) && <span className="v-seu">SEU</span>}
+                    </div>
+                    <div className="vb-actions" onClick={(e) => e.stopPropagation()}>
+                      <button className="vb-iconbtn" title="Bearbeiten" onClick={() => setModal({ editing: c })}><Pencil size={14} /></button>
+                      {active && (
+                        <>
+                          <button className="vb-iconbtn" title="Durch Nachfolger ersetzen" onClick={() => setReplaceTarget(c)}><RefreshCw size={14} /></button>
+                          <button className="vb-iconbtn warn" title="Außer Betrieb nehmen" onClick={() => setDecommissionTarget(c)}><Power size={14} /></button>
+                        </>
                       )}
-                      {consumer.description && !consumer.manufacturer && (
-                        <div className="text-xs text-gray-400 truncate max-w-xs">
-                          {consumer.description}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
-                        {CATEGORIES[consumer.category] || consumer.category}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right text-gray-500">
-                      {consumer.rated_power_kw != null
-                        ? `${consumer.rated_power_kw} kW`
-                        : '–'}
-                    </td>
-                    <td className="px-4 py-3 text-right text-gray-500">
-                      {consumer.operating_hours_per_year != null
-                        ? consumer.operating_hours_per_year.toLocaleString('de-DE')
-                        : '–'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${PRIORITY_COLORS[consumer.priority] || PRIORITY_COLORS.normal}`}>
-                        {PRIORITIES[consumer.priority] || consumer.priority}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {isDecommissioned ? (
-                        <div>
-                          <span className="inline-flex items-center rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700">
-                            Außer Betrieb
-                          </span>
-                          <div className="text-xs text-gray-400 mt-0.5">
-                            {formatDate(consumer.decommissioned_at)}
-                          </div>
-                          {consumer.replaced_by_name && (
-                            <div className="text-xs text-gray-400 mt-0.5">
-                              Ersetzt durch: {consumer.replaced_by_name}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
-                          Aktiv
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <button
-                        onClick={() => handleEdit(consumer)}
-                        className="mr-2 text-primary-600 hover:text-primary-800"
-                      >
-                        Bearbeiten
-                      </button>
-                      {!isDecommissioned && (
-                        <button
-                          onClick={() => handleReplace(consumer)}
-                          className="mr-2 text-amber-600 hover:text-amber-800"
-                          title="Durch neuen Verbraucher ersetzen"
-                        >
-                          Ersetzen
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleDelete(consumer)}
-                        className="text-red-500 hover:text-red-700"
-                      >
-                        Löschen
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="mt-4 flex items-center justify-between">
-          <p className="text-sm text-gray-500">
-            Seite {page} von {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <button
-              className="btn-secondary"
-              disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
-            >
-              Zurück
-            </button>
-            <button
-              className="btn-secondary"
-              disabled={page >= totalPages}
-              onClick={() => setPage(page + 1)}
-            >
-              Weiter
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Verbraucher erstellen/bearbeiten */}
-      {showModal && (
+      {modal && (
         <ConsumerModal
-          editingId={editingId}
-          editingConsumer={editingConsumer}
-          form={form}
-          setForm={setForm}
-          formError={formError}
-          saving={saving}
-          onSubmit={handleSubmit}
-          onClose={() => setShowModal(false)}
+          editing={modal.editing}
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); loadConsumers(); }}
         />
       )}
-
-      {/* Modal: Verbraucher ersetzen */}
-      {showReplaceModal && replacingConsumer && (
+      {replaceTarget && (
         <ConsumerModal
-          editingId={null}
-          editingConsumer={null}
-          form={replaceForm}
-          setForm={setReplaceForm}
-          formError={formError}
-          saving={saving}
-          onSubmit={handleReplaceSubmit}
-          onClose={() => setShowReplaceModal(false)}
-          replaceMode
-          replacingName={replacingConsumer.name}
-          replacingUnitId={replacingConsumer.usage_unit_id}
+          editing={null}
+          replaceTarget={replaceTarget}
+          onClose={() => setReplaceTarget(null)}
+          onSaved={() => { setReplaceTarget(null); loadConsumers(); }}
+        />
+      )}
+      {decommissionTarget && (
+        <DecommissionModal
+          target={decommissionTarget}
+          onClose={() => setDecommissionTarget(null)}
+          onConfirm={(date) => handleDecommission(decommissionTarget, date)}
         />
       )}
     </div>
   );
 }
 
-/* ── Verbraucher-Modal mit Standort-Kaskade + Zähler-Zuordnung ── */
+// ── Confirm-Dialog: Außer Betrieb nehmen (Lebensende dokumentieren) ──
 
-function ConsumerModal({
-  editingId,
-  editingConsumer,
-  form,
-  setForm,
-  formError,
-  saving,
-  onSubmit,
-  onClose,
-  replaceMode = false,
-  replacingName,
-  replacingUnitId,
-}: {
-  editingId: string | null;
-  editingConsumer: Consumer | null;
-  form: ConsumerForm;
-  setForm: (f: ConsumerForm) => void;
-  formError: string | null;
-  saving: boolean;
-  onSubmit: (e: React.FormEvent, unitId: string, meterIds: string[]) => void;
+function DecommissionModal({ target, onClose, onConfirm }: {
+  target: Consumer;
   onClose: () => void;
-  replaceMode?: boolean;
-  replacingName?: string;
-  replacingUnitId?: string | null;
+  onConfirm: (date: string) => void;
 }) {
-  const hierarchy = useSiteHierarchy(editingConsumer?.usage_unit_id || replacingUnitId || undefined);
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const tone = EM_ENERGY[catMeta(target.category).energy];
+  return (
+    <div className="v-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="v-modal sm">
+        <div className="v-m-head">
+          <div>
+            <div className="v-m-title">Außer Betrieb nehmen</div>
+            <div className="v-m-sub">Lebensende dokumentieren</div>
+          </div>
+          <button className="v-m-close" onClick={onClose}><X size={16} /></button>
+        </div>
+        <div className="v-confirm-body">
+          <div className="target">
+            <span className="v-stripe-sm" style={{ background: tone.color, alignSelf: 'stretch', minHeight: 30 }} />
+            <div>
+              <div className="nm">{target.name}</div>
+              <div className="sub">{catMeta(target.category).label}</div>
+            </div>
+          </div>
+          <p style={{ margin: '0 0 6px' }}>Die Anlage wird als <strong>außer Betrieb</strong> markiert und aus den aktiven Verbrauchern entfernt. Sie bleibt für Historie und Nachweis erhalten.</p>
+          <div className="v-field" style={{ marginTop: 12, marginBottom: 6 }}>
+            <label>Außerbetriebnahme</label>
+            <input type="date" className="v-inp mono" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div className="iso-note"><Shield size={13} style={{ color: 'var(--ink-4)', flexShrink: 0 }} /> Nach ISO 50001 wird die Stilllegung im Lebenszyklus protokolliert.</div>
+        </div>
+        <div className="v-m-foot">
+          <div className="btns">
+            <button className="v-btn-soft" onClick={onClose}>Abbrechen</button>
+            <button className="btn-primary" onClick={() => onConfirm(date)}><Power size={13} /> Außer Betrieb nehmen</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Create/Edit/Replace-Modal ──
+
+function ConsumerModal({ editing, replaceTarget, onClose, onSaved }: {
+  editing: Consumer | null;
+  replaceTarget?: Consumer;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const replaceMode = !!replaceTarget;
+  const seed = editing ?? replaceTarget ?? null;
+
+  const [f, setF] = useState<ConsumerForm>(() => {
+    if (!seed) return emptyForm;
+    return {
+      name: replaceMode ? `${seed.name} (Nachfolger)` : seed.name,
+      category: seed.category,
+      rated_power_kw: seed.rated_power_kw?.toString() ?? '',
+      operating_hours_per_year: seed.operating_hours_per_year?.toString() ?? '',
+      priority: seed.priority || 'normal',
+      description: replaceMode ? '' : (seed.description ?? ''),
+      meter_ids: replaceMode ? [...(seed.meter_ids ?? [])] : (seed.meter_ids ?? []),
+      manufacturer: replaceMode ? '' : (seed.manufacturer ?? ''),
+      model: replaceMode ? '' : (seed.model ?? ''),
+      serial_number: replaceMode ? '' : (seed.serial_number ?? ''),
+      commissioned_at: replaceMode ? new Date().toISOString().slice(0, 10) : (seed.commissioned_at ?? ''),
+      decommissioned_at: replaceMode ? '' : (seed.decommissioned_at ?? ''),
+      replaced_by_id: replaceMode ? '' : (seed.replaced_by_id ?? ''),
+    };
+  });
+  const [touched, setTouched] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [meters, setMeters] = useState<MeterOption[]>([]);
-  const [selectedMeterIds, setSelectedMeterIds] = useState<string[]>(form.meter_ids || []);
   const [allConsumers, setAllConsumers] = useState<{ id: string; name: string }[]>([]);
 
-  // Zähler-Liste laden
+  const hierarchy = useSiteHierarchy(seed?.usage_unit_id || undefined);
+  const set = (k: keyof ConsumerForm, v: string) => setF((p) => ({ ...p, [k]: v }));
+
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await apiClient.get('/api/v1/meters?page_size=100');
-        setMeters(
-          (res.data.items || []).map((m: Record<string, unknown>) => ({
-            id: m.id as string,
-            name: m.name as string,
-            energy_type: m.energy_type as string,
-          }))
-        );
-      } catch {
-        // ignore
-      }
-    })();
+    apiClient.get('/api/v1/meters?page_size=200')
+      .then((res) => setMeters((res.data.items || []).map((m: Record<string, unknown>) => ({
+        id: m.id as string, name: m.name as string, energy_type: m.energy_type as string,
+      }))))
+      .catch(() => { /* ignore */ });
   }, []);
 
-  // Aktive Verbraucher laden (für "Ersetzt durch"-Dropdown)
   useEffect(() => {
-    if (!editingId) return;
-    (async () => {
-      try {
-        const res = await apiClient.get<PaginatedResponse<Consumer>>(
-          '/api/v1/consumers?page_size=200&status=active'
-        );
-        setAllConsumers(
-          (res.data.items || [])
-            .filter((c: Consumer) => c.id !== editingId)
-            .map((c: Consumer) => ({ id: c.id, name: c.name }))
-        );
-      } catch {
-        // ignore
-      }
-    })();
-  }, [editingId]);
+    if (!editing) return;
+    apiClient.get<PaginatedResponse<Consumer>>('/api/v1/consumers?page_size=200&status=active')
+      .then((res) => setAllConsumers((res.data.items || []).filter((c) => c.id !== editing.id).map((c) => ({ id: c.id, name: c.name }))))
+      .catch(() => { /* ignore */ });
+  }, [editing]);
 
-  const toggleMeter = (id: string) => {
-    setSelectedMeterIds((prev) =>
-      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]
-    );
+  const addMeter = (id: string) => { if (id) setF((p) => p.meter_ids.includes(id) ? p : { ...p, meter_ids: [...p.meter_ids, id] }); };
+  const removeMeter = (id: string) => setF((p) => ({ ...p, meter_ids: p.meter_ids.filter((x) => x !== id) }));
+
+  const assignedMeters = f.meter_ids.map((id) => meters.find((m) => m.id === id)).filter(Boolean) as MeterOption[];
+  const availableMeters = meters.filter((m) => !f.meter_ids.includes(m.id));
+
+  const estKwh = (parseFloat(f.rated_power_kw.replace(',', '.')) || 0) * (parseFloat(f.operating_hours_per_year.replace(',', '.')) || 0);
+  const estView = fmtEnergy(Math.round(estKwh));
+  const wouldBeSEU = f.priority === 'high' || estKwh >= 300_000;
+  const nameOk = f.name.trim().length > 0;
+  const title = replaceMode ? `Verbraucher ersetzen: ${replaceTarget!.name}` : editing ? 'Verbraucher bearbeiten' : 'Neuer Verbraucher';
+
+  const submit = async () => {
+    setTouched(true);
+    if (!nameOk) return;
+    setSaving(true);
+    setError(null);
+    const payload: Record<string, unknown> = {
+      name: f.name.trim(),
+      category: f.category,
+      priority: f.priority,
+      usage_unit_id: hierarchy.selectedUnitId || null,
+      meter_ids: f.meter_ids,
+    };
+    if (f.rated_power_kw) payload.rated_power_kw = parseFloat(f.rated_power_kw.replace(',', '.'));
+    if (f.operating_hours_per_year) payload.operating_hours_per_year = parseInt(f.operating_hours_per_year.replace(',', '.'), 10);
+    if (f.description) payload.description = f.description.trim();
+    if (f.manufacturer) payload.manufacturer = f.manufacturer.trim();
+    if (f.model) payload.model = f.model.trim();
+    if (f.serial_number) payload.serial_number = f.serial_number.trim();
+    if (f.commissioned_at) payload.commissioned_at = f.commissioned_at;
+    if (f.decommissioned_at) payload.decommissioned_at = f.decommissioned_at;
+    if (f.replaced_by_id) payload.replaced_by_id = f.replaced_by_id;
+    try {
+      if (replaceMode) {
+        await apiClient.post(`/api/v1/consumers/${replaceTarget!.id}/replace`, payload);
+      } else if (editing) {
+        await apiClient.put(`/api/v1/consumers/${editing.id}`, payload);
+      } else {
+        await apiClient.post('/api/v1/consumers', payload);
+      }
+      onSaved();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } } };
+      setError(e.response?.data?.detail || 'Fehler beim Speichern');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const title = replaceMode
-    ? `Verbraucher ersetzen: ${replacingName}`
-    : editingId
-      ? 'Verbraucher bearbeiten'
-      : 'Neuer Verbraucher';
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
-        <h2 className="mb-4 text-lg font-bold">{title}</h2>
-
-        {replaceMode && (
-          <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
-            Der bisherige Verbraucher <strong>{replacingName}</strong> wird außer Betrieb genommen
-            und durch den neuen Verbraucher ersetzt.
+    <div className="v-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="v-modal">
+        <div className="v-m-head">
+          <div>
+            <div className="v-m-title">{title}</div>
+            <div className="v-m-sub">Großverbraucher und energetisch relevante Anlagen nach ISO&nbsp;50001</div>
           </div>
-        )}
+          <button className="v-m-close" onClick={onClose}><X size={16} /></button>
+        </div>
 
-        <form onSubmit={(e) => onSubmit(e, hierarchy.selectedUnitId, selectedMeterIds)} className="space-y-4">
-          {formError && (
-            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
-              {formError}
+        <div className="v-m-body">
+          {error && (
+            <div className="v-calc-note" style={{ background: 'color-mix(in srgb, var(--alert) 10%, var(--surface))', borderColor: 'color-mix(in srgb, var(--alert) 38%, transparent)', color: 'var(--alert)' }}>
+              {error}
+            </div>
+          )}
+          {replaceMode && (
+            <div className="v-calc-note">
+              Der bisherige Verbraucher <span className="n">{replaceTarget!.name}</span> wird außer Betrieb genommen und durch den neuen ersetzt.
             </div>
           )}
 
-          <div>
-            <label className="label">Name *</label>
-            <input
-              type="text"
-              className="input"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              required
-              autoFocus
-            />
+          <div className="v-field">
+            <label>Name <span className="req">*</span></label>
+            <input className={`v-inp${touched && !nameOk ? ' invalid' : ''}`} value={f.name}
+              onChange={(e) => set('name', e.target.value)} placeholder="z.B. RLT002 — Lüftung Großer Saal" autoFocus />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label">Kategorie *</label>
-              <select
-                className="input"
-                value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
-              >
-                {Object.entries(CATEGORIES).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
+          <div className="v-field-row c3" style={{ marginBottom: 14 }}>
+            <div className="v-field" style={{ marginBottom: 0 }}>
+              <label>Kategorie <span className="req">*</span></label>
+              <select className="v-sel" value={f.category} onChange={(e) => set('category', e.target.value)}>
+                {CATEGORY_ORDER.map((k) => <option key={k} value={k}>{CAT_META[k].label}</option>)}
               </select>
             </div>
-            <div>
-              <label className="label">Priorität</label>
-              <select
-                className="input"
-                value={form.priority}
-                onChange={(e) => setForm({ ...form, priority: e.target.value })}
-              >
-                {Object.entries(PRIORITIES).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
+            <div className="v-field" style={{ marginBottom: 0 }}>
+              <label>Priorität</label>
+              <select className="v-sel" value={f.priority} onChange={(e) => set('priority', e.target.value)}>
+                {Object.entries(PRIORITIES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
               </select>
             </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label">Nennleistung (kW)</label>
-              <input
-                type="number"
-                step="0.1"
-                className="input"
-                value={form.rated_power_kw}
-                onChange={(e) => setForm({ ...form, rated_power_kw: e.target.value })}
-                placeholder="z.B. 15.5"
-              />
-            </div>
-            <div>
-              <label className="label">Betriebsstunden / Jahr</label>
-              <input
-                type="number"
-                className="input"
-                value={form.operating_hours_per_year}
-                onChange={(e) => setForm({ ...form, operating_hours_per_year: e.target.value })}
-                placeholder="z.B. 2500"
-              />
+            <div className="v-field" style={{ marginBottom: 0 }}>
+              <label>Energieart</label>
+              <input className="v-inp" value={EM_ENERGY[catMeta(f.category).energy].label} disabled
+                title="Wird aus der Kategorie abgeleitet" />
             </div>
           </div>
 
-          <div>
-            <label className="label">Beschreibung</label>
-            <textarea
-              className="input"
-              rows={2}
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="Optionale Beschreibung der Anlage..."
-            />
-          </div>
-
-          {/* Gerätedaten */}
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-            <p className="text-sm font-medium text-gray-700 mb-3">Gerätedaten (optional)</p>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <label className="label">Hersteller</label>
-                <input
-                  type="text"
-                  className="input"
-                  value={form.manufacturer}
-                  onChange={(e) => setForm({ ...form, manufacturer: e.target.value })}
-                  placeholder="z.B. Viessmann"
-                />
+          <div className="v-field-row c2" style={{ marginBottom: 14 }}>
+            <div className="v-field" style={{ marginBottom: 0 }}>
+              <label>Nennleistung</label>
+              <div className="v-inp-suffix">
+                <input className="v-inp mono" value={f.rated_power_kw} onChange={(e) => set('rated_power_kw', e.target.value)} placeholder="z.B. 165" inputMode="decimal" />
+                <span className="suf">kW</span>
               </div>
-              <div>
-                <label className="label">Modell / Typ</label>
-                <input
-                  type="text"
-                  className="input"
-                  value={form.model}
-                  onChange={(e) => setForm({ ...form, model: e.target.value })}
-                  placeholder="z.B. Vitocrossal 300"
-                />
-              </div>
-              <div>
-                <label className="label">Seriennummer</label>
-                <input
-                  type="text"
-                  className="input"
-                  value={form.serial_number}
-                  onChange={(e) => setForm({ ...form, serial_number: e.target.value })}
-                  placeholder="z.B. SN-12345"
-                />
+            </div>
+            <div className="v-field" style={{ marginBottom: 0 }}>
+              <label>Betriebsstunden / Jahr</label>
+              <div className="v-inp-suffix">
+                <input className="v-inp mono" value={f.operating_hours_per_year} onChange={(e) => set('operating_hours_per_year', e.target.value)} placeholder="z.B. 3600" inputMode="numeric" />
+                <span className="suf">h/a</span>
               </div>
             </div>
           </div>
 
-          {/* Lebenszyklus */}
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-            <p className="text-sm font-medium text-gray-700 mb-3">Lebenszyklus</p>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="label">Inbetriebnahme</label>
-                <input
-                  type="date"
-                  className="input"
-                  value={form.commissioned_at}
-                  onChange={(e) => setForm({ ...form, commissioned_at: e.target.value })}
-                />
-              </div>
+          <div className="v-calc-note">
+            <Sparkles size={14} style={{ color: 'var(--fw-fernwaerme)' }} />
+            Geschätzter Jahresverbrauch: <span className="n">{estView.val} {estView.unit}</span>
+            {wouldBeSEU && <span className="v-seu seu-flag">SEU-Kandidat</span>}
+          </div>
+
+          <div className="v-field">
+            <label>Beschreibung</label>
+            <textarea className="v-ta" value={f.description} onChange={(e) => set('description', e.target.value)} placeholder="Optionale Beschreibung der Anlage…" />
+          </div>
+
+          <div className="v-fieldset">
+            <div className="v-fieldset-legend"><Box size={13} /> Gerätedaten <span className="opt">(optional)</span></div>
+            <div className="v-field-row c3">
+              <div className="v-field" style={{ marginBottom: 0 }}><label>Hersteller</label><input className="v-inp" value={f.manufacturer} onChange={(e) => set('manufacturer', e.target.value)} placeholder="z.B. Wolf GmbH" /></div>
+              <div className="v-field" style={{ marginBottom: 0 }}><label>Modell / Typ</label><input className="v-inp" value={f.model} onChange={(e) => set('model', e.target.value)} placeholder="z.B. KG Top 84" /></div>
+              <div className="v-field" style={{ marginBottom: 0 }}><label>Seriennummer</label><input className="v-inp mono" value={f.serial_number} onChange={(e) => set('serial_number', e.target.value)} placeholder="z.B. SN-12345" /></div>
+            </div>
+          </div>
+
+          <div className="v-fieldset">
+            <div className="v-fieldset-legend"><History size={13} /> Lebenszyklus</div>
+            <div className="v-field-row c2">
+              <div className="v-field" style={{ marginBottom: 0 }}><label>Inbetriebnahme</label><input type="date" className="v-inp mono" value={f.commissioned_at} onChange={(e) => set('commissioned_at', e.target.value)} /></div>
               {!replaceMode && (
-                <div>
-                  <label className="label">Außerbetriebnahme</label>
-                  <input
-                    type="date"
-                    className="input"
-                    value={form.decommissioned_at}
-                    onChange={(e) => setForm({ ...form, decommissioned_at: e.target.value })}
-                  />
-                </div>
+                <div className="v-field" style={{ marginBottom: 0 }}><label>Außerbetriebnahme</label><input type="date" className="v-inp mono" value={f.decommissioned_at} onChange={(e) => set('decommissioned_at', e.target.value)} /></div>
               )}
             </div>
-            {/* "Ersetzt durch"-Dropdown nur im Bearbeitungsmodus und wenn decommissioned_at gesetzt */}
-            {editingId && form.decommissioned_at && allConsumers.length > 0 && (
-              <div className="mt-4">
-                <label className="label">Ersetzt durch</label>
-                <select
-                  className="input"
-                  value={form.replaced_by_id}
-                  onChange={(e) => setForm({ ...form, replaced_by_id: e.target.value })}
-                >
+            {editing && f.decommissioned_at && allConsumers.length > 0 && (
+              <div className="v-field" style={{ marginBottom: 0, marginTop: 12 }}>
+                <label>Ersetzt durch</label>
+                <select className="v-sel" value={f.replaced_by_id} onChange={(e) => set('replaced_by_id', e.target.value)}>
                   <option value="">– Kein Nachfolger –</option>
-                  {allConsumers.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
+                  {allConsumers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
             )}
           </div>
 
-          {/* Zuordnung: Standort → Gebäude → Nutzungseinheit */}
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-            <p className="text-sm font-medium text-gray-700 mb-3">Standort-Zuordnung (optional)</p>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <label className="label">Standort</label>
-                <select
-                  className="input"
-                  value={hierarchy.selectedSiteId}
-                  onChange={(e) => hierarchy.setSelectedSiteId(e.target.value)}
-                >
+          <div className="v-fieldset">
+            <div className="v-fieldset-legend"><MapPin size={13} /> Standort-Zuordnung <span className="opt">(optional)</span></div>
+            <div className="v-field-row c3">
+              <div className="v-field" style={{ marginBottom: 0 }}>
+                <label>Standort</label>
+                <select className="v-sel" value={hierarchy.selectedSiteId} onChange={(e) => hierarchy.setSelectedSiteId(e.target.value)}>
                   <option value="">– Kein Standort –</option>
-                  {hierarchy.sites.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
+                  {hierarchy.sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
-              <div>
-                <label className="label">Gebäude</label>
-                <select
-                  className="input"
-                  value={hierarchy.selectedBuildingId}
-                  onChange={(e) => hierarchy.setSelectedBuildingId(e.target.value)}
-                  disabled={!hierarchy.selectedSiteId}
-                >
+              <div className="v-field" style={{ marginBottom: 0 }}>
+                <label>Gebäude</label>
+                <select className="v-sel" value={hierarchy.selectedBuildingId} onChange={(e) => hierarchy.setSelectedBuildingId(e.target.value)} disabled={!hierarchy.selectedSiteId}>
                   <option value="">– Kein Gebäude –</option>
-                  {hierarchy.buildings.map((b) => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
+                  {hierarchy.buildings.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
               </div>
-              <div>
-                <label className="label">Nutzungseinheit</label>
-                <select
-                  className="input"
-                  value={hierarchy.selectedUnitId}
-                  onChange={(e) => hierarchy.setSelectedUnitId(e.target.value)}
-                  disabled={!hierarchy.selectedBuildingId}
-                >
+              <div className="v-field" style={{ marginBottom: 0 }}>
+                <label>Nutzungseinheit</label>
+                <select className="v-sel" value={hierarchy.selectedUnitId} onChange={(e) => hierarchy.setSelectedUnitId(e.target.value)} disabled={!hierarchy.selectedBuildingId}>
                   <option value="">– Keine Einheit –</option>
-                  {hierarchy.units.map((u) => (
-                    <option key={u.id} value={u.id}>{u.name}</option>
-                  ))}
+                  {hierarchy.units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </select>
               </div>
             </div>
           </div>
 
-          {/* Zähler-Zuordnung */}
-          {meters.length > 0 && (
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-              <p className="text-sm font-medium text-gray-700 mb-3">
-                Zähler-Zuordnung (optional)
-              </p>
-              <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
-                {meters.map((m) => (
-                  <label
-                    key={m.id}
-                    className="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-white"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedMeterIds.includes(m.id)}
-                      onChange={() => toggleMeter(m.id)}
-                      className="rounded border-gray-300 text-primary-500"
-                    />
-                    <span className="text-sm">{m.name}</span>
-                  </label>
-                ))}
+          <div className="v-fieldset" style={{ marginBottom: 0 }}>
+            <div className="v-fieldset-legend"><Gauge size={13} /> Zählerzuordnung <span className="opt">(optional)</span></div>
+            {assignedMeters.length > 0 && (
+              <div className="v-meter-chips" style={{ marginBottom: availableMeters.length ? 10 : 0 }}>
+                {assignedMeters.map((m) => {
+                  const tone = EM_ENERGY[(['fernwaerme', 'strom', 'kaelte', 'wasser'] as EnergyKey[]).find((k) => m.energy_type.toLowerCase().includes(k.slice(0, 4))) ?? 'strom'];
+                  return (
+                    <span className="v-meter-chip" key={m.id}>
+                      <span className="mc-stripe" style={{ background: tone.color }} />
+                      <span className="mc-code">{m.name}</span>
+                      <button type="button" className="mc-x" onClick={() => removeMeter(m.id)} title="Zuordnung entfernen"><X size={12} /></button>
+                    </span>
+                  );
+                })}
               </div>
+            )}
+            <div className="v-field" style={{ marginBottom: 0 }}>
+              <label>Zähler hinzufügen</label>
+              <select className="v-sel" value="" onChange={(e) => { addMeter(e.target.value); e.target.value = ''; }} disabled={availableMeters.length === 0}>
+                <option value="">{availableMeters.length === 0 ? (f.meter_ids.length ? 'Alle Zähler zugeordnet' : 'Keine Zähler verfügbar') : '– Zähler auswählen –'}</option>
+                {availableMeters.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
             </div>
-          )}
+          </div>
+        </div>
 
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn-secondary"
-            >
-              Abbrechen
-            </button>
-            <button type="submit" className="btn-primary" disabled={saving}>
-              {saving
-                ? 'Speichern...'
-                : replaceMode
-                  ? 'Ersetzen'
-                  : editingId
-                    ? 'Speichern'
-                    : 'Anlegen'}
+        <div className="v-m-foot">
+          <span className="hint"><Shield size={13} /> Pflichtfelder mit <span style={{ color: 'var(--alert)' }}>*</span></span>
+          <div className="btns">
+            <button className="v-btn-soft" onClick={onClose}>Abbrechen</button>
+            <button className="btn-primary" onClick={submit} disabled={!nameOk || saving}>
+              {saving ? 'Speichern…' : replaceMode ? 'Ersetzen' : editing ? 'Speichern' : 'Anlegen'}
             </button>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );
