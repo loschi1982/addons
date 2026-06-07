@@ -17,7 +17,6 @@ import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import PageHead from '@/components/ui/PageHead';
-import PageTabs, { ANALYSIS_TABS } from '@/components/layout/PageTabs';
 
 const MonthlyComparisonPage = lazy(() => import('./MonthlyComparisonPage'));
 const EnergyBalancePage = lazy(() => import('./EnergyBalancePage'));
@@ -264,7 +263,6 @@ export default function AnalyticsPage() {
 
   return (
     <div className="analyse">
-      <PageTabs tabs={ANALYSIS_TABS} />
       <PageHead
         eyebrow="Energiemanagement · ISO 50001"
         title="Analyse"
@@ -380,6 +378,12 @@ function fmtMWh(kwh: number): { val: string; unit: string } {
   return { val: kwh.toLocaleString('de-DE', { maximumFractionDigits: 0 }), unit: 'kWh' };
 }
 const pctStr = (n: number) => `${n > 0 ? '+' : ''}${n.toLocaleString('de-DE', { maximumFractionDigits: 1 })} %`;
+// CO₂ in kg → lesbare Einheit (t ab 1.000 kg, kt ab 1 Mio kg).
+function fmtCO2(kg: number): { val: string; unit: string } {
+  if (kg >= 1_000_000) return { val: (kg / 1_000_000).toLocaleString('de-DE', { maximumFractionDigits: 1 }), unit: 'kt' };
+  if (kg >= 1_000) return { val: (kg / 1_000).toLocaleString('de-DE', { maximumFractionDigits: 0 }), unit: 't' };
+  return { val: kg.toLocaleString('de-DE', { maximumFractionDigits: 0 }), unit: 'kg' };
+}
 
 function OverviewView({ siteId, onGoto }: { siteId: string; onGoto: (v: ViewKey) => void }) {
   const [d, setD] = useState<OverviewData | null>(null);
@@ -472,7 +476,7 @@ function OverviewView({ siteId, onGoto }: { siteId: string; onGoto: (v: ViewKey)
   const signals = [
     { icon: AlertTriangle, c: 'var(--alert)', v: d.anomalyCount != null ? String(d.anomalyCount) : '—', l: 'Auffälligkeiten (≥ 2σ, 30 Tage)', view: 'verbrauch' as ViewKey },
     { icon: Cloud, c: 'var(--info)', v: d.weatherSharePct != null ? d.weatherSharePct.toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' %' : '—', l: 'Witterungsabhängiger Verbrauch', view: 'effizienz' as ViewKey },
-    { icon: TrendingUp, c: 'var(--fw-fernwaerme)', v: d.co2Value != null ? fmtMWh(d.co2Value).val + ' ' + (d.co2Value >= 10000 ? 't' : 'kg') : '—', l: 'CO₂-Emissionen YTD', view: 'ziele' as ViewKey },
+    { icon: TrendingUp, c: 'var(--fw-fernwaerme)', v: d.co2Value != null ? `${fmtCO2(d.co2Value).val} ${fmtCO2(d.co2Value).unit}` : '—', l: 'CO₂-Emissionen YTD', view: 'ziele' as ViewKey },
     { icon: Database, c: 'var(--ink-3)', v: d.staleMeters != null ? String(d.staleMeters) : '—', l: 'Zähler ohne aktuelle Daten', view: 'verbrauch' as ViewKey },
   ];
 
@@ -496,7 +500,7 @@ function OverviewView({ siteId, onGoto }: { siteId: string; onGoto: (v: ViewKey)
           </div>
           <div className="progress-stats">
             <span><strong>{d.co2ReductionPct != null ? (d.co2ReductionPct >= 0 ? '−' : '+') + Math.abs(d.co2ReductionPct).toLocaleString('de-DE', { maximumFractionDigits: 1 }) : '—'} %</strong> CO₂ vs. Basisjahr</span>
-            {d.co2Value != null && <><span className="dim">·</span><span><strong>{fmtMWh(d.co2Value).val}</strong> {d.co2Value >= 10000 ? 't' : 'kg'} YTD</span></>}
+            {d.co2Value != null && <><span className="dim">·</span><span><strong>{fmtCO2(d.co2Value).val}</strong> {fmtCO2(d.co2Value).unit} YTD</span></>}
           </div>
         </div>
         <div className="status-action">

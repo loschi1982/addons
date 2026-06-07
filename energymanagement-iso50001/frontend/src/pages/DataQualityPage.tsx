@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { apiClient } from '@/utils/api';
-import PageTabs, { ANALYSIS_TABS } from '@/components/layout/PageTabs';
 import PageHead from '@/components/ui/PageHead';
 
 interface Alert {
@@ -233,7 +232,6 @@ export default function DataQualityPage() {
 
   return (
     <div>
-      <PageTabs tabs={ANALYSIS_TABS} />
 
       <PageHead
         eyebrow="Analyse"

@@ -5,7 +5,6 @@ import {
 } from 'recharts';
 import { RefreshCw, Zap, AlertTriangle, TrendingUp, Activity } from 'lucide-react';
 import { apiClient } from '@/utils/api';
-import PageTabs, { ANALYSIS_TABS } from '@/components/layout/PageTabs';
 import PageHead from '@/components/ui/PageHead';
 
 /* ── Typen ── */
@@ -144,7 +143,6 @@ export default function LoadProfilePage() {
 
   return (
     <div className="p-6 space-y-6">
-      <PageTabs tabs={ANALYSIS_TABS} />
       <PageHead eyebrow="Analyse" title="Lastprofil & Spitzenlast" />
       <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
         Leistungsverlauf (kW) aus Zählerständen – Peak-Erkennung und Vergleich mit Vertragslimit

@@ -26,6 +26,8 @@ import {
   GraduationCap,
   SlidersHorizontal,
   AlertTriangle,
+  Layers,
+  Database,
   type LucideIcon,
 } from 'lucide-react';
 import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
@@ -64,10 +66,10 @@ const navGroups: NavGroup[] = [
     labelKey: 'nav.group.analysis',
     items: [
       {
-        path: '/energy-review',
+        path: '/analytics',
         labelKey: 'nav.analysis',
         icon: Activity,
-        alsoActiveFor: ['/analytics', '/load-profile', '/data-quality', '/monthly-comparison', '/energy-balance'],
+        alsoActiveFor: ['/load-profile', '/monthly-comparison', '/energy-balance'],
       },
       { path: '/reports', labelKey: 'nav.reports', icon: FileText },
     ],
@@ -95,6 +97,7 @@ const navGroups: NavGroup[] = [
     labelKey: 'nav.group.iso',
     items: [
       { path: '/iso', labelKey: 'nav.iso', icon: Shield },
+      { path: '/energy-review', labelKey: 'nav.energyReview', icon: Layers },
       { path: '/benchmarking', labelKey: 'nav.benchmarking', icon: BookOpen },
       { path: '/trainings', labelKey: 'nav.trainings', icon: GraduationCap },
       { path: '/control-strategies', labelKey: 'nav.controlStrategies', icon: SlidersHorizontal },
@@ -103,6 +106,7 @@ const navGroups: NavGroup[] = [
   {
     labelKey: 'nav.group.system',
     items: [
+      { path: '/data-quality', labelKey: 'nav.dataQuality', icon: Database },
       { path: '/import', labelKey: 'nav.import', icon: Upload },
       { path: '/users', labelKey: 'nav.users', icon: Users },
       { path: '/settings', labelKey: 'nav.settings', icon: Settings },

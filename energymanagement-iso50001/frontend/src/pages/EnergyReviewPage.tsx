@@ -9,7 +9,6 @@ import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
 import InfoTip from '@/components/ui/InfoTip';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
-import PageTabs, { ANALYSIS_TABS } from '@/components/layout/PageTabs';
 import PageHead from '@/components/ui/PageHead';
 import SegControl from '@/components/ui/SegControl';
 import {
@@ -178,7 +177,6 @@ export default function EnergyReviewPage() {
 
   return (
     <div>
-      <PageTabs tabs={ANALYSIS_TABS} />
       <PageHead
         eyebrow="Analyse · ISO 50001 Kap. 6.3–6.5"
         title="Energiebewertung"
