@@ -7,7 +7,10 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { RefreshCw, Activity } from 'lucide-react';
+import {
+  RefreshCw, Activity, LayoutGrid, Waves, Zap, Target,
+  AlertTriangle, Cloud, TrendingUp, Database, ArrowRight, FileText,
+} from 'lucide-react';
 import InfoTip from '@/components/ui/InfoTip';
 import SankeyDiagram from '@/components/charts/SankeyDiagram';
 import { apiClient } from '@/utils/api';
@@ -114,15 +117,23 @@ interface TabDef {
   label: string;
 }
 
+// View = oberste Ebene im Design (4 gleichrangige Schritte). Jede View
+// (außer Überblick) bündelt die bisherigen Sub-Tabs als sekundäre Navigation.
+type ViewKey = 'overview' | 'verbrauch' | 'effizienz' | 'ziele';
+
 interface TabGroup {
+  view: ViewKey;
   label: string;
+  step: string;
   description: string;
   tabs: TabDef[];
 }
 
 const TAB_GROUPS: TabGroup[] = [
   {
+    view: 'verbrauch',
     label: 'Verbrauch',
+    step: '01',
     description: 'Verbrauchsdaten auswerten und vergleichen',
     tabs: [
       { key: 'timeseries', label: 'Zeitreihen' },
@@ -134,7 +145,9 @@ const TAB_GROUPS: TabGroup[] = [
     ],
   },
   {
+    view: 'effizienz',
     label: 'Effizienz',
+    step: '02',
     description: 'Lastprofile, Muster und Optimierungspotenziale',
     tabs: [
       { key: 'heatmap', label: 'Lastprofil' },
@@ -146,7 +159,9 @@ const TAB_GROUPS: TabGroup[] = [
     ],
   },
   {
-    label: 'Klima & Ziele',
+    view: 'ziele',
+    label: 'Ziele & CO₂',
+    step: '03',
     description: 'CO₂-Reduktion, Energiebilanz und Auffälligkeiten',
     tabs: [
       { key: 'energy_balance', label: 'Energiebilanz' },
@@ -158,6 +173,8 @@ const TAB_GROUPS: TabGroup[] = [
 
 const ALL_TABS = TAB_GROUPS.flatMap((g) => g.tabs);
 type TabKey = string;
+
+const groupForTab = (key: TabKey): TabGroup => TAB_GROUPS.find((g) => g.tabs.some((t) => t.key === key)) ?? TAB_GROUPS[0];
 
 /* ── Hilfsfunktionen ── */
 
@@ -193,9 +210,13 @@ interface Site {
 
 export default function AnalyticsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialTab = (searchParams.get('tab') as TabKey) || 'timeseries';
+  const initialTab = searchParams.get('tab') as TabKey | null;
+  // View aus URL ableiten: ?tab=… öffnet die zugehörige View; ohne Param Überblick.
+  const [view, setView] = useState<ViewKey>(
+    initialTab && ALL_TABS.some((t) => t.key === initialTab) ? groupForTab(initialTab).view : 'overview',
+  );
   const [tab, setTab] = useState<TabKey>(
-    ALL_TABS.some(t => t.key === initialTab) ? initialTab : 'timeseries'
+    initialTab && ALL_TABS.some((t) => t.key === initialTab) ? initialTab : 'timeseries',
   );
   const [meters, setMeters] = useState<Meter[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
@@ -203,11 +224,30 @@ export default function AnalyticsPage() {
 
   const handleTabChange = (key: TabKey) => {
     setTab(key);
-    setSearchParams(key === 'timeseries' ? {} : { tab: key }, { replace: true });
+    setView(groupForTab(key).view);
+    setSearchParams({ tab: key }, { replace: true });
   };
 
-  // Aktive Gruppe ermitteln
-  const activeGroup = TAB_GROUPS.find((g) => g.tabs.some((t) => t.key === tab)) || TAB_GROUPS[0];
+  // View wechseln: erste Sub-Tab der View aktivieren (außer Überblick).
+  const handleViewChange = (v: ViewKey) => {
+    setView(v);
+    if (v === 'overview') {
+      setSearchParams({}, { replace: true });
+    } else {
+      const grp = TAB_GROUPS.find((g) => g.view === v)!;
+      setTab(grp.tabs[0].key);
+      setSearchParams({ tab: grp.tabs[0].key }, { replace: true });
+    }
+  };
+
+  const activeGroup = TAB_GROUPS.find((g) => g.view === view) ?? TAB_GROUPS[0];
+
+  const VIEW_DEFS: { key: ViewKey; label: string; step?: string; icon: typeof LayoutGrid }[] = [
+    { key: 'overview', label: 'Überblick', icon: LayoutGrid },
+    { key: 'verbrauch', label: 'Verbrauch', step: '01', icon: Waves },
+    { key: 'effizienz', label: 'Effizienz', step: '02', icon: Zap },
+    { key: 'ziele', label: 'Ziele & CO₂', step: '03', icon: Target },
+  ];
 
   useEffect(() => {
     apiClient.get('/api/v1/meters', { params: { page_size: 500 } }).then((res) => {
@@ -223,11 +263,11 @@ export default function AnalyticsPage() {
   const filteredMeters = siteId ? meters.filter((m) => (m as unknown as Record<string, unknown>)['site_id'] === siteId) : meters;
 
   return (
-    <div>
+    <div className="analyse">
       <PageTabs tabs={ANALYSIS_TABS} />
       <PageHead
-        eyebrow="Analyse"
-        title="Analysen"
+        eyebrow="Energiemanagement · ISO 50001"
+        title="Analyse"
         actions={
           sites.length > 0 ? (
             <div className="flex items-center gap-2">
@@ -246,71 +286,261 @@ export default function AnalyticsPage() {
           ) : undefined
         }
       />
-      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
-        Erweiterte Auswertungen und Visualisierungen der Energiedaten.
-      </p>
 
-      {/* Kategorien */}
-      <div className="mt-4 flex gap-2">
-        {TAB_GROUPS.map((group) => (
-          <button
-            key={group.label}
-            onClick={() => handleTabChange(group.tabs[0].key)}
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              activeGroup.label === group.label
-                ? 'bg-primary-600 text-white shadow-sm'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            {group.label}
-          </button>
-        ))}
+      {/* Top-Tabs: 4 gleichrangige Views */}
+      <div className="atabs">
+        {VIEW_DEFS.map((v) => {
+          const Icon = v.icon;
+          return (
+            <button
+              key={v.key}
+              className={`atab${view === v.key ? ' active' : ''}`}
+              onClick={() => handleViewChange(v.key)}
+            >
+              <span className="atab-ic"><Icon size={15} /></span>
+              <span>{v.label}</span>
+              {v.step && <span className="atab-step">{v.step}</span>}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Untertabs der aktiven Kategorie */}
-      <div className="mt-3 flex flex-wrap gap-1 border-b">
-        {activeGroup.tabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => handleTabChange(t.key)}
-            className={`px-3 py-2 text-sm font-medium transition-colors ${
-              tab === t.key
-                ? 'border-b-2 border-primary-600 text-primary-600'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+      {view === 'overview' ? (
+        <OverviewView siteId={siteId} onGoto={handleViewChange} />
+      ) : (
+        <>
+          {/* Sub-Tabs der aktiven View */}
+          <div className="asub">
+            {activeGroup.tabs.map((t) => (
+              <button
+                key={t.key}
+                className={tab === t.key ? 'active' : ''}
+                onClick={() => handleTabChange(t.key)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <p style={{ margin: '6px 0 0', fontSize: 11.5, color: 'var(--ink-4)' }}>{activeGroup.description}</p>
+
+          <div className="mt-4">
+            {tab === 'timeseries' && <TimeSeriesTab meters={filteredMeters} siteId={siteId} />}
+            {tab === 'comparison' && <ComparisonTab meters={filteredMeters} siteId={siteId} />}
+            {tab === 'monthly_comparison' && (
+              <Suspense fallback={<LoadingSpinner />}>
+                <MonthlyComparisonPage siteId={siteId} />
+              </Suspense>
+            )}
+            {tab === 'energy_balance' && (
+              <Suspense fallback={<LoadingSpinner />}>
+                <EnergyBalancePage siteId={siteId} />
+              </Suspense>
+            )}
+            {tab === 'distribution' && <DistributionTab siteId={siteId} />}
+            {tab === 'self_consumption' && <SelfConsumptionTab />}
+            {tab === 'heatmap' && <HeatmapTab meters={filteredMeters} />}
+            {tab === 'sankey' && <SankeyTab meters={filteredMeters} />}
+            {tab === 'duration_curve' && <DurationCurveTab meters={filteredMeters} />}
+            {tab === 'cumulative' && <CumulativeTab meters={filteredMeters} siteId={siteId} />}
+            {tab === 'weather' && <WeatherCorrectionTab meters={filteredMeters} />}
+            {tab === 'co2path' && <CO2PathTab />}
+            {tab === 'anomalies' && <AnomaliesTab />}
+            {tab === 'submeter' && <SubMeterContributionTab meters={meters} />}
+            {tab === 'weather_regression' && <WeatherRegressionTab meters={filteredMeters} />}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Überblick — Statusband (CO₂-Zielpfad) + Story-Cards + Signale.
+   Aggregiert echte Daten aus Dashboard, CO₂-Reduktionspfad, Anomalien
+   und Datenqualität. Degradiert pro Block einzeln, wenn eine Quelle fehlt.
+   ══════════════════════════════════════════════════════════════════════ */
+
+interface DashKPI { label: string; value: number; unit: string; trend_percent: number | null; }
+interface DashBreakdown { energy_type: string; consumption_kwh: number; share_percent: number; }
+interface OverviewData {
+  totalKwh: number;
+  avgDelta: number | null;
+  co2Value: number | null;
+  co2Unit: string;
+  weatherSharePct: number | null;
+  co2ReductionPct: number | null;
+  co2TargetPct: number;
+  anomalyCount: number | null;
+  staleMeters: number | null;
+}
+
+function fmtMWh(kwh: number): { val: string; unit: string } {
+  if (kwh >= 1_000_000) return { val: (kwh / 1_000_000).toLocaleString('de-DE', { maximumFractionDigits: 2 }), unit: 'Mio. kWh' };
+  if (kwh >= 10_000) return { val: (kwh / 1_000).toLocaleString('de-DE', { maximumFractionDigits: 0 }), unit: 'MWh' };
+  return { val: kwh.toLocaleString('de-DE', { maximumFractionDigits: 0 }), unit: 'kWh' };
+}
+const pctStr = (n: number) => `${n > 0 ? '+' : ''}${n.toLocaleString('de-DE', { maximumFractionDigits: 1 })} %`;
+
+function OverviewView({ siteId, onGoto }: { siteId: string; onGoto: (v: ViewKey) => void }) {
+  const [d, setD] = useState<OverviewData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const out: OverviewData = {
+        totalKwh: 0, avgDelta: null, co2Value: null, co2Unit: 'kg',
+        weatherSharePct: null, co2ReductionPct: null, co2TargetPct: 20,
+        anomalyCount: null, staleMeters: null,
+      };
+      // Dashboard: Energie-Summe, Ø-Delta, CO₂, witterungsabhängiger Anteil
+      try {
+        const r = await apiClient.get<{ kpi_cards: DashKPI[]; energy_breakdown: DashBreakdown[] }>(
+          '/api/v1/dashboard', siteId ? { params: { site_id: siteId } } : undefined,
+        );
+        const cards = r.data.kpi_cards || [];
+        const energyCards = cards.filter((c) => /kWh|MWh/i.test(c.unit));
+        const deltas = energyCards.map((c) => c.trend_percent).filter((x): x is number => x != null);
+        out.avgDelta = deltas.length ? deltas.reduce((a, b) => a + b, 0) / deltas.length : null;
+        const co2 = cards.find((c) => /CO₂|CO2/i.test(c.label));
+        if (co2) { out.co2Value = co2.value; out.co2Unit = co2.unit; }
+        const bd = r.data.energy_breakdown || [];
+        out.totalKwh = bd.reduce((a, b) => a + (b.consumption_kwh || 0), 0);
+        const weather = bd.filter((b) => /heating|cooling|fernw|kält|kael/i.test(b.energy_type))
+          .reduce((a, b) => a + (b.consumption_kwh || 0), 0);
+        out.weatherSharePct = out.totalKwh > 0 ? (weather / out.totalKwh) * 100 : null;
+      } catch { /* ignore */ }
+      // CO₂-Reduktionspfad
+      try {
+        const r = await apiClient.get<{ actual: { year: number; co2_kg: number }[] }>(
+          '/api/v1/analytics/co2-reduction-path', { params: { target_year: 2030, target_reduction_percent: 20 } },
+        );
+        const act = (r.data.actual || []).filter((a) => a.co2_kg > 0).sort((a, b) => a.year - b.year);
+        if (act.length >= 2) {
+          const base = act[0].co2_kg, latest = act[act.length - 1].co2_kg;
+          out.co2ReductionPct = base > 0 ? ((base - latest) / base) * 100 : null;
+        }
+      } catch { /* ignore */ }
+      // Anomalien (≥2σ, 30 Tage)
+      try {
+        const r = await apiClient.get<unknown[]>('/api/v1/analytics/anomalies', { params: { threshold: 2, days: 30 } });
+        out.anomalyCount = Array.isArray(r.data) ? r.data.length : null;
+      } catch { /* ignore */ }
+      // Zähler ohne aktuelle Daten
+      try {
+        const r = await apiClient.get<{ alerts: unknown[] }>('/api/v1/dashboard/data-quality');
+        out.staleMeters = Array.isArray(r.data.alerts) ? r.data.alerts.length : null;
+      } catch { /* ignore */ }
+      if (!cancelled) { setD(out); setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [siteId]);
+
+  if (loading || !d) {
+    return <div className="mt-4"><LoadingSpinner /></div>;
+  }
+
+  const onTrack = d.co2ReductionPct != null && d.co2ReductionPct >= d.co2TargetPct;
+  const total = fmtMWh(d.totalKwh);
+  const progressPct = d.co2ReductionPct != null ? Math.min(100, Math.max(0, (d.co2ReductionPct / d.co2TargetPct) * 100)) : 0;
+
+  const cards = [
+    {
+      cls: '', step: 'Schritt 01', icon: Waves, color: 'var(--fw-fernwaerme)', title: 'Verbrauch',
+      desc: 'Wie viel verbrauchen wir — und wo geht es hin?',
+      num: total.val, unit: total.unit,
+      delta: d.avgDelta != null ? pctStr(d.avgDelta) : '—', good: d.avgDelta != null && d.avgDelta <= 0,
+      view: 'verbrauch' as ViewKey,
+    },
+    {
+      cls: 'sc-2', step: 'Schritt 02', icon: Zap, color: 'var(--fw-kaelte)', title: 'Effizienz',
+      desc: 'Witterungsabhängigkeit und Optimierungspotenzial.',
+      num: d.weatherSharePct != null ? d.weatherSharePct.toLocaleString('de-DE', { maximumFractionDigits: 1 }) : '—',
+      unit: '% witterungsabh.', delta: 'Heizen + Kühlen', good: false,
+      view: 'effizienz' as ViewKey,
+    },
+    {
+      cls: 'sc-3', step: 'Schritt 03', icon: Target, color: 'var(--good)', title: 'Ziele & CO₂',
+      desc: 'Stehen wir auf dem ISO-Zielpfad bis 2030?',
+      num: d.co2ReductionPct != null ? (d.co2ReductionPct >= 0 ? '−' : '+') + Math.abs(d.co2ReductionPct).toLocaleString('de-DE', { maximumFractionDigits: 1 }) : '—',
+      unit: '% CO₂ vs. Basis', delta: onTrack ? 'auf Kurs' : 'unter Ziel', good: onTrack,
+      view: 'ziele' as ViewKey,
+    },
+  ];
+
+  const signals = [
+    { icon: AlertTriangle, c: 'var(--alert)', v: d.anomalyCount != null ? String(d.anomalyCount) : '—', l: 'Auffälligkeiten (≥ 2σ, 30 Tage)', view: 'verbrauch' as ViewKey },
+    { icon: Cloud, c: 'var(--info)', v: d.weatherSharePct != null ? d.weatherSharePct.toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' %' : '—', l: 'Witterungsabhängiger Verbrauch', view: 'effizienz' as ViewKey },
+    { icon: TrendingUp, c: 'var(--fw-fernwaerme)', v: d.co2Value != null ? fmtMWh(d.co2Value).val + ' ' + (d.co2Value >= 10000 ? 't' : 'kg') : '—', l: 'CO₂-Emissionen YTD', view: 'ziele' as ViewKey },
+    { icon: Database, c: 'var(--ink-3)', v: d.staleMeters != null ? String(d.staleMeters) : '—', l: 'Zähler ohne aktuelle Daten', view: 'verbrauch' as ViewKey },
+  ];
+
+  return (
+    <div className="mt-4" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Status-Band */}
+      <section className="status-band">
+        <div className="status-meta">
+          <div className={`status-pill${onTrack ? '' : ' off'}`}><span className="dot" /><span>{onTrack ? 'Auf Kurs' : 'Unter Ziel'}</span></div>
+          <div>
+            <span className="status-headline">ISO 50001 — CO₂-Zielpfad</span>
+            <span className="status-sub">Basisjahr → Ziel −{d.co2TargetPct} % bis 2030{d.co2ReductionPct != null ? ` · aktuell ${d.co2ReductionPct >= 0 ? '−' : '+'}${Math.abs(d.co2ReductionPct).toLocaleString('de-DE', { maximumFractionDigits: 1 })} %` : ''}</span>
+          </div>
+        </div>
+        <div className="status-progress">
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${progressPct}%` }} />
+            <div className="progress-marker" style={{ left: '100%' }}>
+              <div className="marker-dot" /><div className="marker-label">Ziel −{d.co2TargetPct} %</div>
+            </div>
+          </div>
+          <div className="progress-stats">
+            <span><strong>{d.co2ReductionPct != null ? (d.co2ReductionPct >= 0 ? '−' : '+') + Math.abs(d.co2ReductionPct).toLocaleString('de-DE', { maximumFractionDigits: 1 }) : '—'} %</strong> CO₂ vs. Basisjahr</span>
+            {d.co2Value != null && <><span className="dim">·</span><span><strong>{fmtMWh(d.co2Value).val}</strong> {d.co2Value >= 10000 ? 't' : 'kg'} YTD</span></>}
+          </div>
+        </div>
+        <div className="status-action">
+          <button className="btn-secondary" onClick={() => onGoto('ziele')}><FileText size={14} /> Details</button>
+        </div>
+      </section>
+
+      {/* Story-Cards */}
+      <div className="grid-3">
+        {cards.map((c) => {
+          const Icon = c.icon;
+          return (
+            <button key={c.title} className={`storycard ${c.cls}`} onClick={() => onGoto(c.view)}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span className="sc-step">{c.step}</span>
+                <Icon size={16} color={c.color} />
+              </div>
+              <div className="sc-title">{c.title}</div>
+              <div className="sc-desc">{c.desc}</div>
+              <div className="sc-metric"><span className="sc-num">{c.num}</span><span className="sc-unit">{c.unit}</span></div>
+              <div className="sc-foot">
+                <span className={`delta${c.good ? ' good' : ''}`}>{c.delta}</span>
+                <span className="go">Ansehen <ArrowRight size={12} /></span>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Kategorie-Beschreibung */}
-      <p className="mt-2 text-xs text-gray-400">{activeGroup.description}</p>
-
-      <div className="mt-4">
-        {tab === 'timeseries' && <TimeSeriesTab meters={filteredMeters} siteId={siteId} />}
-        {tab === 'comparison' && <ComparisonTab meters={filteredMeters} siteId={siteId} />}
-        {tab === 'monthly_comparison' && (
-          <Suspense fallback={<LoadingSpinner />}>
-            <MonthlyComparisonPage siteId={siteId} />
-          </Suspense>
-        )}
-        {tab === 'energy_balance' && (
-          <Suspense fallback={<LoadingSpinner />}>
-            <EnergyBalancePage siteId={siteId} />
-          </Suspense>
-        )}
-        {tab === 'distribution' && <DistributionTab siteId={siteId} />}
-        {tab === 'self_consumption' && <SelfConsumptionTab />}
-        {tab === 'heatmap' && <HeatmapTab meters={filteredMeters} />}
-        {tab === 'sankey' && <SankeyTab meters={filteredMeters} />}
-        {tab === 'duration_curve' && <DurationCurveTab meters={filteredMeters} />}
-        {tab === 'cumulative' && <CumulativeTab meters={filteredMeters} siteId={siteId} />}
-        {tab === 'weather' && <WeatherCorrectionTab meters={filteredMeters} />}
-        {tab === 'co2path' && <CO2PathTab />}
-        {tab === 'anomalies' && <AnomaliesTab />}
-        {tab === 'submeter' && <SubMeterContributionTab meters={meters} />}
-        {tab === 'weather_regression' && <WeatherRegressionTab meters={filteredMeters} />}
+      {/* Signale */}
+      <div className="an-section-h">Signale</div>
+      <div className="grid-4">
+        {signals.map((s) => {
+          const Icon = s.icon;
+          return (
+            <button key={s.l} className="signal" onClick={() => onGoto(s.view)}>
+              <div className="signal-ic" style={{ background: `color-mix(in srgb, ${s.c} 14%, transparent)`, color: s.c }}><Icon size={16} /></div>
+              <div>
+                <div className="signal-v">{s.v}</div>
+                <div className="signal-l">{s.l}</div>
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

@@ -2524,3 +2524,114 @@ nav.flex.gap-6 > button.pb-2:hover { color: var(--ink); }
   .consumers .vb-table { overflow-x: auto; }
   .v-field-row.c2, .v-field-row.c3 { grid-template-columns: 1fr; }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   Analyse — 4 gleichrangige Views (Überblick/Verbrauch/Effizienz/
+   Ziele & CO₂). Adaptiert aus analyse.css/analyse-views.jsx des
+   Claude-Design-Handoffs. Alles unter .analyse gescopt.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* Top-Tabs (eine Ebene, Icon + Label) */
+.analyse .atabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-top: 10px; }
+.analyse .atab {
+  display: flex; align-items: center; gap: 8px;
+  padding: 11px 15px 12px; font-size: 13.5px; font-weight: 500;
+  color: var(--ink-3); border: none; background: none;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  white-space: nowrap; cursor: pointer; transition: color 140ms, border-color 140ms;
+}
+.analyse .atab:hover { color: var(--ink-2); }
+.analyse .atab.active { color: var(--ink); border-bottom-color: var(--fw-fernwaerme); font-weight: 600; }
+.analyse .atab .atab-ic { color: currentColor; opacity: 0.85; display: inline-grid; place-items: center; }
+.analyse .atab-step { font-family: var(--font-mono); font-size: 10px; color: var(--ink-4); font-weight: 600; }
+.analyse .atab.active .atab-step { color: var(--fw-fernwaerme); }
+
+/* Sub-Tabs innerhalb einer View (sekundär, Pill-Stil) */
+.analyse .asub { display: flex; flex-wrap: wrap; gap: 4px; margin: 14px 0 4px; }
+.analyse .asub button {
+  padding: 6px 12px; font-size: 12.5px; font-weight: 500;
+  color: var(--ink-3); background: var(--surface); border: 1px solid var(--line);
+  border-radius: 99px; cursor: pointer; transition: border-color 120ms, color 120ms, background 120ms;
+}
+.analyse .asub button:hover { border-color: var(--line-strong); color: var(--ink); }
+.analyse .asub button.active { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+
+/* Layout-Helfer */
+.analyse .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.analyse .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+
+/* Status-Band (ISO CO₂-Zielpfad) */
+.analyse .status-band {
+  display: grid; grid-template-columns: minmax(240px, 1fr) 2fr auto;
+  gap: 22px; align-items: center;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: 16px 20px;
+}
+.analyse .status-meta { display: flex; align-items: center; gap: 13px; }
+.analyse .status-pill {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 5px 11px; border-radius: 99px; font-size: 12px; font-weight: 600;
+  color: var(--good); background: color-mix(in srgb, var(--good) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--good) 32%, transparent);
+}
+.analyse .status-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
+.analyse .status-pill.off { color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, transparent); border-color: color-mix(in srgb, var(--warn) 32%, transparent); }
+.analyse .status-pill.off .dot { background: var(--warn); }
+.analyse .status-headline { display: block; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.analyse .status-sub { display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+.analyse .status-progress { display: flex; flex-direction: column; gap: 8px; }
+.analyse .progress-track { position: relative; height: 8px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--line); overflow: visible; }
+.analyse .progress-fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--good), color-mix(in srgb, var(--good) 65%, #fff)); }
+.analyse .progress-marker { position: absolute; top: 50%; }
+.analyse .progress-marker .marker-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--surface); border: 2px solid var(--ink); transform: translate(-50%, -50%); }
+.analyse .progress-marker .marker-label { position: absolute; top: 10px; left: 0; transform: translateX(-50%); white-space: nowrap; font-size: 10px; color: var(--ink-3); font-family: var(--font-mono); }
+.analyse .progress-stats { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); }
+.analyse .progress-stats strong { font-family: var(--font-mono); color: var(--ink); }
+.analyse .progress-stats .dim { color: var(--ink-4); }
+
+/* Story-Karten */
+.analyse .storycard {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg);
+  padding: 16px; display: flex; flex-direction: column; gap: 12px;
+  cursor: pointer; position: relative; overflow: hidden; text-align: left;
+  transition: border-color 160ms, box-shadow 160ms;
+}
+.analyse .storycard::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--fw-fernwaerme); }
+.analyse .storycard.sc-2::before { background: var(--fw-kaelte); }
+.analyse .storycard.sc-3::before { background: var(--good); }
+.analyse .storycard:hover { border-color: var(--line-strong); box-shadow: 0 8px 24px -12px rgba(20,20,20,0.18); }
+.analyse .sc-step { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: var(--ink-4); text-transform: uppercase; }
+.analyse .sc-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
+.analyse .sc-desc { font-size: 12px; color: var(--ink-3); line-height: 1.45; }
+.analyse .sc-metric { display: flex; align-items: baseline; gap: 6px; margin-top: 2px; }
+.analyse .sc-num { font-family: var(--font-mono); font-feature-settings: "tnum"; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; color: var(--ink); }
+.analyse .sc-unit { font-size: 11px; color: var(--ink-3); font-family: var(--font-mono); }
+.analyse .sc-foot { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 600; color: var(--ink); }
+.analyse .sc-foot .delta { font-family: var(--font-mono); color: var(--ink-3); }
+.analyse .sc-foot .delta.good { color: var(--good); }
+.analyse .sc-foot .go { display: flex; align-items: center; gap: 5px; }
+
+/* Signal-Kacheln */
+.analyse .signal { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); text-align: left; }
+.analyse .signal-ic { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; flex-shrink: 0; }
+.analyse .signal-v { font-family: var(--font-mono); font-size: 18px; font-weight: 600; letter-spacing: -0.02em; color: var(--ink); }
+.analyse .signal-l { font-size: 11.5px; color: var(--ink-3); }
+
+/* Section-Heading im Überblick */
+.analyse .an-section-h { font-size: 13px; font-weight: 600; color: var(--ink); margin: 4px 0 -4px; }
+
+/* Chart-Karte (Framing für die bestehenden Recharts-Charts) */
+.analyse .achart-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px 18px; }
+.analyse .achart-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.analyse .achart-title { font-size: 14px; font-weight: 600; color: var(--ink); }
+.analyse .achart-sub { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+
+/* SVG-Chart-Achsen-Tokens (für die Design-Mini-Charts im Überblick) */
+.analyse { --chart-grid: var(--line); --chart-axis: var(--ink-4); }
+.analyse .anim-col { animation: growY 560ms cubic-bezier(0.22,1,0.36,1) both; transform-origin: bottom; }
+
+@media (max-width: 1080px) {
+  .analyse .grid-3 { grid-template-columns: 1fr; }
+  .analyse .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .analyse .status-band { grid-template-columns: 1fr; gap: 14px; }
+}
