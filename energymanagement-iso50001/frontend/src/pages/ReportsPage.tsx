@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Plus, Download, Trash2, Eye, RefreshCw, FileText,
-  CheckCircle, AlertCircle, Clock, Loader2, X,
+  CheckCircle, AlertCircle, Loader2, X,
   BarChart3, Leaf, Thermometer, Search,
   GitBranch, Grid3X3, Workflow, TrendingUp, DollarSign,
   Building2, Gauge, Zap,
@@ -48,12 +48,21 @@ const REPORT_TYPES = [
   { value: 'custom', label: 'Individuell' },
 ];
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; Icon: React.ElementType }> = {
-  pending: { label: 'Ausstehend', color: 'bg-gray-100 text-gray-700', Icon: Clock },
-  generating: { label: 'Wird erstellt…', color: 'bg-blue-100 text-blue-700', Icon: Loader2 },
-  ready: { label: 'Fertig', color: 'bg-green-100 text-green-700', Icon: CheckCircle },
-  error: { label: 'Fehler', color: 'bg-red-100 text-red-700', Icon: AlertCircle },
-  draft: { label: 'Entwurf', color: 'bg-gray-100 text-gray-700', Icon: FileText },
+// Status → Design-Pille (good/info/alert/muted) für die Archiv-Tabelle.
+const REPORT_STATUS: Record<string, { label: string; cls: string }> = {
+  ready: { label: 'Fertig', cls: 'good' },
+  generating: { label: 'Wird erstellt…', cls: 'info' },
+  pending: { label: 'Ausstehend', cls: 'muted' },
+  error: { label: 'Fehler', cls: 'alert' },
+  draft: { label: 'Entwurf', cls: 'muted' },
+};
+
+// Berichts-Art → Akzent-Punkt.
+const REPORT_TYPE_DOT: Record<string, string> = {
+  annual: 'var(--fw-fernwaerme)',
+  quarterly: 'var(--fw-kaelte)',
+  monthly: 'var(--info)',
+  custom: 'var(--ink-3)',
 };
 
 /* ── Hilfsfunktionen ── */
@@ -82,9 +91,12 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterType, setFilterType] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [viewingReport, setViewingReport] = useState<ReportDetail | null>(null);
   const [siteMap, setSiteMap] = useState<Record<string, string>>({});
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2800); };
 
   const fetchReports = useCallback(async () => {
     setLoading(true);
@@ -169,14 +181,21 @@ export default function ReportsPage() {
     setTimeout(() => clearInterval(interval), 60000);
   };
 
-  const filteredReports = searchTerm
-    ? reports.filter((r) => r.title.toLowerCase().includes(searchTerm.toLowerCase()))
-    : reports;
+  const filteredReports = reports.filter((r) => {
+    if (filterType && r.report_type !== filterType) return false;
+    if (searchTerm) {
+      const q = searchTerm.toLowerCase();
+      const period = `${formatDate(r.period_start)} ${formatDate(r.period_end)}`;
+      if (!r.title.toLowerCase().includes(q) && !period.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+  const readyCount = reports.filter((r) => r.status === 'ready').length;
 
   const totalPages = Math.ceil(total / 20);
 
   return (
-    <div>
+    <div className="berichte">
       <PageHead
         eyebrow="Analyse"
         title="Berichte"
@@ -188,157 +207,118 @@ export default function ReportsPage() {
         }
       />
       <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
-        Energieberichte erstellen, als PDF exportieren und online ansehen.
+        {total} Berichte · <strong style={{ color: 'var(--good)' }}>{readyCount} fertig</strong> – erstellen, als PDF exportieren und online ansehen.
       </p>
 
-      {/* Filter-Leiste */}
-      <div className="mt-4 flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-          <input
-            type="text"
-            className="input pl-9"
-            placeholder="Berichte suchen…"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+      <div className="b-content">
+        {/* Banner */}
+        <div className="b-banner">
+          <span className="bi"><FileText size={16} /></span>
+          <span>Berichte werden hier zentral erstellt, archiviert und als PDF exportiert. In <strong>Analyse</strong> exploriert man Daten interaktiv.</span>
         </div>
-        <select
-          className="input w-auto"
-          value={filterStatus}
-          onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}
-        >
-          <option value="">Alle Status</option>
-          <option value="ready">Fertig</option>
-          <option value="pending">Ausstehend</option>
-          <option value="generating">Wird erstellt</option>
-          <option value="error">Fehler</option>
-        </select>
-      </div>
 
-      {/* Berichts-Tabelle */}
-      <div className="card mt-4">
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
+        {/* Toolbar */}
+        <div className="b-toolbar">
+          <div className="b-search">
+            <Search size={14} />
+            <input
+              type="text"
+              placeholder="Bericht oder Zeitraum suchen…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
           </div>
-        ) : filteredReports.length === 0 ? (
-          <div className="py-12 text-center text-gray-400">
-            <FileText className="mx-auto h-12 w-12 text-gray-300" />
-            <p className="mt-2">Keine Berichte vorhanden</p>
-            <button onClick={() => setShowCreateModal(true)} className="btn-primary mt-3">
-              Ersten Bericht erstellen
-            </button>
-          </div>
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-gray-500">
-                    <th className="pb-2 font-medium">Titel</th>
-                    <th className="pb-2 font-medium">Typ</th>
-                    <th className="pb-2 font-medium">Standort</th>
-                    <th className="pb-2 font-medium">Zeitraum</th>
-                    <th className="pb-2 font-medium text-center">Status</th>
-                    <th className="pb-2 font-medium">Erstellt</th>
-                    <th className="pb-2 font-medium text-right">Aktionen</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredReports.map((r) => {
-                    const statusCfg = STATUS_CONFIG[r.status] || STATUS_CONFIG.draft;
-                    const StatusIcon = statusCfg.Icon;
-                    return (
-                      <tr key={r.id} className="border-b last:border-0 hover:bg-gray-50">
-                        <td className="py-3 font-medium text-gray-900">{r.title}</td>
-                        <td className="py-3 text-gray-500">
-                          {REPORT_TYPES.find((t) => t.value === r.report_type)?.label || r.report_type}
-                        </td>
-                        <td className="py-3 text-gray-500 text-sm">
-                          {r.site_id ? (siteMap[r.site_id] ?? '–') : <span className="text-gray-300">Alle</span>}
-                        </td>
-                        <td className="py-3 text-gray-500">
-                          {formatDate(r.period_start)} – {formatDate(r.period_end)}
-                        </td>
-                        <td className="py-3 text-center">
-                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${statusCfg.color}`}>
-                            <StatusIcon className={`h-3.5 w-3.5 ${r.status === 'generating' ? 'animate-spin' : ''}`} />
-                            {statusCfg.label}
-                          </span>
-                        </td>
-                        <td className="py-3 text-gray-500">{formatDate(r.created_at)}</td>
-                        <td className="py-3">
-                          <div className="flex items-center justify-end gap-1">
-                            <button
-                              onClick={() => viewReport(r.id)}
-                              className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-primary-600"
-                              title="Ansehen"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </button>
-                            {r.status === 'ready' && r.pdf_path && (
-                              <button
-                                onClick={() => downloadPdf(r)}
-                                className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-primary-600"
-                                title="PDF herunterladen"
-                              >
-                                <Download className="h-4 w-4" />
-                              </button>
-                            )}
-                            {(r.status === 'ready' || r.status === 'error') && (
-                              <button
-                                onClick={() => generatePdf(r.id)}
-                                className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-primary-600"
-                                title="PDF neu generieren"
-                              >
-                                <RefreshCw className="h-4 w-4" />
-                              </button>
-                            )}
-                            <button
-                              onClick={() => deleteReport(r.id)}
-                              className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-red-600"
-                              title="Löschen"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+          <select className="b-filter" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+            <option value="">Alle Arten</option>
+            {REPORT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+          <select className="b-filter" value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}>
+            <option value="">Alle Status</option>
+            <option value="ready">Fertig</option>
+            <option value="pending">Ausstehend</option>
+            <option value="generating">Wird erstellt</option>
+            <option value="error">Fehler</option>
+          </select>
+        </div>
+
+        {/* Tabelle */}
+        <div className="b-table">
+          {loading ? (
+            <div className="b-empty"><span className="mk"><Loader2 size={20} className="animate-spin" /></span><strong>Lade Berichte…</strong></div>
+          ) : filteredReports.length === 0 ? (
+            <div className="b-empty">
+              <span className="mk"><FileText size={20} /></span>
+              <strong>Keine Berichte gefunden</strong>
+              <span>Passen Sie Suche oder Filter an — oder erstellen Sie einen neuen Bericht.</span>
+              <button onClick={() => setShowCreateModal(true)} className="btn-primary" style={{ marginTop: 6 }}>
+                <Plus size={14} /> Neuer Bericht
+              </button>
             </div>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="mt-4 flex items-center justify-between border-t pt-3">
-                <span className="text-sm text-gray-500">{total} Berichte gesamt</span>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => setPage(Math.max(1, page - 1))}
-                    disabled={page === 1}
-                    className="btn-secondary text-sm disabled:opacity-50"
-                  >
-                    Zurück
-                  </button>
-                  <span className="px-3 py-1.5 text-sm text-gray-500">
-                    Seite {page} von {totalPages}
-                  </span>
-                  <button
-                    onClick={() => setPage(Math.min(totalPages, page + 1))}
-                    disabled={page === totalPages}
-                    className="btn-secondary text-sm disabled:opacity-50"
-                  >
-                    Weiter
-                  </button>
-                </div>
+          ) : (
+            <>
+              <div className="b-tr head">
+                <div>Bericht</div>
+                <div>Art</div>
+                <div className="b-col-period">Zeitraum</div>
+                <div className="b-col-created">Erstellt</div>
+                <div>Status</div>
+                <div style={{ textAlign: 'right' }}>Aktionen</div>
               </div>
-            )}
-          </>
+              {filteredReports.map((r) => {
+                const ready = r.status === 'ready';
+                const typeLabel = REPORT_TYPES.find((t) => t.value === r.report_type)?.label || r.report_type;
+                const typeColor = REPORT_TYPE_DOT[r.report_type] || 'var(--ink-3)';
+                const st = REPORT_STATUS[r.status] || REPORT_STATUS.draft;
+                return (
+                  <div key={r.id} className="b-tr row" onClick={() => ready && viewReport(r.id)}>
+                    <div className="b-title-cell">
+                      <span className="b-title-ico"><FileText size={15} /></span>
+                      <div className="b-title-main">
+                        <div className="b-title-name">{r.title}</div>
+                        <div className="b-title-meta">
+                          <span className="b-period">{formatDate(r.period_start)} – {formatDate(r.period_end)}</span>
+                          {r.site_id && siteMap[r.site_id] && <span>· {siteMap[r.site_id]}</span>}
+                        </div>
+                      </div>
+                    </div>
+                    <div><span className="b-type"><span className="tdot" style={{ background: typeColor }} />{typeLabel}</span></div>
+                    <div className="b-col-period b-period">{formatDate(r.period_start)} – {formatDate(r.period_end)}</div>
+                    <div className="b-col-created b-created">{formatDate(r.created_at)}</div>
+                    <div>
+                      <span className={`b-status ${st.cls}`}>
+                        {r.status === 'generating' ? <Loader2 size={11} className="spin" /> : <span className="dot" />}
+                        {st.label}
+                      </span>
+                    </div>
+                    <div className="b-actions" onClick={(e) => e.stopPropagation()}>
+                      <button className="b-iconbtn" title="Ansehen" disabled={!ready} onClick={() => viewReport(r.id)}><Eye size={15} /></button>
+                      <button className="b-iconbtn" title="PDF herunterladen" disabled={!ready || !r.pdf_path} onClick={() => downloadPdf(r)}><Download size={15} /></button>
+                      {(r.status === 'ready' || r.status === 'error') && (
+                        <button className="b-iconbtn" title="PDF neu generieren" onClick={() => { generatePdf(r.id); showToast('PDF-Generierung gestartet…'); }}><RefreshCw size={15} /></button>
+                      )}
+                      <button className="b-iconbtn danger" title="Löschen" onClick={() => deleteReport(r.id)}><Trash2 size={15} /></button>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between" style={{ padding: '4px 2px' }}>
+            <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{total} Berichte gesamt</span>
+            <div className="flex gap-1">
+              <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1} className="btn-secondary text-sm disabled:opacity-50">Zurück</button>
+              <span className="px-3 py-1.5 text-sm" style={{ color: 'var(--ink-3)' }}>Seite {page} von {totalPages}</span>
+              <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page === totalPages} className="btn-secondary text-sm disabled:opacity-50">Weiter</button>
+            </div>
+          </div>
         )}
       </div>
+
+      {toast && <div className="b-toast"><CheckCircle size={14} /> {toast}</div>}
 
       {/* Modals */}
       {showCreateModal && (
