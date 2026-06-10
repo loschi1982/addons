@@ -1,11 +1,26 @@
 import { useEffect, useState, useCallback } from 'react';
+import {
+  Gauge,
+  Activity,
+  RadioTower,
+  Target,
+  Home,
+  Table as TableIcon,
+  Thermometer,
+  Plus,
+  Search,
+  Trash2,
+  Info,
+} from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { type PaginatedResponse } from '@/types';
 import DiscoveryModal from '@/components/DiscoveryModal';
 import InfoTip from '@/components/ui/InfoTip';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import PageHead from '@/components/ui/PageHead';
-import SegControl from '@/components/ui/SegControl';
+import RadialScore from '@/components/umwelt/RadialScore';
+import ComfortField, { type ComfortPoint } from '@/components/umwelt/ComfortField';
+import MultiLine from '@/components/umwelt/MultiLine';
 
 // ── Typen ──
 
@@ -100,44 +115,462 @@ const DATA_SOURCES: Record<string, string> = {
   knx: 'KNX',
 };
 
-type Tab = 'sensors' | 'readings' | 'comfort';
+const nf = (n: number | null | undefined, d = 0) =>
+  n == null ? '—' : Number(n).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
 
-// ── Komponente ──
+type ComfortStatus = 'good' | 'warn' | 'alert';
+const scoreStatus = (s: number | null | undefined): ComfortStatus =>
+  s == null ? 'warn' : s >= 75 ? 'good' : s >= 50 ? 'warn' : 'alert';
+const STATUS_LABEL: Record<ComfortStatus, string> = { good: 'Behaglich', warn: 'Randbereich', alert: 'Unbehaglich' };
+const STATUS_VAR: Record<ComfortStatus, string> = { good: 'var(--good)', warn: 'var(--warn)', alert: 'var(--alert)' };
+
+type Tab = 'comfort' | 'readings' | 'sensors';
+
+const TABS: Array<{ id: Tab; label: string; icon: typeof Gauge }> = [
+  { id: 'comfort', label: 'Komfort', icon: Gauge },
+  { id: 'readings', label: 'Messwerte', icon: Activity },
+  { id: 'sensors', label: 'Sensoren', icon: RadioTower },
+];
+
+// ── Seite ──
 
 export default function ClimatePage() {
-  const [activeTab, setActiveTab] = useState<Tab>('sensors');
+  const [activeTab, setActiveTab] = useState<Tab>('comfort');
 
   return (
-    <div>
-      <PageHead
-        eyebrow="Umwelt"
-        title="Klimasensoren"
-        actions={
-          <SegControl<Tab>
-            value={activeTab}
-            onChange={setActiveTab}
-            options={[
-              { value: 'sensors', label: 'Sensoren' },
-              { value: 'readings', label: 'Messwerte' },
-              { value: 'comfort', label: 'Komfort-Dashboard' },
-            ]}
-          />
-        }
-      />
-      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
-        Innenraum-Klimadaten, Behaglichkeitsanalyse und Komfort-Score
-      </p>
+    <div className="umwelt">
+      <PageHead eyebrow="Umwelt" title="Raumklima" />
+      <div className="head-lead">
+        Behaglichkeit und Luftqualität je Zone — Sensorik über Home Assistant, Modbus oder KNX, bewertet
+        nach DIN EN 16798-1 (thermischer Komfort).
+      </div>
 
-      <div className="mt-4">
-        {activeTab === 'sensors' && <SensorsPanel />}
-        {activeTab === 'readings' && <ReadingsPanel />}
+      <div className="tabs" role="tablist" style={{ marginTop: 14 }}>
+        {TABS.map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={activeTab === t.id}
+              className={'tab' + (activeTab === t.id ? ' active' : '')}
+              onClick={() => setActiveTab(t.id)}
+            >
+              <Icon size={14} />
+              <span>{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="content stack" style={{ paddingTop: 16 }}>
         {activeTab === 'comfort' && <ComfortPanel />}
+        {activeTab === 'readings' && <ReadingsPanel />}
+        {activeTab === 'sensors' && <SensorsPanel />}
       </div>
     </div>
   );
 }
 
-// ── Sensoren ──
+// ── Tab 1: Komfort ──
+
+function ComfortPanel() {
+  const [dashboard, setDashboard] = useState<{
+    zones: ZoneSummary[];
+    current_readings: ClimateReading[];
+    alerts: Array<{ sensor_name: string; comfort_score: number; message: string }>;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await apiClient.get('/api/v1/climate/comfort');
+        setDashboard(res.data);
+      } catch {
+        // Interceptor
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  if (loading) return <div className="card"><LoadingSpinner /></div>;
+  if (!dashboard) return <div className="card text-gray-400">Keine Daten verfügbar.</div>;
+
+  const { zones, current_readings, alerts } = dashboard;
+  const scored = zones.filter((z) => z.comfort_score != null);
+  const overallScore = scored.length
+    ? scored.reduce((a, z) => a + (z.comfort_score || 0), 0) / scored.length
+    : null;
+  const zonesOk = zones.filter((z) => scoreStatus(z.comfort_score) === 'good').length;
+  const zonesAlert = zones.filter((z) => scoreStatus(z.comfort_score) === 'alert').length;
+  const fieldPoints: ComfortPoint[] = zones.map((z) => ({
+    zone: z.zone,
+    t: Number(z.avg_temperature),
+    rh: Number(z.avg_humidity),
+    status: scoreStatus(z.comfort_score),
+  }));
+
+  if (zones.length === 0 && current_readings.length === 0) {
+    return (
+      <div className="card">
+        <div className="empty-state">
+          <div className="mark"><Gauge size={20} /></div>
+          <strong>Keine Klimadaten vorhanden</strong>
+          <p>Lege im Tab „Sensoren" Klimasensoren an und erfasse Messwerte. Sobald Daten vorliegen, erscheinen hier Komfort-Index, Behaglichkeitsfeld und Zonen-Bewertung.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="stack">
+      {/* Warnungen */}
+      {alerts.length > 0 && (
+        <div className="stack" style={{ gap: 8 }}>
+          {alerts.map((alert, idx) => (
+            <div key={idx} className="result-banner warn">
+              <div className="result-icon"><Info size={18} /></div>
+              <div style={{ flex: 1 }}>
+                <div className="result-headline">{alert.sensor_name}</div>
+                <div className="result-sub">{alert.message}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Score + Behaglichkeitsfeld */}
+      <div className="comfort-grid">
+        <div className="card score-card">
+          <div className="card-title" style={{ alignSelf: 'flex-start' }}>
+            <span className="ico"><Gauge size={15} /></span>Komfort-Index
+          </div>
+          {overallScore != null ? (
+            <RadialScore value={overallScore} sub={`${scored.length} Zonen`} />
+          ) : (
+            <div className="empty-state" style={{ padding: '24px 8px' }}>
+              <p>Noch kein Komfort-Score berechnet.</p>
+            </div>
+          )}
+          <div className="score-caption">
+            Gewichtet über alle Zonen nach Abweichung von Soll-Temperatur und -Feuchte (DIN EN 16798-1).
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <div className="card-title"><span className="ico"><Target size={15} /></span>Behaglichkeitsfeld</div>
+              <div className="card-sub">
+                Operative Temperatur × rel. Feuchte je Zone. Punkte im grünen Feld liegen im behaglichen
+                Bereich nach DIN EN 16798-1.
+              </div>
+            </div>
+          </div>
+          {fieldPoints.length > 0 ? (
+            <>
+              <ComfortField points={fieldPoints} height={340} />
+              <div className="chart-foot">
+                <span className="legend-mini"><span className="dot st-good-bg" style={{ borderRadius: '50%' }} />behaglich</span>
+                <span className="legend-mini"><span className="dot st-warn-bg" style={{ borderRadius: '50%' }} />Randbereich</span>
+                <span className="legend-mini"><span className="dot st-alert-bg" style={{ borderRadius: '50%' }} />unbehaglich</span>
+                <span className="chart-note" style={{ marginLeft: 'auto' }}>Punkt anklicken/hovern für Werte</span>
+              </div>
+            </>
+          ) : (
+            <div className="empty-state"><p>Keine Zonendaten für das Behaglichkeitsfeld.</p></div>
+          )}
+        </div>
+      </div>
+
+      {/* Aktuelle Messwerte */}
+      {current_readings.length > 0 && (
+        <div>
+          <div className="card-head" style={{ marginBottom: 12 }}>
+            <div className="card-title"><span className="ico"><Activity size={15} /></span>Aktuelle Messwerte</div>
+            <span className="scope-tag">{current_readings.length} Sensoren live</span>
+          </div>
+          <div className="metric-cards">
+            {current_readings.map((r) => (
+              <div className="metric-card" key={r.id} style={{ ['--accent' as string]: 'var(--fw-kaelte)' }}>
+                <div className="metric-top">
+                  <div className="metric-name">{r.source}</div>
+                  <span className="metric-zone">
+                    {new Date(r.timestamp).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <div className="metric-readings">
+                  <div className="metric-reading">
+                    <div className="v">{r.temperature != null ? nf(Number(r.temperature), 1) : '–'}<span className="u">°C</span></div>
+                    <div className="l">Temp</div>
+                  </div>
+                  {r.humidity != null && (
+                    <div className="metric-reading">
+                      <div className="v">{nf(Number(r.humidity), 0)}<span className="u">%</span></div>
+                      <div className="l">rH</div>
+                    </div>
+                  )}
+                  {r.dew_point != null && (
+                    <div className="metric-reading">
+                      <div className="v">{nf(Number(r.dew_point), 1)}<span className="u">°C</span></div>
+                      <div className="l">Taupunkt</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Zonen-Karten */}
+      {zones.length > 0 && (
+        <div>
+          <div className="card-head" style={{ marginBottom: 12 }}>
+            <div className="card-title"><span className="ico"><Home size={15} /></span>Zonen — aktuelle Behaglichkeit</div>
+            <span className="scope-tag">{zonesOk}/{zones.length} behaglich · {zonesAlert} kritisch</span>
+          </div>
+          <div className="metric-cards">
+            {zones.map((z) => {
+              const st = scoreStatus(z.comfort_score);
+              return (
+                <div className="metric-card" key={z.zone} style={{ ['--accent' as string]: STATUS_VAR[st] }}>
+                  <div className="metric-top">
+                    <div className="metric-name">{z.zone}</div>
+                    <span className={'metric-status st-' + st}><span className={'dot st-' + st + '-bg'} />{STATUS_LABEL[st]}</span>
+                  </div>
+                  <div className="metric-readings">
+                    <div className="metric-reading">
+                      <div className="v">{nf(Number(z.avg_temperature), 1)}<span className="u">°C</span></div>
+                      <div className="l">Ø Temp</div>
+                    </div>
+                    <div className="metric-reading">
+                      <div className="v">{nf(Number(z.avg_humidity), 0)}<span className="u">%</span></div>
+                      <div className="l">Ø rH</div>
+                    </div>
+                    <div className="metric-reading">
+                      <div className="v">{z.comfort_score != null ? nf(z.comfort_score, 0) : '–'}</div>
+                      <div className="l">Komfort</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Soll-Ist / Zonen-Tabelle */}
+      {zones.length > 0 && (
+        <div className="card" style={{ padding: 0 }}>
+          <div className="card-head" style={{ padding: '16px 16px 0' }}>
+            <div className="card-title"><span className="ico"><TableIcon size={15} /></span>Zonen-Übersicht</div>
+            <div className="card-controls">
+              <InfoTip title="Komfort-Score" formula="Score = T_score × 0.6 + RH_score × 0.4">
+                100 = optimal. Pro 1 °C Abweichung vom Sollbereich −15 Punkte, pro 1 % rLF Abweichung −5 Punkte.
+              </InfoTip>
+            </div>
+          </div>
+          <div className="dtable-wrap" style={{ border: 'none' }}>
+            <table className="dtable">
+              <thead>
+                <tr>
+                  <th>Zone</th>
+                  <th className="num">Ø Temp.</th>
+                  <th className="num">Min</th>
+                  <th className="num">Max</th>
+                  <th className="num">Ø Feuchte</th>
+                  <th className="num">Komfort</th>
+                  <th>Bewertung</th>
+                </tr>
+              </thead>
+              <tbody>
+                {zones.map((z) => {
+                  const st = scoreStatus(z.comfort_score);
+                  return (
+                    <tr key={z.zone}>
+                      <td className="cell-name">{z.zone}</td>
+                      <td className="num strong">{nf(Number(z.avg_temperature), 1)} °C</td>
+                      <td className="num" style={{ color: 'var(--fw-kaelte)' }}>{nf(Number(z.min_temperature), 1)}</td>
+                      <td className="num" style={{ color: 'var(--fw-fernwaerme)' }}>{nf(Number(z.max_temperature), 1)}</td>
+                      <td className="num">{nf(Number(z.avg_humidity), 0)} %</td>
+                      <td className="num strong">{z.comfort_score != null ? nf(z.comfort_score, 0) : '–'}</td>
+                      <td><span className={'metric-status st-' + st}><span className={'dot st-' + st + '-bg'} />{STATUS_LABEL[st]}</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <div className="dtable-foot">Bewertung nach DIN EN 16798-1 (Kategorie II)</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Tab 2: Messwerte ──
+
+function ReadingsPanel() {
+  const [sensors, setSensors] = useState<ClimateSensor[]>([]);
+  const [selectedSensor, setSelectedSensor] = useState('');
+  const [readings, setReadings] = useState<ClimateReading[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await apiClient.get<PaginatedResponse<ClimateSensor>>('/api/v1/climate/sensors?page_size=100');
+        setSensors(res.data.items);
+      } catch {
+        // Interceptor
+      }
+    })();
+  }, []);
+
+  const loadReadings = useCallback(async () => {
+    if (!selectedSensor) return;
+    setLoading(true);
+    try {
+      const res = await apiClient.get<PaginatedResponse<ClimateReading>>(
+        `/api/v1/climate/readings?sensor_id=${selectedSensor}&page_size=100`
+      );
+      setReadings(res.data.items);
+      setTotal(res.data.total);
+    } catch {
+      // Interceptor
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedSensor]);
+
+  useEffect(() => {
+    if (selectedSensor) loadReadings();
+  }, [loadReadings, selectedSensor]);
+
+  // Chart aus den Messwerten (chronologisch)
+  const chrono = [...readings].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  const chartLabels = chrono.map((r) =>
+    new Date(r.timestamp).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+  );
+  const tempSeries = chrono.map((r) => (r.temperature != null ? Number(r.temperature) : null));
+  const humSeries = chrono.map((r) => (r.humidity != null ? Number(r.humidity) : null));
+  const xEvery = Math.max(1, Math.ceil(chartLabels.length / 12));
+
+  return (
+    <div className="stack">
+      <div className="toolbar-card">
+        <div className="field grow" style={{ maxWidth: 360 }}>
+          <label className="field-label">Sensor</label>
+          <select className="uselect" value={selectedSensor} onChange={(e) => setSelectedSensor(e.target.value)}>
+            <option value="">– Sensor wählen –</option>
+            {sensors.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} {s.zone ? `(${s.zone})` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {!selectedSensor ? (
+        <div className="card">
+          <div className="empty-state">
+            <div className="mark"><Activity size={20} /></div>
+            <strong>Sensor wählen</strong>
+            <p>Wähle oben einen Sensor, um seinen Verlauf und die Einzelmesswerte anzuzeigen.</p>
+          </div>
+        </div>
+      ) : loading ? (
+        <div className="card"><LoadingSpinner /></div>
+      ) : readings.length === 0 ? (
+        <div className="card">
+          <div className="empty-state">
+            <div className="mark"><Activity size={20} /></div>
+            <strong>Keine Messwerte</strong>
+            <p>Für diesen Sensor liegen noch keine Messwerte vor.</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="card">
+            <div className="card-head">
+              <div>
+                <div className="card-title"><span className="ico"><Thermometer size={15} /></span>Temperatur & Feuchte</div>
+                <div className="card-sub">Grünes Band markiert den behaglichen Temperaturbereich (20–24 °C).</div>
+              </div>
+              <div className="legend-row">
+                <span className="legend-mini"><span className="dot" style={{ background: 'var(--fw-fernwaerme)' }} />Temperatur</span>
+                <span className="legend-mini"><span className="dot" style={{ background: 'var(--fw-wasser)' }} />rel. Feuchte</span>
+              </div>
+            </div>
+            <MultiLine
+              series={[
+                { key: 't', label: 'Temperatur', color: 'var(--fw-fernwaerme)', data: tempSeries, unit: '°C', decimals: 1 },
+                { key: 'rh', label: 'rel. Feuchte', color: 'var(--fw-wasser)', data: humSeries, unit: '%', decimals: 0 },
+              ]}
+              labels={chartLabels}
+              decimals={0}
+              height={260}
+              xTickEvery={xEvery}
+              bands={[{ from: 20, to: 24, color: 'var(--good)', opacity: 0.08 }]}
+            />
+          </div>
+
+          <div className="card" style={{ padding: 0 }}>
+            <div className="card-head" style={{ padding: '16px 16px 0' }}>
+              <div className="card-title"><span className="ico"><TableIcon size={15} /></span>Einzelmesswerte</div>
+              <span className="scope-tag">{total} gesamt</span>
+            </div>
+            <div className="dtable-wrap" style={{ border: 'none', maxHeight: 420, overflowY: 'auto' }}>
+              <table className="dtable">
+                <thead>
+                  <tr>
+                    <th>Zeitpunkt</th>
+                    <th className="num">Temperatur</th>
+                    <th className="num">Feuchte</th>
+                    <th className="num">
+                      Taupunkt
+                      <InfoTip title="Taupunkt" formula="τ = b×γ/(a−γ), γ = a×T/(b+T) + ln(RH/100)">
+                        Magnus-Formel (a=17.271, b=237.7). Temperatur, ab der Kondenswasser entsteht.
+                      </InfoTip>
+                    </th>
+                    <th>Quelle</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {readings.map((r) => (
+                    <tr key={r.id}>
+                      <td className="cell-name mono">
+                        {new Date(r.timestamp).toLocaleString('de-DE', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </td>
+                      <td className="num strong">{r.temperature != null ? `${nf(Number(r.temperature), 1)} °C` : '–'}</td>
+                      <td className="num">{r.humidity != null ? `${nf(Number(r.humidity), 0)} %` : '–'}</td>
+                      <td className="num" style={{ color: 'var(--ink-3)' }}>{r.dew_point != null ? `${nf(Number(r.dew_point), 1)} °C` : '–'}</td>
+                      <td style={{ color: 'var(--ink-3)' }}>{r.source}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="dtable-foot">{total} Messwerte insgesamt</div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Tab 3: Sensoren ──
 
 function SensorsPanel() {
   const [sensors, setSensors] = useState<ClimateSensor[]>([]);
@@ -155,9 +588,7 @@ function SensorsPanel() {
   const loadSensors = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get<PaginatedResponse<ClimateSensor>>(
-        '/api/v1/climate/sensors?page_size=100'
-      );
+      const res = await apiClient.get<PaginatedResponse<ClimateSensor>>('/api/v1/climate/sensors?page_size=100');
       setSensors(res.data.items);
       setTotal(res.data.total);
     } catch {
@@ -169,29 +600,40 @@ function SensorsPanel() {
 
   useEffect(() => {
     loadSensors();
-    // Standorte einmalig laden
-    apiClient.get('/api/v1/sites?page_size=100')
+    apiClient
+      .get('/api/v1/sites?page_size=100')
       .then((r) => {
         const items = r.data.items || r.data;
         setSites(Array.isArray(items) ? items.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name })) : []);
       })
-      .catch(() => { /* ignorieren */ });
+      .catch(() => {
+        /* ignorieren */
+      });
   }, [loadSensors]);
 
-  // Buildings + Units kaskadierend laden
   useEffect(() => {
-    if (!form.site_id) { setBuildings([]); return; }
-    apiClient.get(`/api/v1/sites/${form.site_id}/buildings`)
+    if (!form.site_id) {
+      setBuildings([]);
+      return;
+    }
+    apiClient
+      .get(`/api/v1/sites/${form.site_id}/buildings`)
       .then((r) => {
         const items = r.data.items || r.data;
-        setBuildings(Array.isArray(items) ? items.map((b: { id: string; name: string }) => ({ id: b.id, name: b.name, site_id: form.site_id })) : []);
+        setBuildings(
+          Array.isArray(items) ? items.map((b: { id: string; name: string }) => ({ id: b.id, name: b.name, site_id: form.site_id })) : []
+        );
       })
       .catch(() => setBuildings([]));
   }, [form.site_id]);
 
   useEffect(() => {
-    if (!form.building_id || !form.site_id) { setUnits([]); return; }
-    apiClient.get(`/api/v1/sites/${form.site_id}/buildings/${form.building_id}`)
+    if (!form.building_id || !form.site_id) {
+      setUnits([]);
+      return;
+    }
+    apiClient
+      .get(`/api/v1/sites/${form.site_id}/buildings/${form.building_id}`)
       .then((r) => {
         const list = (r.data?.usage_units ?? []) as Array<{ id: string; name: string }>;
         setUnits(list.map((u) => ({ id: u.id, name: u.name, building_id: form.building_id })));
@@ -247,105 +689,95 @@ function SensorsPanel() {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-gray-500">{total} Sensoren</p>
-        <div className="flex gap-2">
-          <button onClick={() => setShowDiscovery(true)} className="btn-secondary">Sensoren entdecken</button>
-          <button onClick={handleCreate} className="btn-primary">+ Neuer Sensor</button>
+    <div className="stack">
+      <div className="card" style={{ padding: 0 }}>
+        <div className="card-head" style={{ padding: '16px 16px 0' }}>
+          <div>
+            <div className="card-title"><span className="ico"><RadioTower size={15} /></span>Klimasensoren</div>
+            <div className="card-sub">Temperatur-/Feuchtesensoren je Zone, optional strukturell zugeordnet.</div>
+          </div>
+          <div className="card-controls">
+            <button className="btn-ghost small" onClick={() => setShowDiscovery(true)}>
+              <Search size={14} />Entdecken
+            </button>
+            <button className="btn-primary small" onClick={handleCreate}>
+              <Plus size={14} />Neuer Sensor
+            </button>
+          </div>
         </div>
-      </div>
-
-      <div className="card overflow-hidden p-0">
         {loading ? (
-          <LoadingSpinner />
+          <div style={{ padding: 24 }}><LoadingSpinner /></div>
         ) : sensors.length === 0 ? (
-          <div className="p-8 text-center text-gray-400">Keine Sensoren angelegt.</div>
+          <div className="empty-state">
+            <div className="mark"><RadioTower size={20} /></div>
+            <strong>Keine Sensoren angelegt</strong>
+            <p>Lege manuell einen Sensor an oder nutze „Entdecken", um Sensoren aus Home Assistant zu importieren.</p>
+          </div>
         ) : (
-          <table className="w-full text-left text-sm">
-            <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-              <tr>
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">Typ</th>
-                <th className="px-4 py-3">Zone / Zuordnung</th>
-                <th className="px-4 py-3">Quelle</th>
-                <th className="px-4 py-3">Sollbereich</th>
-                <th className="px-4 py-3 text-right">Aktionen</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {sensors.map((s) => {
-                const siteName = sites.find((x) => x.id === s.site_id)?.name;
-                const bldName = buildings.find((x) => x.id === s.building_id)?.name;
-                const unitName = units.find((x) => x.id === s.usage_unit_id)?.name;
-                const path = [siteName, bldName, unitName].filter(Boolean).join(' › ');
-                return (
-                <tr key={s.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium">{s.name}</td>
-                  <td className="px-4 py-3 text-gray-500">{SENSOR_TYPES[s.sensor_type] || s.sensor_type}</td>
-                  <td className="px-4 py-3">
-                    {s.zone && (
-                      <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
-                        {s.zone}
-                      </span>
-                    )}
-                    {path && <div className="mt-0.5 text-xs text-gray-500">{path}</div>}
-                    {!s.zone && !path && '–'}
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">{DATA_SOURCES[s.data_source] || s.data_source}</td>
-                  <td className="px-4 py-3 text-gray-500 text-xs font-mono">
-                    {s.target_temp_min && s.target_temp_max
-                      ? `${s.target_temp_min}–${s.target_temp_max} °C`
-                      : '–'}
-                    {s.target_humidity_min && s.target_humidity_max
-                      ? ` / ${s.target_humidity_min}–${s.target_humidity_max} %`
-                      : ''}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button onClick={() => handleDelete(s)} className="text-red-500 hover:text-red-700 text-sm">
-                      Löschen
-                    </button>
-                  </td>
+          <div className="dtable-wrap" style={{ border: 'none' }}>
+            <table className="dtable">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Typ</th>
+                  <th>Zone / Zuordnung</th>
+                  <th>Quelle</th>
+                  <th>Sollbereich</th>
+                  <th></th>
                 </tr>
-                );
-              })}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {sensors.map((s) => {
+                  const siteName = sites.find((x) => x.id === s.site_id)?.name;
+                  const bldName = buildings.find((x) => x.id === s.building_id)?.name;
+                  const unitName = units.find((x) => x.id === s.usage_unit_id)?.name;
+                  const path = [siteName, bldName, unitName].filter(Boolean).join(' › ');
+                  return (
+                    <tr key={s.id}>
+                      <td className="cell-name">{s.name}</td>
+                      <td style={{ color: 'var(--ink-3)' }}>{SENSOR_TYPES[s.sensor_type] || s.sensor_type}</td>
+                      <td>
+                        {s.zone && <span className="scope-tag">{s.zone}</span>}
+                        {path && <div className="cell-sub">{path}</div>}
+                        {!s.zone && !path && <span className="muted">–</span>}
+                      </td>
+                      <td style={{ color: 'var(--ink-3)' }}>{DATA_SOURCES[s.data_source] || s.data_source}</td>
+                      <td className="mono" style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                        {s.target_temp_min && s.target_temp_max ? `${s.target_temp_min}–${s.target_temp_max} °C` : '–'}
+                        {s.target_humidity_min && s.target_humidity_max ? ` / ${s.target_humidity_min}–${s.target_humidity_max} %` : ''}
+                      </td>
+                      <td className="num">
+                        <a className="row-action danger" onClick={() => handleDelete(s)}>
+                          <Trash2 size={13} style={{ display: 'inline', verticalAlign: -2 }} /> Löschen
+                        </a>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <div className="dtable-foot">{total} Sensoren</div>
+          </div>
         )}
       </div>
 
-      {/* Discovery-Modal */}
-      {showDiscovery && (
-        <DiscoveryModal
-          mode="climate"
-          onClose={() => setShowDiscovery(false)}
-          onCreated={loadSensors}
-        />
-      )}
+      {showDiscovery && <DiscoveryModal mode="climate" onClose={() => setShowDiscovery(false)} onCreated={loadSensors} />}
 
-      {/* Modal: Neuer Sensor */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
-            <h2 className="mb-4 text-lg font-bold">Neuer Klimasensor</h2>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {formError && (
-                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{formError}</div>
-              )}
+        <div className="umodal-overlay" onClick={() => setShowModal(false)}>
+          <div className="umwelt-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600 }}>
+            <h2>Neuer Klimasensor</h2>
+            <form onSubmit={handleSubmit}>
+              {formError && <div className="form-err">{formError}</div>}
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Name *</label>
-                  <input
-                    type="text" className="input" required autoFocus
-                    value={form.name}
-                    onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  />
+              <div className="form-grid2">
+                <div className="field">
+                  <label className="field-label">Name *</label>
+                  <input type="text" className="uinput" required autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
                 </div>
-                <div>
-                  <label className="label">Typ</label>
-                  <select className="input" value={form.sensor_type}
-                    onChange={(e) => setForm({ ...form, sensor_type: e.target.value })}>
+                <div className="field">
+                  <label className="field-label">Typ</label>
+                  <select className="uselect" value={form.sensor_type} onChange={(e) => setForm({ ...form, sensor_type: e.target.value })}>
                     {Object.entries(SENSOR_TYPES).map(([k, v]) => (
                       <option key={k} value={k}>{v}</option>
                     ))}
@@ -353,58 +785,58 @@ function SensorsPanel() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Position (Freitext)</label>
-                  <input type="text" className="input" placeholder="z.B. Büro EG"
-                    value={form.location}
-                    onChange={(e) => setForm({ ...form, location: e.target.value })} />
+              <div className="form-grid2">
+                <div className="field">
+                  <label className="field-label">Position</label>
+                  <input type="text" className="uinput" placeholder="z. B. Büro EG" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
                 </div>
-                <div>
-                  <label className="label">Zone</label>
-                  <input type="text" className="input" placeholder="z.B. Heizzone 1"
-                    value={form.zone}
-                    onChange={(e) => setForm({ ...form, zone: e.target.value })} />
+                <div className="field">
+                  <label className="field-label">Zone</label>
+                  <input type="text" className="uinput" placeholder="z. B. Heizzone 1" value={form.zone} onChange={(e) => setForm({ ...form, zone: e.target.value })} />
                 </div>
               </div>
 
-              {/* Strukturelle Zuordnung: Standort → Gebäude → Nutzungseinheit */}
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                <p className="text-xs font-medium text-gray-600 mb-2">Strukturelle Zuordnung (optional, für Auswertungen)</p>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="label">Standort</label>
-                    <select className="input" value={form.site_id}
-                      onChange={(e) => setForm({ ...form, site_id: e.target.value, building_id: '', usage_unit_id: '' })}>
-                      <option value="">— nicht zugeordnet —</option>
-                      {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="label">Gebäude</label>
-                    <select className="input" value={form.building_id}
-                      disabled={!form.site_id || buildings.length === 0}
-                      onChange={(e) => setForm({ ...form, building_id: e.target.value, usage_unit_id: '' })}>
-                      <option value="">{form.site_id ? (buildings.length ? '— wählen —' : 'keine') : 'erst Standort'}</option>
-                      {buildings.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="label">Nutzungseinheit</label>
-                    <select className="input" value={form.usage_unit_id}
-                      disabled={!form.building_id || units.length === 0}
-                      onChange={(e) => setForm({ ...form, usage_unit_id: e.target.value })}>
-                      <option value="">{form.building_id ? (units.length ? '— wählen —' : 'keine') : 'erst Gebäude'}</option>
-                      {units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                    </select>
-                  </div>
+              <div className="field">
+                <label className="field-label">Strukturelle Zuordnung (optional)</label>
+                <div className="form-grid2" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+                  <select
+                    className="uselect"
+                    value={form.site_id}
+                    onChange={(e) => setForm({ ...form, site_id: e.target.value, building_id: '', usage_unit_id: '' })}
+                  >
+                    <option value="">— Standort —</option>
+                    {sites.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                  <select
+                    className="uselect"
+                    value={form.building_id}
+                    disabled={!form.site_id || buildings.length === 0}
+                    onChange={(e) => setForm({ ...form, building_id: e.target.value, usage_unit_id: '' })}
+                  >
+                    <option value="">{form.site_id ? (buildings.length ? '— Gebäude —' : 'keine') : 'erst Standort'}</option>
+                    {buildings.map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                  <select
+                    className="uselect"
+                    value={form.usage_unit_id}
+                    disabled={!form.building_id || units.length === 0}
+                    onChange={(e) => setForm({ ...form, usage_unit_id: e.target.value })}
+                  >
+                    <option value="">{form.building_id ? (units.length ? '— Einheit —' : 'keine') : 'erst Gebäude'}</option>
+                    {units.map((u) => (
+                      <option key={u.id} value={u.id}>{u.name}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
-              <div>
-                <label className="label">Datenquelle</label>
-                <select className="input" value={form.data_source}
-                  onChange={(e) => setForm({ ...form, data_source: e.target.value })}>
+              <div className="field">
+                <label className="field-label">Datenquelle</label>
+                <select className="uselect" value={form.data_source} onChange={(e) => setForm({ ...form, data_source: e.target.value })}>
                   {Object.entries(DATA_SOURCES).map(([k, v]) => (
                     <option key={k} value={k}>{v}</option>
                   ))}
@@ -412,53 +844,32 @@ function SensorsPanel() {
               </div>
 
               {form.data_source === 'homeassistant' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="label">HA Entity-ID Temperatur</label>
-                    <input type="text" className="input" placeholder="sensor.temp_buero"
-                      value={form.ha_entity_id_temp}
-                      onChange={(e) => setForm({ ...form, ha_entity_id_temp: e.target.value })} />
+                <div className="form-grid2">
+                  <div className="field">
+                    <label className="field-label">HA Entity Temperatur</label>
+                    <input type="text" className="uinput mono" placeholder="sensor.temp_buero" value={form.ha_entity_id_temp} onChange={(e) => setForm({ ...form, ha_entity_id_temp: e.target.value })} />
                   </div>
-                  <div>
-                    <label className="label">HA Entity-ID Feuchte</label>
-                    <input type="text" className="input" placeholder="sensor.humidity_buero"
-                      value={form.ha_entity_id_humidity}
-                      onChange={(e) => setForm({ ...form, ha_entity_id_humidity: e.target.value })} />
+                  <div className="field">
+                    <label className="field-label">HA Entity Feuchte</label>
+                    <input type="text" className="uinput mono" placeholder="sensor.humidity_buero" value={form.ha_entity_id_humidity} onChange={(e) => setForm({ ...form, ha_entity_id_humidity: e.target.value })} />
                   </div>
                 </div>
               )}
 
-              <div className="grid grid-cols-4 gap-4">
-                <div>
-                  <label className="label">T_min (°C)</label>
-                  <input type="number" step="0.1" className="input"
-                    value={form.target_temp_min}
-                    onChange={(e) => setForm({ ...form, target_temp_min: e.target.value })} />
-                </div>
-                <div>
-                  <label className="label">T_max (°C)</label>
-                  <input type="number" step="0.1" className="input"
-                    value={form.target_temp_max}
-                    onChange={(e) => setForm({ ...form, target_temp_max: e.target.value })} />
-                </div>
-                <div>
-                  <label className="label">RH_min (%)</label>
-                  <input type="number" step="1" className="input"
-                    value={form.target_humidity_min}
-                    onChange={(e) => setForm({ ...form, target_humidity_min: e.target.value })} />
-                </div>
-                <div>
-                  <label className="label">RH_max (%)</label>
-                  <input type="number" step="1" className="input"
-                    value={form.target_humidity_max}
-                    onChange={(e) => setForm({ ...form, target_humidity_max: e.target.value })} />
+              <div className="field">
+                <label className="field-label">Sollbereiche</label>
+                <div className="form-grid2" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+                  <input type="number" step="0.1" className="uinput mono" placeholder="T min" value={form.target_temp_min} onChange={(e) => setForm({ ...form, target_temp_min: e.target.value })} />
+                  <input type="number" step="0.1" className="uinput mono" placeholder="T max" value={form.target_temp_max} onChange={(e) => setForm({ ...form, target_temp_max: e.target.value })} />
+                  <input type="number" step="1" className="uinput mono" placeholder="rH min" value={form.target_humidity_min} onChange={(e) => setForm({ ...form, target_humidity_min: e.target.value })} />
+                  <input type="number" step="1" className="uinput mono" placeholder="rH max" value={form.target_humidity_max} onChange={(e) => setForm({ ...form, target_humidity_max: e.target.value })} />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">Abbrechen</button>
+              <div className="modal-actions">
+                <button type="button" className="btn-ghost" onClick={() => setShowModal(false)}>Abbrechen</button>
                 <button type="submit" className="btn-primary" disabled={saving}>
-                  {saving ? 'Speichern...' : 'Anlegen'}
+                  {saving ? 'Speichern…' : 'Anlegen'}
                 </button>
               </div>
             </form>
@@ -466,248 +877,5 @@ function SensorsPanel() {
         </div>
       )}
     </div>
-  );
-}
-
-// ── Messwerte ──
-
-function ReadingsPanel() {
-  const [sensors, setSensors] = useState<ClimateSensor[]>([]);
-  const [selectedSensor, setSelectedSensor] = useState('');
-  const [readings, setReadings] = useState<ClimateReading[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await apiClient.get<PaginatedResponse<ClimateSensor>>(
-          '/api/v1/climate/sensors?page_size=100'
-        );
-        setSensors(res.data.items);
-      } catch {
-        // Interceptor
-      }
-    })();
-  }, []);
-
-  const loadReadings = useCallback(async () => {
-    if (!selectedSensor) return;
-    setLoading(true);
-    try {
-      const res = await apiClient.get<PaginatedResponse<ClimateReading>>(
-        `/api/v1/climate/readings?sensor_id=${selectedSensor}&page_size=100`
-      );
-      setReadings(res.data.items);
-      setTotal(res.data.total);
-    } catch {
-      // Interceptor
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedSensor]);
-
-  useEffect(() => {
-    if (selectedSensor) loadReadings();
-  }, [loadReadings, selectedSensor]);
-
-  return (
-    <div className="space-y-4">
-      <div className="card">
-        <label className="label">Sensor auswählen</label>
-        <select
-          className="input max-w-md"
-          value={selectedSensor}
-          onChange={(e) => setSelectedSensor(e.target.value)}
-        >
-          <option value="">– Sensor wählen –</option>
-          {sensors.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name} {s.zone ? `(${s.zone})` : ''}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {selectedSensor && (
-        <div className="card overflow-hidden p-0">
-          {loading ? (
-            <LoadingSpinner />
-          ) : readings.length === 0 ? (
-            <div className="p-8 text-center text-gray-400">Keine Messwerte vorhanden.</div>
-          ) : (
-            <>
-              <div className="max-h-[400px] overflow-y-auto">
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 border-b bg-gray-50 text-xs uppercase text-gray-500">
-                    <tr>
-                      <th className="px-3 py-2 text-left">Zeitpunkt</th>
-                      <th className="px-3 py-2 text-right">Temperatur</th>
-                      <th className="px-3 py-2 text-right">Feuchte</th>
-                      <th className="px-3 py-2 text-right">
-                        Taupunkt
-                        <InfoTip title="Taupunkt" formula="τ = b×γ/(a−γ), γ = a×T/(b+T) + ln(RH/100)">
-                          Magnus-Formel (a=17.271, b=237.7). Temperatur, ab der Kondenswasser entsteht.
-                        </InfoTip>
-                      </th>
-                      <th className="px-3 py-2 text-left">Quelle</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {readings.map((r) => (
-                      <tr key={r.id} className="hover:bg-gray-50">
-                        <td className="px-3 py-1.5">
-                          {new Date(r.timestamp).toLocaleString('de-DE', {
-                            day: '2-digit', month: '2-digit', year: 'numeric',
-                            hour: '2-digit', minute: '2-digit',
-                          })}
-                        </td>
-                        <td className="px-3 py-1.5 text-right font-mono">
-                          {r.temperature != null ? `${Number(r.temperature).toFixed(1)} °C` : '–'}
-                        </td>
-                        <td className="px-3 py-1.5 text-right font-mono">
-                          {r.humidity != null ? `${Number(r.humidity).toFixed(0)} %` : '–'}
-                        </td>
-                        <td className="px-3 py-1.5 text-right font-mono text-gray-500">
-                          {r.dew_point != null ? `${Number(r.dew_point).toFixed(1)} °C` : '–'}
-                        </td>
-                        <td className="px-3 py-1.5 text-gray-500">{r.source}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="border-t bg-gray-50 px-3 py-2 text-xs text-gray-500">
-                {total} Messwerte insgesamt
-              </div>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Komfort-Dashboard ──
-
-function ComfortPanel() {
-  const [dashboard, setDashboard] = useState<{
-    zones: ZoneSummary[];
-    current_readings: ClimateReading[];
-    alerts: Array<{ sensor_name: string; comfort_score: number; message: string }>;
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await apiClient.get('/api/v1/climate/comfort');
-        setDashboard(res.data);
-      } catch {
-        // Interceptor
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  if (loading) return <div className="card"><LoadingSpinner /></div>;
-  if (!dashboard) return <div className="card text-gray-400">Keine Daten verfügbar.</div>;
-
-  return (
-    <div className="space-y-4">
-      {/* Warnungen */}
-      {dashboard.alerts.length > 0 && (
-        <div className="space-y-2">
-          {dashboard.alerts.map((alert, idx) => (
-            <div key={idx} className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
-              <span className="font-medium">{alert.sensor_name}:</span> {alert.message}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Aktuelle Messwerte */}
-      {dashboard.current_readings.length > 0 && (
-        <div>
-          <h3 className="mb-2 text-sm font-semibold text-gray-700">Aktuelle Messwerte</h3>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-            {dashboard.current_readings.map((r) => (
-              <div key={r.id} className="card text-center">
-                <div className="text-2xl font-bold">
-                  {r.temperature != null ? `${Number(r.temperature).toFixed(1)} °C` : '–'}
-                </div>
-                {r.humidity != null && (
-                  <div className="text-sm text-gray-500">{Number(r.humidity).toFixed(0)} % RH</div>
-                )}
-                <div className="text-xs text-gray-400 mt-1">
-                  {new Date(r.timestamp).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Zonen-Übersicht */}
-      {dashboard.zones.length > 0 && (
-        <div className="card overflow-hidden p-0">
-          <div className="bg-gray-50 px-4 py-2 text-xs font-semibold uppercase text-gray-500">
-            Zonen-Übersicht
-          </div>
-          <table className="w-full text-sm">
-            <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-              <tr>
-                <th className="px-4 py-2 text-left">Zone</th>
-                <th className="px-4 py-2 text-right">T_avg</th>
-                <th className="px-4 py-2 text-right">T_min</th>
-                <th className="px-4 py-2 text-right">T_max</th>
-                <th className="px-4 py-2 text-right">RH_avg</th>
-                <th className="px-4 py-2 text-right">
-                  Komfort
-                  <InfoTip title="Komfort-Score" formula="Score = T_score × 0.6 + RH_score × 0.4">
-                    100 = optimal. Pro 1 °C Abweichung vom Sollbereich −15 Punkte, pro 1 % rLF Abweichung −5 Punkte.
-                  </InfoTip>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {dashboard.zones.map((z, idx) => (
-                <tr key={idx} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 font-medium">{z.zone}</td>
-                  <td className="px-4 py-2 text-right font-mono">{Number(z.avg_temperature).toFixed(1)} °C</td>
-                  <td className="px-4 py-2 text-right font-mono text-blue-600">{Number(z.min_temperature).toFixed(1)}</td>
-                  <td className="px-4 py-2 text-right font-mono text-red-500">{Number(z.max_temperature).toFixed(1)}</td>
-                  <td className="px-4 py-2 text-right font-mono">{Number(z.avg_humidity).toFixed(0)} %</td>
-                  <td className="px-4 py-2 text-right">
-                    {z.comfort_score != null ? (
-                      <ComfortBadge score={z.comfort_score} />
-                    ) : '–'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {dashboard.zones.length === 0 && dashboard.current_readings.length === 0 && (
-        <div className="card text-center text-gray-400 py-8">
-          Keine Klimadaten vorhanden. Legen Sie Sensoren an und erfassen Sie Messwerte.
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ComfortBadge({ score }: { score: number }) {
-  let color = 'bg-green-100 text-green-700';
-  if (score < 50) color = 'bg-red-100 text-red-700';
-  else if (score < 75) color = 'bg-yellow-100 text-yellow-700';
-
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold ${color}`}>
-      {Number(score).toFixed(0)}
-    </span>
   );
 }

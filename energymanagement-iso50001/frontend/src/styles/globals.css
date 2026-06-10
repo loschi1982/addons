@@ -3406,3 +3406,32 @@ nav.flex.gap-6 > button.pb-2:hover { color: var(--ink); }
 .umwelt .info-row .il { font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 10px; }
 .umwelt .info-row .iv { font-family: var(--font-mono); font-size: 14px; font-weight: 500; color: var(--ink); }
 .umwelt .info-row .is { font-size: 11.5px; color: var(--ink-3); }
+
+/* ─── Umwelt · Raumklima-Komfort (comfort-grid, metric-cards) ──────── */
+.umwelt .comfort-grid { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+.umwelt .score-card { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.umwelt .score-caption { font-size: 12.5px; color: var(--ink-3); text-align: center; max-width: 34ch; }
+.umwelt .score-tags { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.umwelt .score-tag { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 99px; }
+.umwelt .score-tag .dot { width: 7px; height: 7px; border-radius: 50%; }
+.umwelt .behag-zone { fill: color-mix(in srgb, var(--good) 14%, transparent); stroke: var(--good); stroke-dasharray: 3 3; stroke-width: 1; }
+
+.umwelt .metric-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.umwelt .metric-card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-md); padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 7px; position: relative; overflow: hidden;
+}
+.umwelt .metric-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--accent, var(--ink-4)); }
+.umwelt .metric-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.umwelt .metric-name { font-size: 12.5px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.umwelt .metric-zone { font-size: 10.5px; color: var(--ink-3); }
+.umwelt .metric-readings { display: flex; gap: 16px; }
+.umwelt .metric-reading { display: flex; flex-direction: column; gap: 1px; }
+.umwelt .metric-reading .v { font-family: var(--font-mono); font-size: 22px; font-weight: 600; color: var(--ink); letter-spacing: -0.02em; }
+.umwelt .metric-reading .v .u { font-size: 11px; color: var(--ink-3); font-weight: 500; }
+.umwelt .metric-reading .l { font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; }
+
+@media (max-width: 1180px) {
+  .umwelt .comfort-grid { grid-template-columns: 1fr; }
+}
