@@ -1,10 +1,23 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import {
+  Upload,
+  History,
+  Info,
+  ChevronDown,
+  ChevronRight,
+  X,
+  Check,
+  CheckCircle2,
+  AlertTriangle,
+  ArrowRight,
+  Plus,
+  RefreshCw,
+  Plug,
+} from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType, type PaginatedResponse } from '@/types';
-import { Info } from 'lucide-react';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import PageHead from '@/components/ui/PageHead';
-import SegControl from '@/components/ui/SegControl';
 
 // ── Typen ──
 
@@ -84,6 +97,7 @@ export default function ImportPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
+  const [fileName, setFileName] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Single-Meter Mapping
@@ -114,9 +128,7 @@ export default function ImportPage() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await apiClient.get<PaginatedResponse<Meter>>(
-          '/api/v1/meters?page_size=100'
-        );
+        const res = await apiClient.get<PaginatedResponse<Meter>>('/api/v1/meters?page_size=100');
         setMeters(res.data.items);
       } catch {
         // Interceptor handled
@@ -155,7 +167,6 @@ export default function ImportPage() {
       setUploadResult(res.data);
 
       if (res.data.is_multi_meter && res.data.meter_columns) {
-        // Multi-Meter: Auto-Matching übernehmen
         const autoMapping: Record<string, string> = {};
         for (const mc of res.data.meter_columns) {
           if (mc.matched_meter_id) {
@@ -164,7 +175,6 @@ export default function ImportPage() {
         }
         setMeterColumnMapping(autoMapping);
       } else {
-        // Single-Meter: bisherige Auto-Erkennung
         const autoMapping: Record<string, string> = {};
         for (const col of res.data.detected_columns) {
           const lower = col.toLowerCase();
@@ -192,8 +202,6 @@ export default function ImportPage() {
     setColumnMapping(profile.column_mapping);
     setDateFormat(profile.date_format || '');
     setDecimalSeparator(profile.decimal_separator);
-
-    // Multi-Meter: Spalten-Index → Meter-UUID aus Profil übernehmen
     if (profile.meter_mapping) {
       setMeterColumnMapping(profile.meter_mapping);
     }
@@ -205,14 +213,12 @@ export default function ImportPage() {
     setMappingError(null);
 
     if (uploadResult?.is_multi_meter) {
-      // Multi-Meter Validierung
-      const assignedCount = Object.values(meterColumnMapping).filter(v => v).length;
+      const assignedCount = Object.values(meterColumnMapping).filter((v) => v).length;
       if (assignedCount === 0) {
         setMappingError('Bitte ordnen Sie mindestens eine Spalte einem Zähler zu.');
         return;
       }
     } else {
-      // Single-Meter Validierung
       const mapped = Object.values(columnMapping);
       if (!mapped.includes('timestamp')) {
         setMappingError('Bitte ordnen Sie eine Spalte als "Zeitstempel" zu.');
@@ -232,7 +238,6 @@ export default function ImportPage() {
 
     try {
       if (uploadResult?.is_multi_meter) {
-        // Multi-Meter: meter_column_mapping senden
         const filteredMapping: Record<string, string> = {};
         for (const [colIdx, meterId] of Object.entries(meterColumnMapping)) {
           if (meterId) {
@@ -251,7 +256,6 @@ export default function ImportPage() {
         });
         setImportResult(res.data);
       } else {
-        // Single-Meter: bisheriger Flow
         const finalMapping = { ...columnMapping };
         const mapped = Object.values(columnMapping);
         if (!mapped.includes('meter_id') && selectedMeterId) {
@@ -291,6 +295,7 @@ export default function ImportPage() {
     setImportResult(null);
     setUploadError(null);
     setMappingError(null);
+    setFileName('');
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -324,213 +329,158 @@ export default function ImportPage() {
 
   // ── Hilfsfunktionen ──
 
-  // Für Multi-Meter: welche Meter-IDs sind bereits vergeben
   const assignedMeterIds = new Set(Object.values(meterColumnMapping).filter(Boolean));
-
-  // Zähler-Name finden
   const getMeterLabel = (meterId: string) => {
-    const m = meters.find(m => m.id === meterId);
+    const m = meters.find((m) => m.id === meterId);
     return m ? `${m.name} (${ENERGY_TYPE_LABELS[m.energy_type as EnergyType] || m.energy_type})` : meterId;
   };
-
-  // Multi-Meter: Anzahl zugeordneter Spalten
   const assignedColumnCount = Object.values(meterColumnMapping).filter(Boolean).length;
 
+  const STEPS: Array<{ id: WizardStep; label: string }> = [
+    { id: 'upload', label: 'Hochladen' },
+    { id: 'mapping', label: 'Zuordnung' },
+    { id: 'result', label: 'Ergebnis' },
+  ];
+  const stepIndex = STEPS.findIndex((s) => s.id === step);
+
   return (
-    <div>
-      <PageHead
-        eyebrow="System"
-        title="Datenimport"
-        actions={
-          <SegControl
-            value={activeTab}
-            onChange={(v) => setActiveTab(v as 'wizard' | 'history')}
-            options={[
-              { value: 'wizard', label: 'Import-Assistent' },
-              { value: 'history', label: 'Import-Verlauf' },
-            ]}
-          />
-        }
-      />
-      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
-        Zählerstände aus CSV oder Excel-Dateien importieren
-      </p>
+    <div className="imp">
+      <PageHead eyebrow="System" title="Datenimport" />
+      <div className="head-lead">Zählerstände aus CSV- oder Excel-Dateien importieren · SPIE-Automatik anbinden</div>
+
+      <div className="imp-tabs">
+        <button className={'imp-tab' + (activeTab === 'wizard' ? ' active' : '')} onClick={() => setActiveTab('wizard')}>
+          <Upload size={15} /> Import-Assistent
+        </button>
+        <button className={'imp-tab' + (activeTab === 'history' ? ' active' : '')} onClick={() => setActiveTab('history')}>
+          <History size={15} /> Import-Verlauf
+          {history.length > 0 && <span className="tab-badge">{history.length}</span>}
+        </button>
+      </div>
 
       {activeTab === 'wizard' && (
-        <div className="mt-4">
-          {/* Fortschrittsanzeige */}
-          <div className="mb-6 flex items-center gap-2 text-sm">
-            <StepIndicator label="1. Hochladen" active={step === 'upload'} done={step !== 'upload'} />
-            <span className="text-gray-300">→</span>
-            <StepIndicator label="2. Zuordnung" active={step === 'mapping'} done={step === 'result'} />
-            <span className="text-gray-300">→</span>
-            <StepIndicator label="3. Ergebnis" active={step === 'result'} done={false} />
+        <div className="imp-wrap">
+          {/* Stepper */}
+          <div className="stepper">
+            {STEPS.map((s, i) => (
+              <span key={s.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span className={'step' + (i === stepIndex ? ' active' : i < stepIndex ? ' done' : '')}>
+                  <span className="num">{i < stepIndex ? <Check size={12} /> : i + 1}</span>
+                  {s.label}
+                </span>
+                {i < STEPS.length - 1 && <span className="step-sep"><ChevronRight size={14} /></span>}
+              </span>
+            ))}
           </div>
 
           {/* ── Schritt 1: Upload ── */}
           {step === 'upload' && (
-            <div className="space-y-4">
-              {/* Format-Hinweis */}
-              <div className="card border-blue-200 bg-blue-50/50">
-                <button
-                  onClick={() => setShowFormatHint(!showFormatHint)}
-                  className="flex items-center gap-2 text-sm font-semibold text-blue-800 w-full text-left"
-                >
-                  <Info className="w-4 h-4" />
-                  CSV-Format-Vorgabe
-                  <span className="ml-auto text-xs text-blue-600">{showFormatHint ? 'Ausblenden' : 'Anzeigen'}</span>
-                </button>
-                {showFormatHint && (
-                  <div className="mt-3 space-y-2 text-sm text-blue-900">
-                    <p className="font-medium">Einzelzähler-CSV:</p>
-                    <div className="rounded bg-white/70 px-3 py-2 font-mono text-xs border border-blue-200">
-                      Zeitstempel;Zählerstand<br />
-                      01.01.2025;16600,49<br />
-                      02.01.2025;22302,95
-                    </div>
-                    <p className="font-medium mt-3">Multi-Zähler-CSV:</p>
-                    <div className="rounded bg-white/70 px-3 py-2 font-mono text-xs border border-blue-200">
-                      Datum;Zähler A;Zähler B;Zähler C<br />
-                      01.01.2025;16600,49;0;0,82<br />
-                      02.01.2025;22302,95;0;0,19
-                    </div>
-                    <ul className="list-disc list-inside text-xs space-y-1 mt-2 text-blue-800">
-                      <li><strong>1. Spalte:</strong> Zeitstempel (TT.MM.JJJJ oder JJJJ-MM-TT)</li>
-                      <li><strong>Ab Spalte 2:</strong> Je ein Zählerwert pro Spalte</li>
-                      <li><strong>1. Zeile:</strong> Spaltenüberschriften (Name/Kennung des Zählers)</li>
-                      <li><strong>Trennzeichen:</strong> Semikolon oder Komma (automatisch erkannt)</li>
-                      <li><strong>Dezimalformat:</strong> Komma (1.234,56) oder Punkt (1,234.56)</li>
-                      <li>Keine Messstatus-, Einheiten- oder sonstige Zusatzspalten</li>
-                    </ul>
+            <>
+              <FormatPanel open={showFormatHint} onToggle={() => setShowFormatHint((v) => !v)} />
+
+              {uploadError && (
+                <div className="result-banner" style={{ background: 'color-mix(in srgb, var(--alert) 8%, var(--surface))', border: '1px solid color-mix(in srgb, var(--alert) 30%, var(--line))', borderRadius: 'var(--r-md)', padding: '12px 14px', color: 'var(--alert)', fontSize: 13 }}>
+                  {uploadError}
+                </div>
+              )}
+
+              <div className={'dropzone' + (fileName ? ' armed' : '')}>
+                <span className="dz-ico"><Upload size={20} /></span>
+                <div className="dz-body">
+                  <div className="dz-title">
+                    {fileName ? <>Bereit: <span className="fname">{fileName}</span></> : 'CSV- oder Excel-Datei hochladen'}
                   </div>
-                )}
-              </div>
-
-              <div className="card">
-                <h2 className="mb-4 text-base font-semibold">Datei hochladen</h2>
-                <p className="mb-4 text-sm text-gray-500">
-                  Unterstützte Formate: CSV (.csv), Excel (.xlsx, .xls).
-                  Die Spalten werden automatisch erkannt.
-                </p>
-
-                {uploadError && (
-                  <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{uploadError}</div>
-                )}
-
-                <div className="flex items-end gap-4">
-                  <div className="flex-1">
-                    <label className="label">Datei auswählen *</label>
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      accept=".csv,.xlsx,.xls"
-                      className="input"
-                    />
-                  </div>
-                  <button
-                    onClick={handleUpload}
-                    className="btn-primary"
-                    disabled={uploading}
-                  >
-                    {uploading ? 'Wird hochgeladen...' : 'Hochladen'}
+                  <div className="dz-sub">Unterstützt: .csv, .xlsx, .xls · Spalten werden automatisch erkannt</div>
+                </div>
+                <div className="dz-actions">
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    className="file-native"
+                    onChange={(e) => setFileName(e.target.files?.[0]?.name || '')}
+                  />
+                  <button onClick={handleUpload} className="btn-primary" disabled={uploading || !fileName}>
+                    {uploading ? <RefreshCw size={14} /> : <Upload size={14} />}
+                    {uploading ? 'Wird hochgeladen…' : 'Hochladen'}
                   </button>
                 </div>
               </div>
-            </div>
+
+              <SpiePanel />
+            </>
           )}
 
           {/* ── Schritt 2: Mapping ── */}
           {step === 'mapping' && uploadResult && (
-            <div className="space-y-4">
-              <div className="card">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h2 className="text-base font-semibold">
-                      {uploadResult.is_multi_meter ? 'Zähler-Zuordnung' : 'Spaltenzuordnung'}
-                    </h2>
-                    <p className="text-sm text-gray-500">
-                      {uploadResult.filename} – {uploadResult.row_count} Zeilen,{' '}
-                      {uploadResult.is_multi_meter
-                        ? `${uploadResult.meter_columns?.length || 0} Zähler-Spalten erkannt`
-                        : `${uploadResult.detected_columns.length} Spalten erkannt`}
-                    </p>
-                  </div>
-                  <button onClick={handleReset} className="btn-secondary text-sm">
-                    Andere Datei
-                  </button>
+            <>
+              <div className="file-summary">
+                <span className="fs-ico"><CheckCircle2 size={18} /></span>
+                <div>
+                  <div className="fs-name">{uploadResult.filename}</div>
+                  <div className="fs-sub">Datei eingelesen · Spalten automatisch erkannt</div>
                 </div>
+                <div className="fs-badges">
+                  <span className="fs-badge">Zeilen <b>{uploadResult.row_count.toLocaleString('de-DE')}</b></span>
+                  <span className="fs-badge">
+                    {uploadResult.is_multi_meter ? 'Zähler-Spalten' : 'Spalten'}{' '}
+                    <b>{uploadResult.is_multi_meter ? uploadResult.meter_columns?.length || 0 : uploadResult.detected_columns.length}</b>
+                  </span>
+                  <span className="fs-badge">Trennzeichen <b>auto</b></span>
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="sec-title">{uploadResult.is_multi_meter ? 'Zähler-Zuordnung' : 'Spalten zuordnen'}</div>
+                <p className="sec-sub">
+                  {uploadResult.is_multi_meter
+                    ? 'Ordnen Sie jede CSV-Spalte einem bestehenden Zähler zu. Automatisch erkannte Zuordnungen sind vorausgewählt.'
+                    : 'Jede Datenspalte wird einer Zielspalte zugeordnet. Vorschläge stammen aus dem automatischen Abgleich – bitte prüfen.'}
+                </p>
 
                 {mappingError && (
-                  <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{mappingError}</div>
+                  <div style={{ marginBottom: 14, background: 'color-mix(in srgb, var(--alert) 8%, var(--surface))', border: '1px solid color-mix(in srgb, var(--alert) 30%, var(--line))', borderRadius: 'var(--r-sm)', padding: '9px 12px', color: 'var(--alert)', fontSize: 12.5 }}>
+                    {mappingError}
+                  </div>
                 )}
 
-                {/* ── Multi-Meter Mapping ── */}
+                {/* Profile */}
+                {((uploadResult.is_multi_meter && profiles.filter((p) => p.meter_mapping).length > 0) ||
+                  (!uploadResult.is_multi_meter && profiles.length > 0)) && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div className="fmt-label" style={{ marginBottom: 7 }}>Gespeicherte Vorlage laden</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      {(uploadResult.is_multi_meter ? profiles.filter((p) => p.meter_mapping) : profiles).map((p) => (
+                        <button key={p.id} className="btn-soft small" onClick={() => applyProfile(p)}>{p.name}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Multi-Meter */}
                 {uploadResult.is_multi_meter && uploadResult.meter_columns ? (
-                  <div>
-                    {/* Gespeicherte Vorlagen */}
-                    {profiles.filter(p => p.meter_mapping).length > 0 && (
-                      <div className="mb-4">
-                        <label className="label">Gespeicherte Vorlage laden</label>
-                        <div className="flex flex-wrap gap-2">
-                          {profiles.filter(p => p.meter_mapping).map((p) => (
-                            <button
-                              key={p.id}
-                              onClick={() => applyProfile(p)}
-                              className="btn-secondary text-xs"
-                            >
-                              {p.name}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    <p className="text-sm text-gray-500 mb-3">
-                      Ordnen Sie jede CSV-Spalte einem bestehenden Zähler zu.
-                      Automatisch erkannte Zuordnungen sind vorausgewählt.
-                    </p>
-                    <div className="space-y-2">
+                  <>
+                    <div className="map-list">
                       {uploadResult.meter_columns.map((mc) => {
                         const currentMeter = meterColumnMapping[String(mc.column_index)];
                         const isAutoMatched = mc.matched_meter_id && currentMeter === mc.matched_meter_id;
                         return (
-                          <div
-                            key={mc.column_index}
-                            className={`flex items-center gap-4 rounded-lg border p-3 ${
-                              currentMeter
-                                ? isAutoMatched
-                                  ? 'border-green-200 bg-green-50/50'
-                                  : 'border-primary-200 bg-primary-50/30'
-                                : 'border-gray-200'
-                            }`}
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium truncate" title={mc.column_name}>
-                                {mc.column_name}
+                          <div key={mc.column_index} className={'map-rowc' + (currentMeter ? (isAutoMatched ? ' matched' : ' assigned') : '')}>
+                            <div className="map-col">
+                              <div style={{ minWidth: 0 }}>
+                                <div className="col-name" title={mc.column_name}>{mc.column_name}</div>
+                                {mc.matched_meter_name && isAutoMatched && <div className="col-hint">Automatisch erkannt</div>}
                               </div>
-                              {mc.matched_meter_name && isAutoMatched && (
-                                <div className="text-xs text-green-600 mt-0.5">
-                                  Automatisch erkannt
-                                </div>
-                              )}
                             </div>
-                            <span className="text-gray-300 flex-shrink-0">→</span>
+                            <span className="map-arrow"><ArrowRight size={15} /></span>
                             <select
-                              className="input w-72 flex-shrink-0"
+                              className={'sel' + (currentMeter ? '' : ' empty')}
                               value={currentMeter || ''}
-                              onChange={(e) => {
-                                setMeterColumnMapping({
-                                  ...meterColumnMapping,
-                                  [String(mc.column_index)]: e.target.value,
-                                });
-                              }}
+                              onChange={(e) => setMeterColumnMapping({ ...meterColumnMapping, [String(mc.column_index)]: e.target.value })}
                             >
-                              <option value="">– Nicht importieren –</option>
+                              <option value="">— nicht importieren —</option>
                               {meters.map((m) => (
-                                <option
-                                  key={m.id}
-                                  value={m.id}
-                                  disabled={assignedMeterIds.has(m.id) && currentMeter !== m.id}
-                                >
+                                <option key={m.id} value={m.id} disabled={assignedMeterIds.has(m.id) && currentMeter !== m.id}>
                                   {m.name} ({ENERGY_TYPE_LABELS[m.energy_type as EnergyType] || m.energy_type} – {m.unit})
                                   {assignedMeterIds.has(m.id) && currentMeter !== m.id ? ' ✓' : ''}
                                 </option>
@@ -540,46 +490,21 @@ export default function ImportPage() {
                         );
                       })}
                     </div>
-                    <div className="mt-3 text-sm text-gray-500">
+                    <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--ink-3)' }}>
                       {assignedColumnCount} von {uploadResult.meter_columns.length} Spalten zugeordnet
                     </div>
-                  </div>
+                  </>
                 ) : (
-                  /* ── Single-Meter Mapping (bisheriger Flow) ── */
-                  <div>
-                    {/* Profil laden */}
-                    {profiles.length > 0 && (
-                      <div className="mb-4">
-                        <label className="label">Gespeichertes Profil laden</label>
-                        <div className="flex gap-2">
-                          {profiles.map((p) => (
-                            <button
-                              key={p.id}
-                              onClick={() => applyProfile(p)}
-                              className="btn-secondary text-xs"
-                            >
-                              {p.name}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Spalten-Zuordnung */}
-                    <div className="space-y-2">
+                  /* Single-Meter */
+                  <>
+                    <div className="map-list">
                       {uploadResult.detected_columns.map((col) => (
-                        <div key={col} className="flex items-center gap-4">
-                          <span className="w-40 truncate text-sm font-medium" title={col}>
-                            {col}
-                          </span>
-                          <span className="text-gray-300">→</span>
-                          <select
-                            className="input w-48"
-                            value={columnMapping[col] || ''}
-                            onChange={(e) =>
-                              setColumnMapping({ ...columnMapping, [col]: e.target.value })
-                            }
-                          >
+                        <div key={col} className={'map-rowc' + (columnMapping[col] ? ' assigned' : '')}>
+                          <div className="map-col">
+                            <span className="col-name" title={col}>{col}</span>
+                          </div>
+                          <span className="map-arrow"><ArrowRight size={15} /></span>
+                          <select className="sel" value={columnMapping[col] || ''} onChange={(e) => setColumnMapping({ ...columnMapping, [col]: e.target.value })}>
                             {Object.entries(TARGET_COLUMNS).map(([val, label]) => (
                               <option key={val} value={val}>{label}</option>
                             ))}
@@ -588,15 +513,10 @@ export default function ImportPage() {
                       ))}
                     </div>
 
-                    {/* Zähler-Auswahl */}
                     {!Object.values(columnMapping).includes('meter_id') && (
-                      <div className="mt-4 border-t pt-4">
-                        <label className="label">Zähler für alle Zeilen *</label>
-                        <select
-                          className="input max-w-md"
-                          value={selectedMeterId}
-                          onChange={(e) => setSelectedMeterId(e.target.value)}
-                        >
+                      <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
+                        <div className="fmt-label" style={{ marginBottom: 7 }}>Zähler für alle Zeilen *</div>
+                        <select className="sel" style={{ maxWidth: 420 }} value={selectedMeterId} onChange={(e) => setSelectedMeterId(e.target.value)}>
                           <option value="">– Zähler wählen –</option>
                           {meters.map((m) => (
                             <option key={m.id} value={m.id}>
@@ -606,103 +526,67 @@ export default function ImportPage() {
                         </select>
                       </div>
                     )}
-                  </div>
+                  </>
                 )}
 
                 {/* Optionen */}
-                <div className="mt-4 border-t pt-4 grid grid-cols-3 gap-4">
-                  <div>
-                    <label className="label">Datumsformat (optional)</label>
-                    <input
-                      type="text"
-                      className="input"
-                      placeholder="z.B. %d.%m.%Y %H:%M"
-                      value={dateFormat}
-                      onChange={(e) => setDateFormat(e.target.value)}
-                    />
-                    <p className="mt-1 text-xs text-gray-400">Leer = automatische Erkennung</p>
+                <div className="opt-grid">
+                  <div className="ifield">
+                    <label>Datumsformat (optional)</label>
+                    <input type="text" className="inp mono" placeholder="z. B. %d.%m.%Y %H:%M" value={dateFormat} onChange={(e) => setDateFormat(e.target.value)} />
                   </div>
-                  <div>
-                    <label className="label">Dezimaltrennzeichen</label>
-                    <select
-                      className="input"
-                      value={decimalSeparator}
-                      onChange={(e) => setDecimalSeparator(e.target.value)}
-                    >
+                  <div className="ifield">
+                    <label>Dezimaltrennzeichen</label>
+                    <select className="sel" value={decimalSeparator} onChange={(e) => setDecimalSeparator(e.target.value)}>
                       <option value=",">Komma (1.234,56)</option>
                       <option value=".">Punkt (1,234.56)</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="label">Profil speichern als</label>
-                    <input
-                      type="text"
-                      className="input"
-                      placeholder="z.B. EVU-Abrechnung"
-                      value={profileName}
-                      onChange={(e) => setProfileName(e.target.value)}
-                    />
+                  <div className="ifield">
+                    <label>Profil speichern als</label>
+                    <input type="text" className="inp" placeholder="z. B. EVU-Abrechnung" value={profileName} onChange={(e) => setProfileName(e.target.value)} />
                   </div>
                 </div>
 
-                <div className="mt-3 flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="skip_duplicates"
-                    checked={skipDuplicates}
-                    onChange={(e) => setSkipDuplicates(e.target.checked)}
-                  />
-                  <label htmlFor="skip_duplicates" className="text-sm">
-                    Duplikate überspringen (gleicher Zeitstempel + Zähler)
-                  </label>
-                </div>
+                <label className={'check' + (skipDuplicates ? ' on' : '')} style={{ marginTop: 14 }} onClick={() => setSkipDuplicates((v) => !v)}>
+                  <span className="box"><Check size={12} /></span> Duplikate überspringen (gleicher Zeitstempel + Zähler)
+                </label>
               </div>
 
               {/* Vorschau */}
-              <div className="card overflow-hidden p-0">
-                <div className="bg-gray-50 px-4 py-2 text-xs font-semibold uppercase text-gray-500">
-                  Vorschau (erste {uploadResult.preview_rows.length} Zeilen)
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="border-b bg-gray-50 text-xs text-gray-500">
+              <div className="card" style={{ padding: 0 }}>
+                <div className="fmt-label" style={{ padding: '14px 16px 10px' }}>Vorschau · erste {Math.min(5, uploadResult.preview_rows.length)} Zeilen</div>
+                <div className="preview-wrap" style={{ border: 'none', borderTop: '1px solid var(--line)', borderRadius: 0 }}>
+                  <table className="pv-table">
+                    <thead>
                       <tr>
                         {uploadResult.detected_columns.map((col, idx) => {
                           if (uploadResult.is_multi_meter && idx > 0) {
-                            // Multi-Meter: Zähler-Name anzeigen wenn zugeordnet
                             const meterId = meterColumnMapping[String(idx)];
-                            const meter = meterId ? meters.find(m => m.id === meterId) : null;
+                            const meter = meterId ? meters.find((m) => m.id === meterId) : null;
                             return (
-                              <th key={col} className="px-3 py-2 text-left whitespace-nowrap">
-                                <span className="truncate block max-w-[150px]" title={col}>
-                                  {meter ? meter.name : col.length > 25 ? col.slice(0, 25) + '…' : col}
-                                </span>
-                                {meter && (
-                                  <span className="text-green-600 text-[10px] block">zugeordnet</span>
-                                )}
+                              <th key={col}>
+                                <span title={col}>{meter ? meter.name : col.length > 25 ? col.slice(0, 25) + '…' : col}</span>
+                                {meter && <span className="tag-ok">zugeordnet</span>}
                               </th>
                             );
                           }
                           return (
-                            <th key={col} className="px-3 py-2 text-left whitespace-nowrap">
+                            <th key={col}>
                               {col}
                               {!uploadResult.is_multi_meter && columnMapping[col] && (
-                                <span className="ml-1 text-primary-600">
-                                  ({TARGET_COLUMNS[columnMapping[col]]})
-                                </span>
+                                <span className="tag-mapped"> ({TARGET_COLUMNS[columnMapping[col]]})</span>
                               )}
                             </th>
                           );
                         })}
                       </tr>
                     </thead>
-                    <tbody className="divide-y">
+                    <tbody>
                       {uploadResult.preview_rows.slice(0, 5).map((row, idx) => (
-                        <tr key={idx} className="hover:bg-gray-50">
+                        <tr key={idx}>
                           {uploadResult.detected_columns.map((col) => (
-                            <td key={col} className="px-3 py-1.5 whitespace-nowrap text-gray-600">
-                              {row[col] ?? ''}
-                            </td>
+                            <td key={col}>{row[col] ?? ''}</td>
                           ))}
                         </tr>
                       ))}
@@ -712,56 +596,60 @@ export default function ImportPage() {
               </div>
 
               {/* Aktionen */}
-              <div className="flex justify-end gap-3">
-                <button onClick={handleReset} className="btn-secondary">
-                  Abbrechen
-                </button>
-                <button
-                  onClick={handleProcess}
-                  className="btn-primary"
-                  disabled={processing}
-                >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                <button onClick={handleReset} className="btn-soft">Zurück</button>
+                <button onClick={handleProcess} className="btn-primary" disabled={processing}>
+                  <Check size={14} />
                   {processing
-                    ? 'Importiere...'
+                    ? 'Importiere…'
                     : uploadResult.is_multi_meter
                       ? `${uploadResult.row_count} Zeilen × ${assignedColumnCount} Zähler importieren`
                       : `${uploadResult.row_count} Zeilen importieren`}
                 </button>
               </div>
-            </div>
+            </>
           )}
 
           {/* ── Schritt 3: Ergebnis ── */}
           {step === 'result' && importResult && (
-            <div className="card">
-              <h2 className="mb-4 text-base font-semibold">Import-Ergebnis</h2>
-
-              <div className="grid grid-cols-4 gap-4 mb-4">
-                <StatBox label="Gesamt" value={importResult.total_rows} />
-                <StatBox label="Importiert" value={importResult.imported_count} color="text-green-600" />
-                <StatBox label="Übersprungen" value={importResult.skipped_count} color="text-yellow-600" />
-                <StatBox label="Fehler" value={importResult.error_count} color="text-red-600" />
+            <>
+              <div className={'result-hero' + (importResult.error_count > 0 ? ' warnhero' : '')}>
+                <span className="rh-ico">{importResult.error_count > 0 ? <AlertTriangle size={26} /> : <CheckCircle2 size={26} />}</span>
+                <div>
+                  <div className="rh-title">
+                    {importResult.error_count > 0 ? 'Import mit Hinweisen abgeschlossen' : 'Import erfolgreich abgeschlossen'}
+                  </div>
+                  <div className="rh-sub">
+                    {uploadResult?.filename} · {importResult.imported_count.toLocaleString('de-DE')} Werte importiert
+                  </div>
+                </div>
               </div>
 
-              {/* Multi-Meter: Details pro Zähler */}
+              <div className="result-stats">
+                <div className="rstat"><span className="l">Gesamt</span><span className="v">{importResult.total_rows.toLocaleString('de-DE')}</span><span className="m">Zeilen verarbeitet</span></div>
+                <div className="rstat"><span className="l">Importiert</span><span className="v good">{importResult.imported_count.toLocaleString('de-DE')}</span><span className="m">Werte übernommen</span></div>
+                <div className="rstat"><span className="l">Übersprungen</span><span className="v warn">{importResult.skipped_count.toLocaleString('de-DE')}</span><span className="m">Duplikate / leer</span></div>
+                <div className="rstat"><span className="l">Fehler</span><span className={'v' + (importResult.error_count > 0 ? ' alert' : '')}>{importResult.error_count.toLocaleString('de-DE')}</span><span className="m">Konflikte</span></div>
+              </div>
+
               {importResult.meter_details && importResult.meter_details.length > 0 && (
-                <div className="mb-4">
-                  <h3 className="mb-2 text-sm font-semibold">Details pro Zähler</h3>
-                  <div className="rounded-lg border overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 text-xs text-gray-500">
+                <div className="card" style={{ padding: 0 }}>
+                  <div className="sec-title" style={{ padding: '16px 16px 0' }}>Details pro Zähler</div>
+                  <div className="preview-wrap" style={{ border: 'none', borderTop: '1px solid var(--line)', borderRadius: 0, marginTop: 12 }}>
+                    <table className="pv-table" style={{ fontFamily: 'var(--font-sans)' }}>
+                      <thead>
                         <tr>
-                          <th className="px-3 py-2 text-left">Zähler</th>
-                          <th className="px-3 py-2 text-right">Importiert</th>
-                          <th className="px-3 py-2 text-right">Fehler</th>
+                          <th>Zähler</th>
+                          <th style={{ textAlign: 'right' }}>Importiert</th>
+                          <th style={{ textAlign: 'right' }}>Fehler</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y">
+                      <tbody>
                         {importResult.meter_details.map((md) => (
                           <tr key={md.meter_id}>
-                            <td className="px-3 py-2 font-medium">{getMeterLabel(md.meter_id)}</td>
-                            <td className="px-3 py-2 text-right text-green-600 font-mono">{md.imported}</td>
-                            <td className="px-3 py-2 text-right text-red-600 font-mono">{md.errors}</td>
+                            <td style={{ fontFamily: 'var(--font-sans)', fontWeight: 500, color: 'var(--ink)' }}>{getMeterLabel(md.meter_id)}</td>
+                            <td style={{ textAlign: 'right', color: 'var(--good)' }}>{md.imported}</td>
+                            <td style={{ textAlign: 'right', color: md.errors > 0 ? 'var(--alert)' : 'var(--ink-3)' }}>{md.errors}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -771,12 +659,12 @@ export default function ImportPage() {
               )}
 
               {importResult.error_count > 0 && (
-                <div className="mb-4">
-                  <h3 className="mb-2 text-sm font-semibold text-red-600">Fehlerdetails</h3>
-                  <div className="max-h-48 overflow-y-auto rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
+                <div className="card">
+                  <div className="sec-title" style={{ color: 'var(--alert)' }}>Fehlerdetails</div>
+                  <div style={{ maxHeight: 200, overflowY: 'auto', marginTop: 10, fontSize: 12.5, fontFamily: 'var(--font-mono)' }}>
                     {importResult.errors.map((err, idx) => (
-                      <div key={idx} className="py-0.5 text-red-700">
-                        {err.row != null && <span className="font-mono">Zeile {err.row}: </span>}
+                      <div key={idx} style={{ padding: '3px 0', color: 'var(--alert)' }}>
+                        {err.row != null && <span>Zeile {err.row}: </span>}
                         {err.error}
                       </div>
                     ))}
@@ -784,73 +672,116 @@ export default function ImportPage() {
                 </div>
               )}
 
-              <div className="flex justify-end gap-3">
-                <button onClick={handleReset} className="btn-primary">
-                  Neuer Import
-                </button>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button onClick={handleReset} className="btn-primary"><Plus size={14} /> Neuen Import starten</button>
               </div>
-            </div>
+            </>
           )}
         </div>
       )}
 
       {/* ── History Tab ── */}
-      <SpiePanel />
-
       {activeTab === 'history' && (
-        <div className="card mt-4 overflow-hidden p-0">
+        <div className="imp-wrap">
           {historyLoading ? (
-            <LoadingSpinner />
+            <div className="card"><LoadingSpinner /></div>
           ) : history.length === 0 ? (
-            <div className="p-8 text-center text-gray-400">
-              Noch keine Imports durchgeführt.
-            </div>
+            <div className="hist-table"><div className="empty-pad">Noch keine Imports durchgeführt.</div></div>
           ) : (
-            <table className="w-full text-left text-sm">
-              <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-                <tr>
-                  <th className="px-4 py-3">Datei</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 text-right">Zeilen</th>
-                  <th className="px-4 py-3 text-right">Importiert</th>
-                  <th className="px-4 py-3">Datum</th>
-                  <th className="px-4 py-3 text-right">Aktionen</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {history.map((batch) => (
-                  <tr key={batch.batch_id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium">{batch.filename}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={batch.status} />
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono">{batch.total_rows}</td>
-                    <td className="px-4 py-3 text-right font-mono">{batch.imported_count}</td>
-                    <td className="px-4 py-3 text-gray-500">
-                      {new Date(batch.created_at).toLocaleDateString('de-DE', {
-                        day: '2-digit', month: '2-digit', year: 'numeric',
-                        hour: '2-digit', minute: '2-digit',
-                      })}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      {batch.status === 'completed' && (
-                        <button
-                          onClick={() => handleUndoImport(batch.batch_id)}
-                          className="text-red-500 hover:text-red-700 text-sm"
-                        >
-                          Rückgängig
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="hist-table">
+              <div className="hist-row head">
+                <span>Datei</span>
+                <span>Datum</span>
+                <span style={{ textAlign: 'right' }}>Zeilen</span>
+                <span style={{ textAlign: 'right' }}>Importiert</span>
+                <span>Status</span>
+              </div>
+              {history.map((batch) => (
+                <div className="hist-row" key={batch.batch_id}>
+                  <span className="hist-fname" title={batch.filename}>{batch.filename}</span>
+                  <span className="hist-date">
+                    {new Date(batch.created_at).toLocaleDateString('de-DE', {
+                      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+                    })}
+                  </span>
+                  <span className="hist-num">{batch.total_rows.toLocaleString('de-DE')}</span>
+                  <span className="hist-num">{batch.imported_count.toLocaleString('de-DE')}</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <HistStatus status={batch.status} />
+                    {batch.status === 'completed' && (
+                      <button className="mini-link" style={{ color: 'var(--alert)' }} onClick={() => handleUndoImport(batch.batch_id)}>
+                        Rückgängig
+                      </button>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
     </div>
   );
+}
+
+// ── Format-Panel (CSV-Vorgabe) ──
+
+function FormatPanel({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <div className="info-panel">
+      <div className="info-head" onClick={onToggle}>
+        <span className="ico"><Info size={15} /></span>
+        <span className="t">CSV-Format-Vorgabe</span>
+        <span className="toggle">
+          {open ? 'Ausblenden' : 'Anzeigen'}
+          <ChevronDown size={14} className={'chev' + (open ? ' open' : '')} />
+        </span>
+      </div>
+      {open && (
+        <div className="info-body">
+          <div className="fmt-block">
+            <span className="fmt-label">Einzelzähler-CSV</span>
+            <div className="code-block">
+              <span className="k">Zeitstempel;Zählerstand</span>{'\n'}01.01.2025;16600,49{'\n'}02.01.2025;22302,95
+            </div>
+          </div>
+          <div className="fmt-block">
+            <span className="fmt-label">Multi-Zähler-CSV</span>
+            <div className="code-block">
+              <span className="k">Datum;Zähler A;Zähler B;Zähler C</span>{'\n'}01.01.2025;16600,49;0;0,82{'\n'}02.01.2025;22302,95;0;0,19
+            </div>
+          </div>
+          <div className="rules">
+            {[
+              ['1. Spalte:', ' Zeitstempel (TT.MM.JJJJ oder JJJJ-MM-TT)'],
+              ['Ab Spalte 2:', ' Je ein Zählerwert pro Spalte'],
+              ['1. Zeile:', ' Spaltenüberschriften (Name/Kennung)'],
+              ['Trennzeichen:', ' Semikolon oder Komma (auto)'],
+              ['Dezimalformat:', ' Komma (1.234,56) oder Punkt'],
+              ['Keine', ' Status-, Einheiten- oder Zusatzspalten'],
+            ].map(([b, t], i) => (
+              <div className="rule-row" key={i}>
+                <span className="dot" />
+                <span><b>{b}</b>{t}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HistStatus({ status }: { status: string }) {
+  const map: Record<string, { cls: string; label: string }> = {
+    completed: { cls: 'ok', label: 'Erfolgreich' },
+    processing: { cls: 'neutral', label: 'In Bearbeitung' },
+    failed: { cls: 'err', label: 'Fehlgeschlagen' },
+    reverted: { cls: 'neutral', label: 'Rückgängig' },
+    uploaded: { cls: 'neutral', label: 'Hochgeladen' },
+  };
+  const m = map[status] || { cls: 'neutral', label: status };
+  return <span className={'hist-status ' + m.cls}><span className="dot" />{m.label}</span>;
 }
 
 // ── SPIE-Automatik-Import ──
@@ -906,40 +837,39 @@ function SpiePanel() {
       setPasswordSet(cfg.password_set || false);
       setLastSync(statusRes.data);
       if (cfg.username) loadSpieMeters();
-    } catch { /* ignorieren */ }
+    } catch {
+      /* ignorieren */
+    }
   };
 
   const loadSpieMeters = async () => {
     setMetersLoading(true);
     try {
-      const res = await apiClient.get<{ items: SpieMeter[] }>(
-        '/api/v1/meters?data_source=spie&page_size=500'
-      );
+      const res = await apiClient.get<{ items: SpieMeter[] }>('/api/v1/meters?data_source=spie&page_size=500');
       setSpieMeters(res.data.items);
-    } catch { /* ignorieren */ } finally { setMetersLoading(false); }
+    } catch {
+      /* ignorieren */
+    } finally {
+      setMetersLoading(false);
+    }
   };
 
   const toggleExclude = async (meter: SpieMeter) => {
     try {
-      await apiClient.put(`/api/v1/meters/${meter.id}`, {
-        spie_import_excluded: !meter.spie_import_excluded,
-      });
-      setSpieMeters(prev => prev.map(m =>
-        m.id === meter.id ? { ...m, spie_import_excluded: !m.spie_import_excluded } : m
-      ));
-    } catch { /* ignorieren */ }
+      await apiClient.put(`/api/v1/meters/${meter.id}`, { spie_import_excluded: !meter.spie_import_excluded });
+      setSpieMeters((prev) => prev.map((m) => (m.id === meter.id ? { ...m, spie_import_excluded: !m.spie_import_excluded } : m)));
+    } catch {
+      /* ignorieren */
+    }
   };
 
   const changeToManual = async (meter: SpieMeter) => {
     try {
-      await apiClient.put(`/api/v1/meters/${meter.id}`, {
-        data_source: 'manual',
-        spie_import_excluded: true,
-      });
-      setSpieMeters(prev => prev.map(m =>
-        m.id === meter.id ? { ...m, data_source: 'manual', spie_import_excluded: true } : m
-      ));
-    } catch { /* ignorieren */ }
+      await apiClient.put(`/api/v1/meters/${meter.id}`, { data_source: 'manual', spie_import_excluded: true });
+      setSpieMeters((prev) => prev.map((m) => (m.id === meter.id ? { ...m, data_source: 'manual', spie_import_excluded: true } : m)));
+    } catch {
+      /* ignorieren */
+    }
   };
 
   const resumePoll = (jobId: string) => {
@@ -954,7 +884,9 @@ function SpiePanel() {
           localStorage.removeItem(LS_SPIE_JOB);
           if (p.status === 'done') await loadConfig();
         }
-      } catch { /* Job noch nicht bereit – weiter pollen */ }
+      } catch {
+        /* Job noch nicht bereit – weiter pollen */
+      }
     }, 2000);
   };
 
@@ -962,22 +894,23 @@ function SpiePanel() {
     loadConfig();
     const jobId = localStorage.getItem(LS_SPIE_JOB);
     if (jobId) resumePoll(jobId);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = async () => {
     setSaving(true);
     setTestResult(null);
     try {
-      await apiClient.post('/api/v1/spie/config', {
-        username,
-        password: password || '',
-        enabled,
-      });
+      await apiClient.post('/api/v1/spie/config', { username, password: password || '', enabled });
       setPassword('');
       setPasswordSet(true);
-    } catch { /* Fehler ignorieren */ }
-    finally { setSaving(false); }
+    } catch {
+      /* Fehler ignorieren */
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleTest = async () => {
@@ -989,7 +922,9 @@ function SpiePanel() {
       setTestResult({ ok: true, message: res.data.message });
     } catch {
       setTestResult({ ok: false, message: 'Login fehlgeschlagen. Zugangsdaten prüfen.' });
-    } finally { setTesting(false); }
+    } finally {
+      setTesting(false);
+    }
   };
 
   const handleSync = async () => {
@@ -1008,201 +943,172 @@ function SpiePanel() {
   const isDone = syncProgress?.status === 'done';
   const isError = syncProgress?.status === 'error';
 
+  const activeCount = spieMeters.filter((m) => !m.spie_import_excluded && m.data_source === 'spie').length;
+  const pct =
+    syncProgress?.current_meter && syncProgress?.total_meters
+      ? Math.round((syncProgress.current_meter / syncProgress.total_meters) * 100)
+      : isRunning
+        ? 30
+        : 0;
+
   return (
-    <div className="card mt-6 p-5 space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-lg">🔄</span>
-          <h2 className="font-semibold text-gray-800">SPIE-Automatik-Import</h2>
+    <div className="card">
+      <div className="spie-head">
+        <div className="spie-head-l">
+          <span className="spie-mark"><RefreshCw size={17} /></span>
+          <div>
+            <div className="spie-title">SPIE-Automatik-Import</div>
+            <div className="sec-sub" style={{ margin: 0 }}>Zählerstände automatisch über die SPIE-Schnittstelle abrufen</div>
+          </div>
         </div>
         {lastSync?.synced_at && (
-          <span className="text-xs text-gray-400">
-            Letzter Import: {new Date(lastSync.synced_at).toLocaleString('de-DE')}
-            {lastSync.meters_processed > 0 && ` · ${lastSync.imported.toLocaleString('de-DE')} Werte`}
-          </span>
+          <div className="spie-meta">
+            Letzter Import: <strong>{new Date(lastSync.synced_at).toLocaleString('de-DE')}</strong>
+            {lastSync.meters_processed > 0 && (
+              <>
+                <br />
+                <strong>{lastSync.imported.toLocaleString('de-DE')}</strong> Werte · {lastSync.meters_processed} Zähler
+              </>
+            )}
+          </div>
         )}
       </div>
 
-      {/* Zugangsdaten */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="label">Benutzername</label>
+      <div className="field-grid">
+        <div className="ifield">
+          <label>Benutzername</label>
           <input
-            type="text"
+            className="inp mono"
             value={username}
-            onChange={e => { setUsername(e.target.value); setTestResult(null); }}
-            className="input w-full"
+            onChange={(e) => {
+              setUsername(e.target.value);
+              setTestResult(null);
+            }}
             placeholder="SPIE-Benutzername"
             disabled={isRunning}
           />
         </div>
-        <div>
-          <label className="label">
-            Passwort{passwordSet && !password && <span className="text-gray-400 font-normal ml-1">(gesetzt)</span>}
+        <div className="ifield">
+          <label>
+            Passwort {passwordSet && !password && <span className="muted">(gesetzt)</span>}
           </label>
           <input
+            className="inp"
             type="password"
             value={password}
-            onChange={e => { setPassword(e.target.value); setTestResult(null); }}
-            className="input w-full"
+            onChange={(e) => {
+              setPassword(e.target.value);
+              setTestResult(null);
+            }}
             placeholder={passwordSet ? 'Unverändert lassen' : 'SPIE-Passwort'}
             disabled={isRunning}
           />
         </div>
       </div>
 
-      {/* Verbindungstest */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={handleTest}
-          disabled={testing || !username || !password || isRunning}
-          className="btn-secondary text-sm"
-        >
-          {testing ? 'Wird getestet…' : 'Verbindung testen'}
+      <div className="spie-actions">
+        <button className="btn-soft" onClick={handleTest} disabled={testing || !username || !password || isRunning}>
+          <Plug size={14} /> {testing ? 'Prüfe…' : 'Verbindung testen'}
         </button>
         {testResult && (
-          <span className={`text-sm ${testResult.ok ? 'text-green-600' : 'text-red-600'}`}>
-            {testResult.ok ? '✓' : '✗'} {testResult.message}
+          <span className={'test-result ' + (testResult.ok ? 'ok' : 'err')}>
+            {testResult.ok ? <Check size={14} /> : <X size={14} />} {testResult.message}
           </span>
         )}
+        <span className="grow" />
+        <label className={'check' + (enabled ? ' on' : '')} onClick={() => !isRunning && setEnabled((v) => !v)}>
+          <span className="box"><Check size={12} /></span> Automatischer Import alle 3 Tage
+        </label>
+        <button className="btn-soft" onClick={handleSave} disabled={saving || isRunning || !username}>
+          {saving ? 'Speichern…' : 'Speichern'}
+        </button>
+        <button className="btn-primary" onClick={handleSync} disabled={isRunning || !username}>
+          {isRunning ? <RefreshCw size={14} /> : <Upload size={14} />} {isRunning ? 'Läuft…' : 'Jetzt importieren'}
+        </button>
       </div>
 
-      {/* Aktivieren + Speichern */}
-      <div className="border-t pt-3 space-y-2">
-        <div className="flex items-center justify-between">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={e => setEnabled(e.target.checked)}
-              className="rounded"
-              disabled={isRunning}
-            />
-            <span className="text-sm text-gray-700">Automatischer Import alle 3 Tage</span>
-          </label>
-          <div className="flex gap-2">
-            <button
-              onClick={handleSave}
-              disabled={saving || isRunning || !username}
-              className="btn-primary text-sm"
-            >
-              {saving ? 'Speichern…' : 'Speichern'}
-            </button>
-            <button
-              onClick={handleSync}
-              disabled={isRunning || !username}
-              className="btn-secondary text-sm"
-            >
-              Jetzt importieren
-            </button>
-          </div>
-        </div>
-        {enabled && <SpieNextRunBar lastSyncedAt={lastSync?.synced_at ?? null} />}
-      </div>
+      {/* Auto-Run Bar (wenn aktiviert und kein laufender Import) */}
+      {enabled && !syncProgress && <SpieNextRunBar lastSyncedAt={lastSync?.synced_at ?? null} />}
 
-      {/* Fortschrittsanzeige */}
+      {/* Fortschritt / Ergebnis */}
       {syncProgress && (
-        <div className="border-t pt-3 space-y-2">
+        <div className={'imp-status' + (isDone ? ' done' : isError ? ' errstate' : ' running')}>
+          <div className="is-row">
+            <span className="is-label">
+              <span className="dot" />
+              {isRunning && (
+                <>
+                  Import läuft – <b>{activeCount > 0 ? activeCount : syncProgress.total_meters || ''} Zähler</b>
+                </>
+              )}
+              {isDone && (
+                <>
+                  Import <b>abgeschlossen</b> – {syncProgress.imported?.toLocaleString('de-DE')} neue Werte
+                  {syncProgress.errors ? `, ${syncProgress.errors} Fehler` : ''}
+                </>
+              )}
+              {isError && <>Import <b>fehlgeschlagen</b> – {syncProgress.error}</>}
+            </span>
+            {(isDone || isError) && <button className="mini-link" onClick={() => setSyncProgress(null)}>Schließen</button>}
+          </div>
           {isRunning && (
             <>
-              <div className="flex justify-between text-xs text-gray-500">
-                <span>
+              <div className="bar"><span style={{ width: `${pct}%` }} /></div>
+              <div className="is-detail">
+                <span className="who">
                   {syncProgress.current_meter && syncProgress.total_meters
-                    ? `Zähler ${syncProgress.current_meter} / ${syncProgress.total_meters}${syncProgress.meter_name ? ` – ${syncProgress.meter_name}` : ''}`
-                    : syncProgress.phase === 'login' ? 'SPIE-Login…' : 'Import wird vorbereitet…'}
+                    ? `Zähler ${syncProgress.current_meter} / ${syncProgress.total_meters}${syncProgress.meter_name ? ' – ' + syncProgress.meter_name : ''}`
+                    : syncProgress.phase === 'login'
+                      ? 'SPIE-Login…'
+                      : 'Import wird vorbereitet…'}
                 </span>
-                <span>
-                  {syncProgress.current_meter && syncProgress.total_meters
-                    ? `${Math.round(syncProgress.current_meter / syncProgress.total_meters * 100)}%`
-                    : '…'}
-                </span>
-              </div>
-              <div className="w-full bg-gray-100 rounded-full h-2">
-                <div
-                  className="h-2 rounded-full bg-primary-500 transition-all duration-500"
-                  style={{
-                    width: syncProgress.total_meters
-                      ? `${Math.round((syncProgress.current_meter ?? 0) / syncProgress.total_meters * 100)}%`
-                      : '30%',
-                  }}
-                />
+                <span className="pct">{pct}%</span>
               </div>
             </>
-          )}
-          {isDone && (
-            <div className="flex items-center gap-2 text-sm text-green-700">
-              <span>✓</span>
-              <span>
-                Import abgeschlossen –{' '}
-                {syncProgress.imported?.toLocaleString('de-DE')} neue Werte importiert
-                {syncProgress.errors ? `, ${syncProgress.errors} Fehler` : ''}
-              </span>
-              <button onClick={() => setSyncProgress(null)} className="ml-auto text-xs text-gray-400 hover:text-gray-600">✕</button>
-            </div>
-          )}
-          {isError && (
-            <div className="flex items-center gap-2 text-sm text-red-600">
-              <span>✗</span>
-              <span>{syncProgress.error}</span>
-              <button onClick={() => setSyncProgress(null)} className="ml-auto text-xs text-gray-400 hover:text-gray-600">✕</button>
-            </div>
           )}
         </div>
       )}
 
       {/* SPIE-Zähler verwalten */}
-      <div className="border-t border-gray-100 pt-4">
+      <div className="manage">
         <button
-          className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900"
+          className="manage-head"
           onClick={() => {
             const next = !metersExpanded;
             setMetersExpanded(next);
             if (next) loadSpieMeters();
           }}
         >
-          <span>{metersExpanded ? '▾' : '▸'}</span>
-          SPIE-Zähler verwalten ({spieMeters.length})
+          <ChevronRight size={14} className={'chev' + (metersExpanded ? ' open' : '')} />
+          SPIE-Zähler verwalten <span className="count">{spieMeters.length}</span>
+          <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--ink-3)' }}>
+            {activeCount} aktiv · {spieMeters.length - activeCount} aus
+          </span>
         </button>
 
         {metersExpanded && (
-          <div className="mt-3 space-y-1">
-            {metersLoading && <p className="text-sm text-gray-400">Lade Zähler…</p>}
+          <div className="manage-list">
+            {metersLoading && <div style={{ padding: 14, fontSize: 13, color: 'var(--ink-3)' }}>Lade Zähler…</div>}
             {!metersLoading && spieMeters.length === 0 && (
-              <p className="text-sm text-gray-400">Keine SPIE-Zähler gefunden.</p>
+              <div style={{ padding: 14, fontSize: 13, color: 'var(--ink-3)' }}>Keine SPIE-Zähler gefunden.</div>
             )}
-            {spieMeters.map(meter => (
-              <div
-                key={meter.id}
-                className="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2 text-sm"
-              >
-                <div className="min-w-0 flex-1">
-                  <span className="font-medium text-gray-800 truncate">
-                    {meter.display_name || meter.name}
+            {spieMeters.map((meter) => (
+              <div key={meter.id} className={'mrow' + (meter.spie_import_excluded ? ' off' : '')}>
+                <div className="m-main">
+                  <span className="m-code">{meter.display_name || meter.name}</span>
+                  <span className="m-name">
+                    {meter.location || '—'}
+                    {meter.data_source !== 'spie' && <span style={{ marginLeft: 8, color: 'var(--info)' }}>Quelle: Manuell</span>}
                   </span>
-                  {meter.location && (
-                    <span className="ml-2 text-gray-400 text-xs">{meter.location}</span>
-                  )}
-                  {meter.data_source !== 'spie' && (
-                    <span className="ml-2 text-xs text-blue-600">Quelle: Manuell</span>
-                  )}
                 </div>
-                <div className="flex items-center gap-3 flex-shrink-0 ml-3">
+                <div className="m-right">
                   {!meter.spie_import_excluded && meter.data_source === 'spie' && (
-                    <button
-                      onClick={() => changeToManual(meter)}
-                      className="text-xs text-blue-600 hover:underline"
-                      title="Zähler auf Manuell umstellen und vom Import ausschließen"
-                    >
-                      → Manuell
+                    <button className="m-link" onClick={() => changeToManual(meter)} title="Auf Manuell umstellen und ausschließen">
+                      <ArrowRight size={12} /> Manuell
                     </button>
                   )}
-                  <label className="flex items-center gap-1 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={meter.spie_import_excluded}
-                      onChange={() => toggleExclude(meter)}
-                    />
-                    <span className="text-xs text-gray-600">Import aus</span>
+                  <label className={'check' + (meter.spie_import_excluded ? ' on' : '')} onClick={() => toggleExclude(meter)}>
+                    <span className="box"><Check size={11} /></span> Import aus
                   </label>
                 </div>
               </div>
@@ -1214,56 +1120,6 @@ function SpiePanel() {
   );
 }
 
-// ── Sub-Komponenten ──
-
-function StepIndicator({ label, active, done }: { label: string; active: boolean; done: boolean }) {
-  return (
-    <span
-      className={`rounded-full px-3 py-1 text-xs font-medium ${
-        active
-          ? 'bg-primary-100 text-primary-700'
-          : done
-            ? 'bg-green-100 text-green-700'
-            : 'bg-gray-100 text-gray-500'
-      }`}
-    >
-      {done ? '✓ ' : ''}{label}
-    </span>
-  );
-}
-
-function StatBox({ label, value, color }: { label: string; value: number; color?: string }) {
-  return (
-    <div className="rounded-lg border bg-gray-50 p-3 text-center">
-      <div className={`text-2xl font-bold ${color || 'text-gray-900'}`}>{value}</div>
-      <div className="text-xs text-gray-500 mt-1">{label}</div>
-    </div>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    completed: 'bg-green-100 text-green-700',
-    processing: 'bg-blue-100 text-blue-700',
-    failed: 'bg-red-100 text-red-700',
-    reverted: 'bg-yellow-100 text-yellow-700',
-    uploaded: 'bg-gray-100 text-gray-600',
-  };
-  const labels: Record<string, string> = {
-    completed: 'Abgeschlossen',
-    processing: 'In Bearbeitung',
-    failed: 'Fehlgeschlagen',
-    reverted: 'Rückgängig',
-    uploaded: 'Hochgeladen',
-  };
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray-600'}`}>
-      {labels[status] || status}
-    </span>
-  );
-}
-
-
 /* ── Fortschrittsbalken: Zeit bis zum nächsten SPIE-Auto-Import ── */
 
 const SPIE_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000; // 3 Tage
@@ -1272,14 +1128,16 @@ function SpieNextRunBar({ lastSyncedAt }: { lastSyncedAt: string | null }) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    const tick = setInterval(() => setNow(Date.now()), 60_000); // Minute
+    const tick = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(tick);
   }, []);
 
   if (!lastSyncedAt) {
     return (
-      <div className="ml-6 text-xs text-gray-400">
-        Noch kein Import durchgeführt – nächster Lauf bei nächster Beat-Tick-Auslösung.
+      <div className="imp-status" style={{ marginTop: 14 }}>
+        <div className="is-row">
+          <span className="is-label"><span className="dot" />Noch kein Import durchgeführt – nächster Lauf beim nächsten Zyklus.</span>
+        </div>
       </div>
     );
   }
@@ -1293,28 +1151,19 @@ function SpieNextRunBar({ lastSyncedAt }: { lastSyncedAt: string | null }) {
   const isOverdue = remainingMs === 0;
   const remainingLabel = formatRemaining(remainingMs);
   const nextLabel = new Date(next).toLocaleString('de-DE', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 
   return (
-    <div className="ml-6">
-      <div className="flex justify-between text-xs text-gray-500 mb-1">
-        <span>
-          {isOverdue
-            ? 'Nächster Import überfällig – läuft beim nächsten Beat-Tick.'
-            : `Nächster Import in ${remainingLabel}`}
+    <div className="imp-status" style={{ marginTop: 14 }}>
+      <div className="is-row">
+        <span className="is-label">
+          <span className="dot" />
+          {isOverdue ? <>Nächster Import <b>überfällig</b> – läuft beim nächsten Zyklus.</> : <>Nächster Import in <b>{remainingLabel}</b></>}
         </span>
-        <span className="text-gray-400">{nextLabel}</span>
+        <span className="is-meta">geplant: {nextLabel}</span>
       </div>
-      <div className="h-2 w-full rounded-full bg-gray-100">
-        <div
-          className={`h-2 rounded-full transition-all duration-500 ${
-            isOverdue ? 'bg-amber-500' : 'bg-primary-500'
-          }`}
-          style={{ width: `${percent}%` }}
-        />
-      </div>
+      <div className={'bar' + (isOverdue ? ' overdue' : '')}><span style={{ width: `${percent}%` }} /></div>
     </div>
   );
 }
