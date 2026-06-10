@@ -2862,3 +2862,203 @@ nav.flex.gap-6 > button.pb-2:hover { color: var(--ink); }
   .benutzer .aud-row { grid-template-columns: 150px 120px 1fr; }
   .benutzer .aud-row .aud-detail, .benutzer .aud-row .aud-res { display: none; }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   Einstellungen — Rail-Navigation + Konfig-Primitive + System-Framing.
+   Adaptiert aus settings.css/settings-*.jsx des Claude-Design-Handoffs.
+   Unter .einstellungen gescopt.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* Body: Rail + Panel */
+.einstellungen .set-body { display: grid; grid-template-columns: 250px 1fr; align-items: start; gap: 0; margin-top: 12px; border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; background: var(--surface); }
+.einstellungen .set-rail { position: sticky; top: 12px; align-self: start; padding: 14px 12px 22px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; max-height: calc(100vh - 24px); overflow-y: auto; }
+.einstellungen .rail-group { padding: 6px 0; }
+.einstellungen .rail-glabel { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-4); padding: 6px 10px 7px; }
+.einstellungen .rail-item { display: flex; align-items: flex-start; gap: 11px; width: 100%; text-align: left; padding: 9px 10px; border-radius: var(--r-md); color: var(--ink-2); border: 1px solid transparent; background: none; cursor: pointer; transition: background 130ms, color 130ms, border-color 130ms; }
+.einstellungen .rail-item:hover { background: var(--surface-2); color: var(--ink); }
+.einstellungen .rail-item.on { background: var(--surface); border-color: var(--line); box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+.einstellungen .rail-ico { width: 30px; height: 30px; border-radius: var(--r-sm); flex-shrink: 0; display: grid; place-items: center; color: var(--ink-3); background: var(--surface-2); border: 1px solid var(--line); transition: color 130ms, border-color 130ms; }
+.einstellungen .rail-item.on .rail-ico { color: var(--fw-fernwaerme); border-color: color-mix(in srgb, var(--fw-fernwaerme) 40%, var(--line)); }
+.einstellungen .rail-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-top: 1px; }
+.einstellungen .rail-label { font-size: 13px; font-weight: 600; color: var(--ink); }
+.einstellungen .rail-item:not(.on) .rail-label { color: var(--ink-2); }
+.einstellungen .rail-desc { font-size: 11px; color: var(--ink-3); line-height: 1.35; }
+.einstellungen .set-panel { padding: 22px 26px 40px; min-width: 0; }
+
+/* Karten + Stack */
+.einstellungen .intg-stack { display: flex; flex-direction: column; gap: 16px; }
+.einstellungen .set-card { border: 1px solid var(--line); border-radius: var(--r-lg); padding: 20px 22px; background: var(--surface); }
+.einstellungen .set-card.tone-danger { border-color: color-mix(in srgb, var(--alert) 30%, var(--line)); background: color-mix(in srgb, var(--alert) 4%, var(--surface)); }
+.einstellungen .set-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.einstellungen .set-card-title { font-size: 14.5px; font-weight: 600; margin: 0; letter-spacing: -0.005em; color: var(--ink); }
+.einstellungen .set-card-desc { font-size: 12.5px; color: var(--ink-3); margin: 4px 0 0; line-height: 1.45; max-width: 64ch; }
+.einstellungen .set-card-right { flex-shrink: 0; }
+
+/* Formular-Grid + Felder */
+.einstellungen .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 22px; }
+.einstellungen .form-grid.c3 { grid-template-columns: repeat(3, 1fr); }
+.einstellungen .field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.einstellungen .field.full { grid-column: 1 / -1; }
+.einstellungen .field-label { font-size: 11.5px; font-weight: 600; color: var(--ink-2); display: inline-flex; align-items: center; gap: 4px; }
+.einstellungen .field-label .req { color: var(--alert); }
+.einstellungen .field-hint { font-size: 11px; color: var(--ink-4); line-height: 1.4; }
+.einstellungen .sinp { width: 100%; font: inherit; font-size: 13px; padding: 9px 12px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); outline: none; transition: border-color 130ms, box-shadow 130ms, background 130ms; }
+.einstellungen textarea.sinp { resize: vertical; line-height: 1.5; min-height: 64px; }
+.einstellungen .sinp:focus { border-color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 11%, transparent); background: var(--surface); }
+.einstellungen .sinp::placeholder { color: var(--ink-4); }
+.einstellungen .sinp.mono { font-family: var(--font-mono); font-size: 12.5px; }
+.einstellungen .num-wrap { position: relative; display: flex; align-items: center; }
+.einstellungen .num-wrap .sinp { padding-right: 64px; }
+.einstellungen .num-suffix { position: absolute; right: 12px; font-size: 11.5px; color: var(--ink-4); pointer-events: none; }
+.einstellungen .sel-wrap { position: relative; }
+.einstellungen .ssel { width: 100%; font: inherit; font-size: 13px; padding: 9px 36px 9px 12px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); outline: none; appearance: none; cursor: pointer; transition: border-color 130ms, box-shadow 130ms; }
+.einstellungen .ssel:focus { border-color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 11%, transparent); }
+.einstellungen .sel-caret { position: absolute; right: 11px; top: 50%; transform: translateY(-50%); color: var(--ink-3); pointer-events: none; display: grid; }
+
+/* Toggle */
+.einstellungen .tog-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 11px 14px; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--surface-2); cursor: pointer; transition: border-color 130ms; }
+.einstellungen .tog-row:hover { border-color: var(--line-strong); }
+.einstellungen .tog-text { display: flex; flex-direction: column; gap: 2px; }
+.einstellungen .tog-label { font-size: 13px; font-weight: 500; color: var(--ink); }
+.einstellungen .tog-desc { font-size: 11.5px; color: var(--ink-3); }
+.einstellungen .tog-switch { width: 38px; height: 22px; border-radius: 99px; flex-shrink: 0; position: relative; background: var(--line-strong); transition: background 200ms; }
+.einstellungen .tog-row.on .tog-switch { background: var(--good); }
+.einstellungen .tog-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.3); transition: transform 200ms cubic-bezier(0.4,0,0.2,1); }
+.einstellungen .tog-row.on .tog-knob { transform: translateX(16px); }
+
+/* Checkbox-Reihe */
+.einstellungen .check-stack { display: flex; flex-direction: column; gap: 8px; }
+.einstellungen .kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.einstellungen .chkrow { display: flex; align-items: center; gap: 11px; padding: 10px 13px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--surface-2); cursor: pointer; transition: border-color 130ms; }
+.einstellungen .chkrow:hover { border-color: var(--line-strong); }
+.einstellungen .chkrow.on { border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
+.einstellungen .chkbox { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--line-strong); display: grid; place-items: center; flex-shrink: 0; color: transparent; transition: border-color 130ms; }
+.einstellungen .chkrow.on .chkbox { background: var(--good); border-color: var(--good); color: #fff; }
+.einstellungen .chk-text { font-size: 13px; color: var(--ink-2); display: flex; flex-direction: column; gap: 1px; }
+.einstellungen .chkrow.on .chk-text { color: var(--ink); }
+.einstellungen .chk-sub { font-size: 11px; color: var(--ink-4); }
+
+/* Farbfeld + Branding-Vorschau */
+.einstellungen .color-row { display: flex; align-items: center; gap: 10px; }
+.einstellungen .color-swatch { width: 38px; height: 38px; border-radius: var(--r-sm); border: 1px solid var(--line-strong); flex-shrink: 0; cursor: pointer; position: relative; overflow: hidden; }
+.einstellungen .color-swatch input[type="color"] { position: absolute; inset: -4px; width: calc(100% + 8px); height: calc(100% + 8px); border: none; padding: 0; cursor: pointer; opacity: 0; }
+.einstellungen .color-row .sinp { flex: 1; }
+.einstellungen .brand-preview { margin-top: 18px; border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px 16px; background: var(--surface-2); }
+.einstellungen .bp-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); }
+
+/* fade-block */
+.einstellungen .fade-block { transition: opacity 180ms; }
+.einstellungen .fade-block.disabled { opacity: 0.42; pointer-events: none; }
+
+/* Buttons */
+.einstellungen .sbtn-ghost, .einstellungen .sbtn-primary, .einstellungen .sbtn-danger { display: inline-flex; align-items: center; gap: 7px; padding: 9px 15px; border-radius: var(--r-sm); font-size: 12.5px; font-weight: 500; cursor: pointer; transition: background 140ms, border-color 140ms, color 140ms; }
+.einstellungen .sbtn-ghost { border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.einstellungen .sbtn-ghost:hover { border-color: var(--line-strong); }
+.einstellungen .sbtn-ghost.sm { padding: 7px 12px; font-size: 12px; }
+.einstellungen .sbtn-primary { background: var(--ink); color: #FFF; border: 1px solid var(--ink); }
+[data-theme="dark"] .einstellungen .sbtn-primary { color: var(--bg); }
+.einstellungen .sbtn-primary:hover { filter: brightness(1.1); }
+.einstellungen .sbtn-primary:disabled { opacity: 0.6; cursor: default; }
+.einstellungen .sbtn-danger { border: 1px solid color-mix(in srgb, var(--alert) 40%, var(--line)); background: var(--surface); color: var(--alert); }
+.einstellungen .sbtn-danger:hover { background: color-mix(in srgb, var(--alert) 8%, var(--surface)); }
+.einstellungen .sbtn-danger.solid { background: var(--alert); border-color: var(--alert); color: #fff; }
+.einstellungen .test-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: var(--r-sm); font-size: 12px; font-weight: 500; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.einstellungen .test-btn:hover { border-color: var(--line-strong); }
+.einstellungen .test-btn.ok { border-color: color-mix(in srgb, var(--good) 45%, var(--line)); color: var(--good); }
+.einstellungen .test-btn.err { border-color: color-mix(in srgb, var(--alert) 45%, var(--line)); color: var(--alert); }
+.einstellungen .spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; opacity: 0.85; }
+
+/* Tönungen (für intg-badge, log-lvl) */
+.einstellungen .tone-good { --tc: var(--good); --tbg: color-mix(in srgb, var(--good) 14%, var(--surface)); }
+.einstellungen .tone-info { --tc: var(--info); --tbg: color-mix(in srgb, var(--info) 13%, var(--surface)); }
+.einstellungen .tone-warn { --tc: var(--warn); --tbg: color-mix(in srgb, var(--warn) 15%, var(--surface)); }
+.einstellungen .tone-alert { --tc: var(--alert); --tbg: color-mix(in srgb, var(--alert) 13%, var(--surface)); }
+.einstellungen .tone-muted { --tc: var(--ink-3); --tbg: var(--surface-2); }
+
+/* Integrationen */
+.einstellungen .intg-title { display: inline-flex; align-items: center; gap: 10px; font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.einstellungen .intg-ico { width: 28px; height: 28px; border-radius: var(--r-sm); display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); }
+.einstellungen .intg-right { display: flex; align-items: center; gap: 10px; }
+.einstellungen .intg-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 99px; color: var(--tc); background: var(--tbg); }
+.einstellungen .intg-note { font-size: 12.5px; color: var(--ink-3); line-height: 1.5; margin: 0 0 16px; max-width: 72ch; }
+
+/* Status & Dienste */
+.einstellungen .status-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 18px; border-radius: var(--r-lg); border: 1px solid var(--line); }
+.einstellungen .status-banner.ok { background: color-mix(in srgb, var(--good) 9%, var(--surface)); border-color: color-mix(in srgb, var(--good) 30%, var(--line)); }
+.einstellungen .status-banner.degraded { background: color-mix(in srgb, var(--warn) 12%, var(--surface)); border-color: color-mix(in srgb, var(--warn) 34%, var(--line)); }
+.einstellungen .sb-left { display: inline-flex; align-items: center; gap: 9px; font-size: 13.5px; font-weight: 600; }
+.einstellungen .status-banner.ok .sb-left { color: var(--good); }
+.einstellungen .status-banner.degraded .sb-left { color: var(--warn); }
+.einstellungen .sb-dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.einstellungen .sb-time { font-size: 11.5px; color: var(--ink-3); font-family: var(--font-mono); }
+.einstellungen .svc-list { display: flex; flex-direction: column; gap: 10px; }
+.einstellungen .svc-row { display: flex; align-items: center; gap: 13px; padding: 14px 18px; border-radius: var(--r-lg); border: 1px solid var(--line); background: var(--surface); }
+.einstellungen .svc-row.running { background: color-mix(in srgb, var(--good) 5%, var(--surface)); border-color: color-mix(in srgb, var(--good) 22%, var(--line)); }
+.einstellungen .svc-row.stopped { background: color-mix(in srgb, var(--alert) 5%, var(--surface)); border-color: color-mix(in srgb, var(--alert) 26%, var(--line)); }
+.einstellungen .svc-ico { width: 36px; height: 36px; border-radius: var(--r-sm); display: grid; place-items: center; flex-shrink: 0; color: var(--ink-2); background: var(--surface); border: 1px solid var(--line); }
+.einstellungen .svc-row.running .svc-ico { color: var(--good); }
+.einstellungen .svc-row.stopped .svc-ico { color: var(--alert); }
+.einstellungen .svc-main { flex: 1; min-width: 0; }
+.einstellungen .svc-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+.einstellungen .svc-state { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; }
+.einstellungen .svc-state.running { color: var(--good); }
+.einstellungen .svc-state.stopped { color: var(--alert); }
+.einstellungen .svc-state .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.einstellungen .svc-lat { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-4); }
+.einstellungen .svc-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 6px; font-size: 12px; color: var(--ink-2); }
+.einstellungen .svc-meta i { color: var(--ink-4); font-style: normal; }
+.einstellungen .res-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.einstellungen .res-grid.c3 { grid-template-columns: repeat(3, 1fr); }
+.einstellungen .res-card { border: 1px solid var(--line); border-radius: var(--r-lg); padding: 15px 17px; background: var(--surface); }
+.einstellungen .res-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); font-weight: 600; }
+.einstellungen .res-value { font-family: var(--font-mono); font-size: 19px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); margin-top: 6px; }
+.einstellungen .res-value.sm { font-size: 14px; font-family: var(--font-sans); line-height: 1.3; }
+.einstellungen .res-bar { height: 7px; border-radius: 99px; background: var(--line); margin-top: 11px; overflow: hidden; }
+.einstellungen .res-bar span { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--good), #34D399); }
+.einstellungen .res-foot { font-size: 11px; color: var(--ink-4); margin-top: 8px; font-family: var(--font-mono); }
+
+/* Fernwärme-Versorger */
+.einstellungen .sup-list { margin-top: 14px; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; max-height: 264px; overflow-y: auto; }
+.einstellungen .sup-row { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 12px; padding: 11px 14px; border-bottom: 1px solid var(--line); cursor: pointer; transition: background 120ms; }
+.einstellungen .sup-row:last-child { border-bottom: none; }
+.einstellungen .sup-row:hover { background: var(--surface-2); }
+.einstellungen .sup-row.on { background: color-mix(in srgb, var(--fw-fernwaerme) 8%, var(--surface)); }
+.einstellungen .sup-radio { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--line-strong); position: relative; transition: border-color 120ms; }
+.einstellungen .sup-row.on .sup-radio { border-color: var(--fw-fernwaerme); }
+.einstellungen .sup-row.on .sup-radio::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--fw-fernwaerme); }
+.einstellungen .sup-name { font-size: 13px; font-weight: 500; color: var(--ink); }
+.einstellungen .sup-city { font-size: 11.5px; color: var(--ink-3); }
+.einstellungen .sup-vals { text-align: right; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-2); }
+
+/* Log */
+.einstellungen .log-filter { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; margin-bottom: 14px; }
+.einstellungen .lf-btn { padding: 7px 13px; font-size: 12px; color: var(--ink-3); border: none; border-right: 1px solid var(--line); background: none; cursor: pointer; transition: background 120ms, color 120ms; }
+.einstellungen .lf-btn:last-child { border-right: none; }
+.einstellungen .lf-btn:hover { color: var(--ink-2); }
+.einstellungen .lf-btn.on { background: var(--ink); color: var(--surface); font-weight: 500; }
+[data-theme="dark"] .einstellungen .lf-btn.on { color: var(--bg); }
+.einstellungen .log-list { display: flex; flex-direction: column; gap: 8px; }
+.einstellungen .log-row { border: 1px solid var(--line); border-left-width: 3px; border-radius: var(--r-sm); padding: 11px 14px; background: var(--surface-2); }
+.einstellungen .log-row.tone-alert { border-left-color: var(--alert); background: color-mix(in srgb, var(--alert) 5%, var(--surface)); }
+.einstellungen .log-row.tone-warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 6%, var(--surface)); }
+.einstellungen .log-row.tone-info { border-left-color: var(--info); }
+.einstellungen .log-top { display: flex; align-items: center; gap: 10px; }
+.einstellungen .log-lvl { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.04em; padding: 2px 6px; border-radius: 3px; color: var(--tc); background: var(--tbg); }
+.einstellungen .log-ts { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-3); }
+.einstellungen .log-src { font-size: 11.5px; color: var(--ink-4); font-family: var(--font-mono); margin-left: auto; }
+.einstellungen .log-msg { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); margin-top: 6px; word-break: break-word; }
+
+/* Backup */
+.einstellungen .backup-block { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.einstellungen .warn-strip { display: flex; align-items: flex-start; gap: 9px; padding: 11px 13px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--warn) 11%, var(--surface)); border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line)); font-size: 12.5px; color: var(--ink-2); line-height: 1.45; }
+.einstellungen .warn-strip svg { color: var(--warn); flex-shrink: 0; margin-top: 1px; }
+
+@media (max-width: 900px) {
+  .einstellungen .set-body { grid-template-columns: 1fr; }
+  .einstellungen .set-rail { position: static; max-height: none; flex-direction: row; flex-wrap: wrap; border-right: none; border-bottom: 1px solid var(--line); }
+  .einstellungen .rail-group { display: contents; }
+  .einstellungen .rail-glabel { display: none; }
+  .einstellungen .rail-desc { display: none; }
+  .einstellungen .res-grid, .einstellungen .res-grid.c3 { grid-template-columns: repeat(2, 1fr); }
+  .einstellungen .form-grid, .einstellungen .form-grid.c3 { grid-template-columns: 1fr; }
+}

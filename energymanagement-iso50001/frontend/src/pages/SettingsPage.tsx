@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell, Monitor, Download, CheckCircle, AlertTriangle, XCircle, Plug2, HeartPulse, Database, Server, Clock, HardDrive, Play, RotateCcw, Wifi, WifiOff, ScrollText, Trash2, Upload, ShieldCheck } from 'lucide-react';
+import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell, Monitor, Download, CheckCircle, AlertTriangle, XCircle, Plug2, HeartPulse, Database, Server, Clock, HardDrive, Play, RotateCcw, Wifi, ScrollText, Trash2, Upload, ShieldCheck, ChevronDown, Check } from 'lucide-react';
 import { apiClient, setBackupRunning } from '@/utils/api';
 import { useAppDispatch } from '@/hooks/useRedux';
 import { logout } from '@/store/slices/authSlice';
@@ -95,74 +95,83 @@ export default function SettingsPage() {
     );
   }
 
+  const saveable = !['system', 'integrations', 'status', 'logs', 'backup'].includes(activeTab);
+
   return (
-    <div className="space-y-6">
+    <div className="einstellungen">
       <PageHead
         eyebrow="System"
         title="Einstellungen"
         actions={
-          activeTab !== 'system' && activeTab !== 'integrations' && activeTab !== 'status' && activeTab !== 'logs' && activeTab !== 'backup' ? (
+          saveable ? (
             <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2">
               <Save className="w-4 h-4" />
-              {saving ? 'Speichern...' : saved ? 'Gespeichert!' : 'Speichern'}
+              {saving ? 'Speichern…' : saved ? 'Gespeichert!' : 'Speichern'}
             </button>
           ) : undefined
         }
       />
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-gray-200">
-        {TABS.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab.id
-                  ? 'border-primary-500 text-primary-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
+      <div className="set-body">
+        {/* Rail-Navigation */}
+        <nav className="set-rail">
+          {RAIL_GROUPS.map((grp) => (
+            <div className="rail-group" key={grp.label}>
+              <div className="rail-glabel">{grp.label}</div>
+              {grp.items.map((id) => {
+                const tab = TABS.find((t) => t.id === id)!;
+                const Icon = tab.icon;
+                return (
+                  <button key={id} className={`rail-item${activeTab === id ? ' on' : ''}`} onClick={() => setActiveTab(id)}>
+                    <span className="rail-ico"><Icon size={15} /></span>
+                    <span className="rail-text">
+                      <span className="rail-label">{tab.label}</span>
+                      <span className="rail-desc">{RAIL_DESC[id]}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
 
-      {/* Tab-Inhalt */}
-      <div className="card p-6">
-        {settings[activeTab]?.description && (
-          <p className="text-sm text-gray-500 mb-6">
-            {settings[activeTab].description}
-          </p>
-        )}
-
-        {activeTab === 'status' && <StatusPanel />}
-        {activeTab === 'organization' && (
-          <OrganizationForm values={editValues} onChange={updateField} />
-        )}
-        {activeTab === 'branding' && (
-          <BrandingForm values={editValues} onChange={updateField} />
-        )}
-        {activeTab === 'report_defaults' && (
-          <ReportForm values={editValues} onChange={updateField} />
-        )}
-        {activeTab === 'enpi_config' && (
-          <EnPIForm values={editValues} onChange={updateField} />
-        )}
-        {activeTab === 'notifications' && (
-          <NotificationsForm values={editValues} onChange={updateField} />
-        )}
-        {activeTab === 'integrations' && <IntegrationsPanel />}
-        {activeTab === 'system' && <SystemPanel />}
-        {activeTab === 'logs' && <LogPanel />}
-        {activeTab === 'backup' && <BackupPanel />}
+        {/* Panel */}
+        <div className="set-panel">
+          {activeTab === 'status' && <StatusPanel />}
+          {activeTab === 'organization' && <OrganizationForm values={editValues} onChange={updateField} />}
+          {activeTab === 'branding' && <BrandingForm values={editValues} onChange={updateField} />}
+          {activeTab === 'report_defaults' && <ReportForm values={editValues} onChange={updateField} />}
+          {activeTab === 'enpi_config' && <EnPIForm values={editValues} onChange={updateField} />}
+          {activeTab === 'notifications' && <NotificationsForm values={editValues} onChange={updateField} />}
+          {activeTab === 'integrations' && <IntegrationsPanel />}
+          {activeTab === 'system' && <SystemPanel />}
+          {activeTab === 'logs' && <LogPanel />}
+          {activeTab === 'backup' && <BackupPanel />}
+        </div>
       </div>
     </div>
   );
 }
+
+// Rail-Gruppen (4) + Item-Beschreibungen (aus dem Design)
+const RAIL_GROUPS: { label: string; items: string[] }[] = [
+  { label: 'Allgemein', items: ['organization', 'branding', 'report_defaults'] },
+  { label: 'Energiemanagement', items: ['enpi_config', 'notifications'] },
+  { label: 'Daten & Geräte', items: ['integrations'] },
+  { label: 'System & Wartung', items: ['status', 'system', 'logs', 'backup'] },
+];
+const RAIL_DESC: Record<string, string> = {
+  organization: 'Stammdaten für Berichte & ISO-Dokumente',
+  branding: 'Farben & Logo',
+  report_defaults: 'Standardwerte der Berichtsgenerierung',
+  enpi_config: 'Energieleistungskennzahlen & Referenz',
+  notifications: 'E-Mail, Fristen & Audit-Erinnerungen',
+  integrations: 'Home Assistant, Wetter, MQTT, BACnet …',
+  status: 'Live-Zustand der Hintergrunddienste',
+  system: 'Version & Updates',
+  logs: 'Fehler & Warnungen der Sitzung',
+  backup: 'Backup, Wiederherstellung, Reset',
+};
 
 /* ── Backup-Panel (Export / Import) ── */
 
@@ -600,15 +609,6 @@ function formatUptime(seconds: number | null): string {
   return `${mins}m`;
 }
 
-const STATUS_CONFIG: Record<string, { color: string; bg: string; border: string; label: string; Icon: typeof CheckCircle }> = {
-  running: { color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-200', label: 'Läuft', Icon: CheckCircle },
-  warning: { color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200', label: 'Warnung', Icon: AlertTriangle },
-  stopped: { color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200', label: 'Gestoppt', Icon: XCircle },
-  error: { color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200', label: 'Fehler', Icon: XCircle },
-  unknown: { color: 'text-gray-500', bg: 'bg-gray-50', border: 'border-gray-200', label: 'Unbekannt', Icon: AlertTriangle },
-  not_configured: { color: 'text-gray-400', bg: 'bg-gray-50', border: 'border-gray-200', label: 'Nicht konfiguriert', Icon: WifiOff },
-};
-
 const SERVICE_ICONS: Record<string, typeof Database> = {
   'PostgreSQL / TimescaleDB': Database,
   'Redis': Server,
@@ -670,202 +670,88 @@ function StatusPanel() {
     return <p className="text-gray-500">Status konnte nicht geladen werden.</p>;
   }
 
-  const overallConfig = data.overall === 'healthy'
-    ? { color: 'text-green-600', bg: 'bg-green-100', label: 'Alle Systeme laufen' }
-    : data.overall === 'warning'
-    ? { color: 'text-amber-600', bg: 'bg-amber-100', label: 'Eingeschränkt' }
-    : { color: 'text-red-600', bg: 'bg-red-100', label: 'Störung' };
+  const isOk = data.overall === 'healthy';
+  const DETAIL_LABELS: Record<string, string> = {
+    version: 'Version', timescaledb: 'TimescaleDB', database_size: 'Größe', tables: 'Tabellen',
+    active_connections: 'Verbindungen', memory_used: 'Speicher', pending_tasks: 'Wart. Tasks',
+    worker_count: 'Worker', minutes_ago: 'Letzter Task', base_url: 'URL',
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="intg-stack">
       {/* Gesamtstatus-Banner */}
-      <div className={`flex items-center justify-between rounded-lg ${overallConfig.bg} px-5 py-4`}>
-        <div className="flex items-center gap-3">
-          <div className={`w-3 h-3 rounded-full ${
-            data.overall === 'healthy' ? 'bg-green-500' : data.overall === 'warning' ? 'bg-amber-500' : 'bg-red-500'
-          } animate-pulse`} />
-          <span className={`text-lg font-semibold ${overallConfig.color}`}>
-            {overallConfig.label}
-          </span>
-        </div>
-        <div className="flex items-center gap-3">
-          {lastRefresh && (
-            <span className="text-xs text-gray-500">
-              Aktualisiert: {lastRefresh.toLocaleTimeString('de-DE')}
-            </span>
-          )}
-          <button
-            onClick={() => loadStatus(true)}
-            disabled={refreshing}
-            className="btn-secondary flex items-center gap-2 text-sm"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-            Aktualisieren
+      <div className={`status-banner ${isOk ? 'ok' : 'degraded'}`}>
+        <div className="sb-left"><span className="sb-dot" />{isOk ? 'Alle Systeme betriebsbereit' : data.overall === 'warning' ? 'Eingeschränkt' : 'Störung'}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {lastRefresh && <span className="sb-time">Aktualisiert {lastRefresh.toLocaleTimeString('de-DE')}</span>}
+          <button className="sbtn-ghost sm" onClick={() => loadStatus(true)} disabled={refreshing}>
+            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} /> Aktualisieren
           </button>
         </div>
       </div>
 
-      {/* Dienste-Karten */}
-      <div>
-        <h3 className="text-base font-semibold text-gray-900 mb-3">Dienste</h3>
-        <div className="grid grid-cols-1 gap-3">
+      {/* Dienste */}
+      <SetCard title="Hintergrunddienste">
+        <div className="svc-list">
           {data.services.map((service) => {
-            const cfg = STATUS_CONFIG[service.status] || STATUS_CONFIG.unknown;
             const ServiceIcon = SERVICE_ICONS[service.name] || Server;
+            const running = service.status === 'running';
+            const stopped = service.status === 'stopped' || service.status === 'error';
             const canRestart = service.name === 'Celery Worker' || service.name === 'Celery Beat (Scheduler)';
             const restartKey = service.name === 'Celery Worker' ? 'celery_worker' : 'celery_beat';
-
             return (
-              <div
-                key={service.name}
-                className={`rounded-lg border ${cfg.border} ${cfg.bg} p-4`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-3 flex-1">
-                    <ServiceIcon className={`w-5 h-5 mt-0.5 ${cfg.color}`} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-gray-900">{service.name}</span>
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.color} ${cfg.bg}`}>
-                          <cfg.Icon className="w-3 h-3" />
-                          {cfg.label}
-                        </span>
-                        {service.latency_ms != null && (
-                          <span className="text-xs text-gray-400">{service.latency_ms} ms</span>
-                        )}
-                      </div>
-
-                      {/* Details */}
-                      {service.details && (
-                        <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
-                          {Object.entries(service.details).map(([key, value]) => (
-                            <span key={key} className="text-xs text-gray-600">
-                              <span className="text-gray-400">{
-                                key === 'version' ? 'Version' :
-                                key === 'timescaledb' ? 'TimescaleDB' :
-                                key === 'database_size' ? 'Größe' :
-                                key === 'tables' ? 'Tabellen' :
-                                key === 'active_connections' ? 'Verbindungen' :
-                                key === 'memory_used' ? 'Speicher' :
-                                key === 'pending_tasks' ? 'Wart. Tasks' :
-                                key === 'worker_count' ? 'Worker' :
-                                key === 'workers' ? '' :
-                                key === 'minutes_ago' ? 'Letzter Task' :
-                                key === 'last_task_execution' ? '' :
-                                key === 'base_url' ? 'URL' :
-                                key
-                              }: </span>
-                              {key === 'workers' ? '' :
-                               key === 'last_task_execution' ? '' :
-                               key === 'minutes_ago' ? `vor ${value} Min.` :
-                               String(value)}
-                            </span>
-                          )).filter(el => {
-                            const key = el.key as string;
-                            return key !== 'workers' && key !== 'last_task_execution';
-                          })}
-                        </div>
-                      )}
-
-                      {/* Fehlermeldung */}
-                      {service.error && (
-                        <p className="mt-1 text-xs text-red-600">{service.error}</p>
-                      )}
-                    </div>
+              <div key={service.name} className={`svc-row${running ? ' running' : stopped ? ' stopped' : ''}`}>
+                <span className="svc-ico"><ServiceIcon size={18} /></span>
+                <div className="svc-main">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span className="svc-name">{service.name}</span>
+                    <span className={`svc-state${running ? ' running' : stopped ? ' stopped' : ''}`}><span className="dot" />{running ? 'Läuft' : stopped ? 'Gestoppt' : service.status}</span>
+                    {service.latency_ms != null && <span className="svc-lat">{service.latency_ms} ms</span>}
                   </div>
-
-                  {/* Restart-Button */}
-                  {canRestart && (service.status === 'stopped' || service.status === 'error') && (
-                    <button
-                      onClick={() => restartService(restartKey)}
-                      disabled={restarting === restartKey}
-                      className="ml-3 btn-primary flex items-center gap-1.5 text-sm px-3 py-1.5 shrink-0"
-                    >
-                      {restarting === restartKey ? (
-                        <RotateCcw className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <Play className="w-3.5 h-3.5" />
-                      )}
-                      {restarting === restartKey ? 'Startet...' : 'Starten'}
-                    </button>
+                  {service.details && (
+                    <div className="svc-meta">
+                      {Object.entries(service.details)
+                        .filter(([k]) => k !== 'workers' && k !== 'last_task_execution')
+                        .map(([k, v]) => (
+                          <span key={k}><i>{DETAIL_LABELS[k] || k}:</i> {k === 'minutes_ago' ? `vor ${v} Min.` : String(v)}</span>
+                        ))}
+                    </div>
                   )}
-                  {canRestart && service.status === 'running' && (
-                    <button
-                      onClick={() => restartService(restartKey)}
-                      disabled={restarting === restartKey}
-                      className="ml-3 btn-secondary flex items-center gap-1.5 text-xs px-2.5 py-1 shrink-0"
-                    >
-                      <RotateCcw className={`w-3 h-3 ${restarting === restartKey ? 'animate-spin' : ''}`} />
-                      Neustart
-                    </button>
-                  )}
+                  {service.error && <p style={{ marginTop: 4, fontSize: 11.5, color: 'var(--alert)' }}>{service.error}</p>}
                 </div>
+                {canRestart && (
+                  <button className={stopped ? 'sbtn-primary' : 'sbtn-ghost sm'} onClick={() => restartService(restartKey)} disabled={restarting === restartKey} style={{ flexShrink: 0 }}>
+                    {restarting === restartKey ? <RotateCcw size={13} className="animate-spin" /> : <Play size={13} />}
+                    {stopped ? (restarting === restartKey ? 'Startet…' : 'Starten') : 'Neustart'}
+                  </button>
+                )}
               </div>
             );
           })}
         </div>
-      </div>
+      </SetCard>
 
       {/* System-Ressourcen */}
-      <div>
-        <h3 className="text-base font-semibold text-gray-900 mb-3">System-Ressourcen</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="rounded-lg border border-gray-200 p-4">
-            <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide">
-              <Server className="w-3.5 h-3.5" />
-              Hostname
-            </div>
-            <p className="mt-1 text-sm font-semibold text-gray-900 truncate">{data.system.hostname}</p>
+      <SetCard title="System-Ressourcen">
+        <div className="res-grid">
+          <div className="res-card"><div className="res-label"><Server size={13} /> Hostname</div><div className="res-value sm">{data.system.hostname}</div></div>
+          <div className="res-card"><div className="res-label"><Clock size={13} /> Uptime</div><div className="res-value sm">{formatUptime(data.system.uptime_seconds)}</div></div>
+          <div className="res-card">
+            <div className="res-label"><HardDrive size={13} /> Festplatte</div>
+            <div className="res-value sm">{data.system.disk_used_gb} / {data.system.disk_total_gb} GB</div>
+            <div className="res-bar"><span style={{ width: `${data.system.disk_usage_percent}%` }} /></div>
+            <div className="res-foot">{data.system.disk_free_gb} GB frei ({data.system.disk_usage_percent}% belegt)</div>
           </div>
-          <div className="rounded-lg border border-gray-200 p-4">
-            <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide">
-              <Clock className="w-3.5 h-3.5" />
-              Uptime
-            </div>
-            <p className="mt-1 text-sm font-semibold text-gray-900">{formatUptime(data.system.uptime_seconds)}</p>
-          </div>
-          <div className="rounded-lg border border-gray-200 p-4">
-            <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide">
-              <HardDrive className="w-3.5 h-3.5" />
-              Festplatte
-            </div>
-            <p className="mt-1 text-sm font-semibold text-gray-900">
-              {data.system.disk_used_gb} / {data.system.disk_total_gb} GB
-            </p>
-            <div className="mt-1.5 w-full bg-gray-200 rounded-full h-1.5">
-              <div
-                className={`h-1.5 rounded-full ${
-                  data.system.disk_usage_percent > 90 ? 'bg-red-500' :
-                  data.system.disk_usage_percent > 75 ? 'bg-amber-500' : 'bg-green-500'
-                }`}
-                style={{ width: `${data.system.disk_usage_percent}%` }}
-              />
-            </div>
-            <p className="mt-0.5 text-xs text-gray-400">{data.system.disk_free_gb} GB frei ({data.system.disk_usage_percent}% belegt)</p>
-          </div>
-          <div className="rounded-lg border border-gray-200 p-4">
-            <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-wide">
-              <Monitor className="w-3.5 h-3.5" />
-              Version
-            </div>
-            <p className="mt-1 text-sm font-semibold text-gray-900">v{data.system.version}</p>
-            <p className="mt-0.5 text-xs text-gray-400">Python {data.system.python}</p>
-          </div>
+          <div className="res-card"><div className="res-label"><Monitor size={13} /> Version</div><div className="res-value sm">v{data.system.version}</div><div className="res-foot">Python {data.system.python}</div></div>
         </div>
-      </div>
+      </SetCard>
     </div>
   );
 }
 
-/* ── Formular-Komponenten ── */
+/* ── Kompat-Wrapper (von IntegrationsPanel u. a. genutzt) ── */
 
-function FormField({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function FormField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
       <label className="label">{label}</label>
@@ -874,294 +760,191 @@ function FormField({
   );
 }
 
-function OrganizationForm({
-  values,
-  onChange,
-}: {
-  values: Record<string, unknown>;
-  onChange: (k: string, v: unknown) => void;
-}) {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <FormField label="Organisationsname">
-        <input
-          className="input"
-          value={(values.name as string) || ''}
-          onChange={(e) => onChange('name', e.target.value)}
-          placeholder="Muster GmbH"
-        />
-      </FormField>
-      <FormField label="Logo-URL">
-        <input
-          className="input"
-          value={(values.logo_url as string) || ''}
-          onChange={(e) => onChange('logo_url', e.target.value)}
-          placeholder="https://..."
-        />
-      </FormField>
-      <FormField label="Adresse">
-        <input
-          className="input"
-          value={(values.address as string) || ''}
-          onChange={(e) => onChange('address', e.target.value)}
-          placeholder="Musterstraße 1, 12345 Musterstadt"
-        />
-      </FormField>
-      <FormField label="E-Mail">
-        <input
-          className="input"
-          type="email"
-          value={(values.contact_email as string) || ''}
-          onChange={(e) => onChange('contact_email', e.target.value)}
-          placeholder="energie@firma.de"
-        />
-      </FormField>
-      <FormField label="Telefon">
-        <input
-          className="input"
-          value={(values.contact_phone as string) || ''}
-          onChange={(e) => onChange('contact_phone', e.target.value)}
-          placeholder="+49 123 456789"
-        />
-      </FormField>
-    </div>
-  );
-}
+/* ── Design-Primitive (analog settings-ui.jsx) ── */
 
-function BrandingForm({
-  values,
-  onChange,
-}: {
-  values: Record<string, unknown>;
-  onChange: (k: string, v: unknown) => void;
-}) {
-  const colors = [
-    { key: 'primary_color', label: 'Primärfarbe' },
-    { key: 'secondary_color', label: 'Sekundärfarbe' },
-    { key: 'accent_color', label: 'Akzentfarbe' },
-  ];
-
+function SetCard({ title, desc, right, tone, children }: { title: string; desc?: string; right?: React.ReactNode; tone?: 'danger'; children: React.ReactNode }) {
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {colors.map((c) => (
-          <FormField key={c.key} label={c.label}>
-            <div className="flex items-center gap-3">
-              <input
-                type="color"
-                value={(values[c.key] as string) || 'var(--ink)'}
-                onChange={(e) => onChange(c.key, e.target.value)}
-                className="w-12 h-10 rounded cursor-pointer border border-gray-300"
-              />
-              <input
-                className="input flex-1"
-                value={(values[c.key] as string) || ''}
-                onChange={(e) => onChange(c.key, e.target.value)}
-                placeholder="var(--ink)"
-              />
-            </div>
-          </FormField>
-        ))}
-      </div>
-      {/* Vorschau */}
-      <div className="mt-4 p-4 rounded-lg border border-gray-200">
-        <p className="text-sm text-gray-500 mb-3">Vorschau</p>
-        <div className="flex gap-3">
-          <div
-            className="w-24 h-10 rounded flex items-center justify-center text-white text-sm font-medium"
-            style={{ backgroundColor: (values.primary_color as string) || 'var(--ink)' }}
-          >
-            Primär
-          </div>
-          <div
-            className="w-24 h-10 rounded flex items-center justify-center text-white text-sm font-medium"
-            style={{ backgroundColor: (values.secondary_color as string) || '#2D8EB9' }}
-          >
-            Sekundär
-          </div>
-          <div
-            className="w-24 h-10 rounded flex items-center justify-center text-white text-sm font-medium"
-            style={{ backgroundColor: (values.accent_color as string) || 'var(--fw-strom)' }}
-          >
-            Akzent
-          </div>
+    <section className={`set-card${tone === 'danger' ? ' tone-danger' : ''}`}>
+      <div className="set-card-head">
+        <div>
+          <h3 className="set-card-title">{title}</h3>
+          {desc && <p className="set-card-desc">{desc}</p>}
         </div>
+        {right && <div className="set-card-right">{right}</div>}
       </div>
+      {children}
+    </section>
+  );
+}
+
+function Field({ label, hint, full, required, children }: { label: string; hint?: string; full?: boolean; required?: boolean; children: React.ReactNode }) {
+  return (
+    <div className={`field${full ? ' full' : ''}`}>
+      <label className="field-label">{label}{required && <span className="req">*</span>}</label>
+      {children}
+      {hint && <span className="field-hint">{hint}</span>}
     </div>
   );
 }
 
-function ReportForm({
-  values,
-  onChange,
-}: {
-  values: Record<string, unknown>;
-  onChange: (k: string, v: unknown) => void;
-}) {
+function SInput({ value, onChange, placeholder, mono, type = 'text' }: { value: string; onChange: (v: string) => void; placeholder?: string; mono?: boolean; type?: string }) {
+  return <input className={`sinp${mono ? ' mono' : ''}`} type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />;
+}
+
+function NumberInput({ value, onChange, min, max, suffix }: { value: number; onChange: (v: number) => void; min?: number; max?: number; suffix?: string }) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <FormField label="Firmenname im Bericht">
-        <input
-          className="input"
-          value={(values.company_name as string) || ''}
-          onChange={(e) => onChange('company_name', e.target.value)}
-        />
-      </FormField>
-      <FormField label="Berichtssprache">
-        <select
-          className="input"
-          value={(values.report_language as string) || 'de'}
-          onChange={(e) => onChange('report_language', e.target.value)}
-        >
-          <option value="de">Deutsch</option>
-          <option value="en">Englisch</option>
-        </select>
-      </FormField>
-      <FormField label="Standard-Berichtszeitraum (Monate)">
-        <input
-          className="input"
-          type="number"
-          min={1}
-          max={36}
-          value={(values.default_period_months as number) || 12}
-          onChange={(e) => onChange('default_period_months', parseInt(e.target.value) || 12)}
-        />
-      </FormField>
-      <div className="space-y-3 pt-6">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={Boolean(values.include_logo)}
-            onChange={(e) => onChange('include_logo', e.target.checked)}
-            className="rounded border-gray-300 text-primary-500"
-          />
-          <span className="text-sm">Logo im Bericht anzeigen</span>
-        </label>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={Boolean(values.include_weather_correction)}
-            onChange={(e) => onChange('include_weather_correction', e.target.checked)}
-            className="rounded border-gray-300 text-primary-500"
-          />
-          <span className="text-sm">Witterungskorrektur einbeziehen</span>
-        </label>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={Boolean(values.include_co2)}
-            onChange={(e) => onChange('include_co2', e.target.checked)}
-            className="rounded border-gray-300 text-primary-500"
-          />
-          <span className="text-sm">CO₂-Bilanz einbeziehen</span>
-        </label>
-      </div>
+    <div className="num-wrap">
+      <input className="sinp mono" type="number" min={min} max={max} value={value} onChange={(e) => onChange(parseInt(e.target.value) || 0)} />
+      {suffix && <span className="num-suffix">{suffix}</span>}
     </div>
   );
 }
 
-function EnPIForm({
-  values,
-  onChange,
-}: {
-  values: Record<string, unknown>;
-  onChange: (k: string, v: unknown) => void;
-}) {
-  const allMetrics = [
-    { id: 'kwh_per_m2', label: 'kWh/m²' },
-    { id: 'kwh_per_person', label: 'kWh/Mitarbeiter' },
-    { id: 'kwh_per_unit', label: 'kWh/Produktionseinheit' },
-    { id: 'co2_per_m2', label: 'kg CO₂/m²' },
-  ];
-  const selectedMetrics = (values.metrics as string[]) || [];
-
-  const toggleMetric = (id: string) => {
-    const next = selectedMetrics.includes(id)
-      ? selectedMetrics.filter((m) => m !== id)
-      : [...selectedMetrics, id];
-    onChange('metrics', next);
-  };
-
+function SelectInput({ value, onChange, children }: { value: string; onChange: (v: string) => void; children: React.ReactNode }) {
   return (
-    <div className="space-y-6">
-      <FormField label="Aktive Kennzahlen">
-        <div className="grid grid-cols-2 gap-2 mt-2">
-          {allMetrics.map((m) => (
-            <label key={m.id} className="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-gray-50">
-              <input
-                type="checkbox"
-                checked={selectedMetrics.includes(m.id)}
-                onChange={() => toggleMetric(m.id)}
-                className="rounded border-gray-300 text-primary-500"
-              />
-              <span className="text-sm">{m.label}</span>
-            </label>
+    <div className="sel-wrap">
+      <select className="ssel" value={value} onChange={(e) => onChange(e.target.value)}>{children}</select>
+      <span className="sel-caret"><ChevronDown size={14} /></span>
+    </div>
+  );
+}
+
+function Toggle({ checked, onChange, label, desc }: { checked: boolean; onChange: (v: boolean) => void; label: string; desc?: string }) {
+  return (
+    <div className={`tog-row${checked ? ' on' : ''}`} onClick={() => onChange(!checked)} role="switch" aria-checked={checked}>
+      <div className="tog-text"><span className="tog-label">{label}</span>{desc && <span className="tog-desc">{desc}</span>}</div>
+      <div className="tog-switch"><div className="tog-knob" /></div>
+    </div>
+  );
+}
+
+function CheckRow({ checked, onChange, label, sub }: { checked: boolean; onChange: (v: boolean) => void; label: string; sub?: string }) {
+  return (
+    <div className={`chkrow${checked ? ' on' : ''}`} onClick={() => onChange(!checked)} role="checkbox" aria-checked={checked}>
+      <span className="chkbox">{checked && <Check size={12} />}</span>
+      <span className="chk-text">{label}{sub && <span className="chk-sub">{sub}</span>}</span>
+    </div>
+  );
+}
+
+function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <Field label={label}>
+      <div className="color-row">
+        <span className="color-swatch" style={{ background: value || 'var(--ink)' }}>
+          <input type="color" value={value || '#1B5E7B'} onChange={(e) => onChange(e.target.value)} />
+        </span>
+        <input className="sinp mono" value={value || ''} onChange={(e) => onChange(e.target.value)} placeholder="#1B5E7B" />
+      </div>
+    </Field>
+  );
+}
+
+/* ── Konfig-Panels ── */
+
+function OrganizationForm({ values, onChange }: { values: Record<string, unknown>; onChange: (k: string, v: unknown) => void }) {
+  const v = (k: string) => (values[k] as string) || '';
+  return (
+    <SetCard title="Organisationsdaten" desc="Stammdaten für Berichte und ISO-50001-Dokumente.">
+      <div className="form-grid">
+        <Field label="Organisationsname"><SInput value={v('name')} onChange={(x) => onChange('name', x)} placeholder="Muster GmbH" /></Field>
+        <Field label="Logo-URL"><SInput value={v('logo_url')} onChange={(x) => onChange('logo_url', x)} placeholder="https://…" mono /></Field>
+        <Field label="Adresse" full><SInput value={v('address')} onChange={(x) => onChange('address', x)} placeholder="Musterstraße 1, 12345 Musterstadt" /></Field>
+        <Field label="E-Mail"><SInput value={v('contact_email')} onChange={(x) => onChange('contact_email', x)} placeholder="energie@firma.de" mono type="email" /></Field>
+        <Field label="Telefon"><SInput value={v('contact_phone')} onChange={(x) => onChange('contact_phone', x)} placeholder="+49 123 456789" mono /></Field>
+      </div>
+    </SetCard>
+  );
+}
+
+function BrandingForm({ values, onChange }: { values: Record<string, unknown>; onChange: (k: string, v: unknown) => void }) {
+  const v = (k: string) => (values[k] as string) || '';
+  return (
+    <SetCard title="Farben für UI &amp; Berichte" desc="Primär-, Sekundär- und Akzentfarbe für Oberfläche und PDF-Berichte.">
+      <div className="form-grid c3">
+        <ColorField label="Primärfarbe" value={v('primary_color')} onChange={(x) => onChange('primary_color', x)} />
+        <ColorField label="Sekundärfarbe" value={v('secondary_color')} onChange={(x) => onChange('secondary_color', x)} />
+        <ColorField label="Akzentfarbe" value={v('accent_color')} onChange={(x) => onChange('accent_color', x)} />
+      </div>
+      <div className="brand-preview">
+        <div className="bp-label">Vorschau</div>
+        <div style={{ display: 'flex', gap: 12, marginTop: 10 }}>
+          {[['Primär', v('primary_color') || '#1B5E7B'], ['Sekundär', v('secondary_color') || '#2D8EB9'], ['Akzent', v('accent_color') || '#E89A3C']].map(([l, c]) => (
+            <div key={l} style={{ width: 96, height: 40, borderRadius: 8, background: c, color: '#fff', display: 'grid', placeItems: 'center', fontSize: 13, fontWeight: 500 }}>{l}</div>
           ))}
         </div>
-      </FormField>
-      <FormField label="Referenz-Standard">
-        <select
-          className="input"
-          value={(values.reference_standard as string) || 'vdi_3807'}
-          onChange={(e) => onChange('reference_standard', e.target.value)}
-        >
-          <option value="vdi_3807">VDI 3807</option>
-          <option value="din_v_18599">DIN V 18599</option>
-          <option value="custom">Eigene Referenzwerte</option>
-        </select>
-      </FormField>
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={Boolean(values.show_reference_values)}
-          onChange={(e) => onChange('show_reference_values', e.target.checked)}
-          className="rounded border-gray-300 text-primary-500"
-        />
-        <span className="text-sm">Referenzwerte in Benchmarks anzeigen</span>
-      </label>
-    </div>
+      </div>
+    </SetCard>
   );
 }
 
-function NotificationsForm({
-  values,
-  onChange,
-}: {
-  values: Record<string, unknown>;
-  onChange: (k: string, v: unknown) => void;
-}) {
+function ReportForm({ values, onChange }: { values: Record<string, unknown>; onChange: (k: string, v: unknown) => void }) {
   return (
-    <div className="space-y-4">
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={Boolean(values.email_enabled)}
-          onChange={(e) => onChange('email_enabled', e.target.checked)}
-          className="rounded border-gray-300 text-primary-500"
-        />
-        <span className="text-sm">E-Mail-Benachrichtigungen aktivieren</span>
-      </label>
-      <FormField label="Dokumenten-Überprüfung Vorlauf (Tage)">
-        <input
-          className="input w-32"
-          type="number"
-          min={1}
-          max={90}
-          value={(values.review_reminder_days as number) || 30}
-          onChange={(e) => onChange('review_reminder_days', parseInt(e.target.value) || 30)}
-        />
-      </FormField>
-      <FormField label="Audit-Erinnerung Vorlauf (Tage)">
-        <input
-          className="input w-32"
-          type="number"
-          min={1}
-          max={90}
-          value={(values.audit_reminder_days as number) || 14}
-          onChange={(e) => onChange('audit_reminder_days', parseInt(e.target.value) || 14)}
-        />
-      </FormField>
-    </div>
+    <SetCard title="Standardeinstellungen für Berichtsgenerierung" desc="Vorgaben für neue Berichte.">
+      <div className="form-grid">
+        <Field label="Firmenname im Bericht"><SInput value={(values.company_name as string) || ''} onChange={(x) => onChange('company_name', x)} /></Field>
+        <Field label="Berichtssprache">
+          <SelectInput value={(values.report_language as string) || 'de'} onChange={(x) => onChange('report_language', x)}>
+            <option value="de">Deutsch</option><option value="en">Englisch</option>
+          </SelectInput>
+        </Field>
+        <Field label="Standard-Berichtszeitraum">
+          <NumberInput value={(values.default_period_months as number) || 12} onChange={(x) => onChange('default_period_months', x)} min={1} max={36} suffix="Monate" />
+        </Field>
+        <div className="field full"><div className="check-stack">
+          <CheckRow checked={Boolean(values.include_logo)} onChange={(x) => onChange('include_logo', x)} label="Logo im Bericht anzeigen" />
+          <CheckRow checked={Boolean(values.include_weather_correction)} onChange={(x) => onChange('include_weather_correction', x)} label="Witterungskorrektur einbeziehen" />
+          <CheckRow checked={Boolean(values.include_co2)} onChange={(x) => onChange('include_co2', x)} label="CO₂-Bilanz einbeziehen" />
+        </div></div>
+      </div>
+    </SetCard>
+  );
+}
+
+function EnPIForm({ values, onChange }: { values: Record<string, unknown>; onChange: (k: string, v: unknown) => void }) {
+  const allMetrics = [
+    { id: 'kwh_per_m2', label: 'kWh/m²', sub: 'Flächenbezogen' },
+    { id: 'kwh_per_person', label: 'kWh/Mitarbeiter', sub: 'Personenbezogen' },
+    { id: 'kwh_per_unit', label: 'kWh/Produktionseinheit', sub: 'Produktionsbezogen' },
+    { id: 'co2_per_m2', label: 'kg CO₂/m²', sub: 'Emissionsintensität' },
+  ];
+  const selected = (values.metrics as string[]) || [];
+  const toggle = (id: string) => onChange('metrics', selected.includes(id) ? selected.filter((m) => m !== id) : [...selected, id]);
+  return (
+    <SetCard title="EnPI-Kennzahlen-Konfiguration" desc="Aktive Energieleistungskennzahlen und Referenz-Standard.">
+      <Field label="Aktive Kennzahlen">
+        <div className="kpi-grid">
+          {allMetrics.map((m) => <CheckRow key={m.id} checked={selected.includes(m.id)} onChange={() => toggle(m.id)} label={m.label} sub={m.sub} />)}
+        </div>
+      </Field>
+      <div style={{ marginTop: 16 }}>
+        <Field label="Referenz-Standard">
+          <SelectInput value={(values.reference_standard as string) || 'vdi_3807'} onChange={(x) => onChange('reference_standard', x)}>
+            <option value="vdi_3807">VDI 3807</option><option value="din_v_18599">DIN V 18599</option><option value="custom">Eigene Referenzwerte</option>
+          </SelectInput>
+        </Field>
+      </div>
+      <div style={{ marginTop: 16 }}>
+        <CheckRow checked={Boolean(values.show_reference_values)} onChange={(x) => onChange('show_reference_values', x)} label="Referenzwerte in Benchmarks anzeigen" />
+      </div>
+    </SetCard>
+  );
+}
+
+function NotificationsForm({ values, onChange }: { values: Record<string, unknown>; onChange: (k: string, v: unknown) => void }) {
+  const enabled = Boolean(values.email_enabled);
+  return (
+    <SetCard title="Benachrichtigungseinstellungen" desc="Automatische Erinnerungen für ISO-50001-Fristen und Systemereignisse.">
+      <Toggle checked={enabled} onChange={(x) => onChange('email_enabled', x)} label="E-Mail-Benachrichtigungen aktivieren" desc="Versand an die in der Organisation hinterlegte Adresse" />
+      <div className={`form-grid fade-block${enabled ? '' : ' disabled'}`} style={{ marginTop: 16 }}>
+        <Field label="Dokumenten-Überprüfung – Vorlauf" hint="Erinnerung vor Ablauf der Dokumentenprüfung">
+          <NumberInput value={(values.review_reminder_days as number) || 30} onChange={(x) => onChange('review_reminder_days', x)} min={1} max={180} suffix="Tage" />
+        </Field>
+        <Field label="Audit-Erinnerung – Vorlauf" hint="Erinnerung vor dem nächsten internen Audit">
+          <NumberInput value={(values.audit_reminder_days as number) || 14} onChange={(x) => onChange('audit_reminder_days', x)} min={1} max={180} suffix="Tage" />
+        </Field>
+      </div>
+    </SetCard>
   );
 }
 
@@ -2389,16 +2172,12 @@ interface LogEntry {
   details: Record<string, unknown>;
 }
 
-const LEVEL_STYLE: Record<string, string> = {
-  ERROR: 'bg-red-50 text-red-700 border-red-200',
-  WARNING: 'bg-amber-50 text-amber-700 border-amber-200',
-  INFO: 'bg-blue-50 text-blue-700 border-blue-200',
-};
 
 function LogPanel() {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [filter, setFilter] = useState<'all' | 'ERROR' | 'WARNING' | 'INFO'>('all');
 
   const loadLogs = async () => {
     setLoading(true);
@@ -2418,9 +2197,7 @@ function LogPanel() {
     setEntries([]);
   };
 
-  useEffect(() => {
-    loadLogs();
-  }, []);
+  useEffect(() => { loadLogs(); }, []);
 
   const formatTs = (ts: string) => {
     try {
@@ -2428,74 +2205,58 @@ function LogPanel() {
         day: '2-digit', month: '2-digit', year: 'numeric',
         hour: '2-digit', minute: '2-digit', second: '2-digit',
       });
-    } catch {
-      return ts;
-    }
+    } catch { return ts; }
   };
 
+  const toneOf = (lvl: string) => lvl === 'ERROR' ? 'tone-alert' : lvl === 'WARNING' ? 'tone-warn' : 'tone-info';
+  const counts = { all: entries.length, ERROR: entries.filter((e) => e.level === 'ERROR').length, WARNING: entries.filter((e) => e.level === 'WARNING').length, INFO: entries.filter((e) => e.level === 'INFO').length };
+  const filtered = filter === 'all' ? entries : entries.filter((e) => e.level === filter);
+  const FILTERS: { id: typeof filter; label: string }[] = [
+    { id: 'all', label: `Alle (${counts.all})` }, { id: 'ERROR', label: `Fehler (${counts.ERROR})` },
+    { id: 'WARNING', label: `Warnung (${counts.WARNING})` }, { id: 'INFO', label: `Info (${counts.INFO})` },
+  ];
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-base font-semibold text-gray-900">Anwendungs-Log</h3>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Fehler und Warnungen der laufenden Sitzung (max. 200 Einträge, nicht persistent)
-          </p>
+    <SetCard
+      title="Anwendungs-Protokoll"
+      desc="Fehler und Warnungen der laufenden Sitzung (max. 200 Einträge, nicht persistent)."
+      right={
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="sbtn-ghost sm" onClick={loadLogs}><RefreshCw size={13} /> Aktualisieren</button>
+          <button className="sbtn-danger" onClick={clearLogs} style={{ padding: '7px 12px', fontSize: 12 }}><Trash2 size={13} /> Leeren</button>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={loadLogs}
-            className="btn-secondary flex items-center gap-1"
-            title="Aktualisieren"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Aktualisieren
-          </button>
-          <button
-            onClick={clearLogs}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-red-200 text-red-600 text-sm hover:bg-red-50"
-            title="Log leeren"
-          >
-            <Trash2 className="w-4 h-4" />
-            Leeren
-          </button>
-        </div>
+      }
+    >
+      <div className="log-filter">
+        {FILTERS.map((f) => <button key={f.id} className={`lf-btn${filter === f.id ? ' on' : ''}`} onClick={() => setFilter(f.id)}>{f.label}</button>)}
       </div>
 
       {loading ? (
         <LoadingSpinner />
-      ) : entries.length === 0 ? (
-        <div className="py-12 text-center">
-          <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-3" />
-          <p className="text-gray-500">Keine Fehler seit dem letzten Start</p>
+      ) : filtered.length === 0 ? (
+        <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--ink-3)' }}>
+          <CheckCircle size={28} style={{ color: 'var(--good)', margin: '0 auto 10px' }} />
+          <p style={{ fontSize: 13 }}>Keine Einträge in dieser Auswahl.</p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {entries.map((entry, i) => {
-            const style = LEVEL_STYLE[entry.level] || LEVEL_STYLE.INFO;
+        <div className="log-list">
+          {filtered.map((entry, i) => {
             const hasDetails = entry.details && Object.keys(entry.details).length > 0;
             return (
-              <div key={i} className={`rounded-lg border p-3 ${style}`}>
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-mono font-bold">{entry.level}</span>
-                      <span className="text-xs font-mono text-gray-500">{formatTs(entry.timestamp)}</span>
-                      <span className="text-xs text-gray-500 truncate">{entry.source}</span>
-                    </div>
-                    <p className="mt-1 text-sm font-medium break-words">{entry.message}</p>
-                  </div>
+              <div key={i} className={`log-row ${toneOf(entry.level)}`}>
+                <div className="log-top">
+                  <span className={`log-lvl ${toneOf(entry.level)}`}>{entry.level}</span>
+                  <span className="log-ts">{formatTs(entry.timestamp)}</span>
+                  <span className="log-src">{entry.source}</span>
                   {hasDetails && (
-                    <button
-                      onClick={() => setExpanded(expanded === i ? null : i)}
-                      className="text-xs underline whitespace-nowrap shrink-0"
-                    >
+                    <button onClick={() => setExpanded(expanded === i ? null : i)} style={{ fontSize: 11, color: 'var(--ink-3)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
                       {expanded === i ? 'Schließen' : 'Details'}
                     </button>
                   )}
                 </div>
+                <p className="log-msg">{entry.message}</p>
                 {expanded === i && hasDetails && (
-                  <pre className="mt-2 text-xs bg-white/60 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">
+                  <pre style={{ marginTop: 8, fontSize: 11, background: 'var(--surface-2)', borderRadius: 6, padding: 8, overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'var(--ink-2)' }}>
                     {JSON.stringify(entry.details, null, 2)}
                   </pre>
                 )}
@@ -2504,6 +2265,6 @@ function LogPanel() {
           })}
         </div>
       )}
-    </div>
+    </SetCard>
   );
 }
