@@ -1,10 +1,28 @@
 import { useEffect, useState, useCallback } from 'react';
+import {
+  Leaf,
+  SlidersHorizontal,
+  Calculator,
+  Plus,
+  Info,
+  BarChart3,
+  Layers,
+  Table as TableIcon,
+  Factory,
+  Zap,
+  Check,
+  Play,
+  RefreshCw,
+} from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import InfoTip from '@/components/ui/InfoTip';
-import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
+import { ENERGY_TYPE_LABELS } from '@/types';
+import { EM_ENERGY, resolveEnergyKey } from '@/utils/energyPalette';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import PageHead from '@/components/ui/PageHead';
-import SegControl from '@/components/ui/SegControl';
+import EnergyChip from '@/components/ui/EnergyChip';
+import SourceChip from '@/components/umwelt/SourceChip';
+import MonthBars from '@/components/umwelt/MonthBars';
 
 // ── Typen ──
 
@@ -63,34 +81,56 @@ const SCOPE_LABELS: Record<string, string> = {
   scope_2: 'Scope 2 (Strom/Wärme)',
   scope_3: 'Scope 3 (Vorketten)',
 };
+const SCOPE_SHORT: Record<string, { label: string; note: string; color: string }> = {
+  scope_1: { label: 'Scope 1 — Direkt', note: 'Verbrennung vor Ort, Kältemittel', color: '#B45309' },
+  scope_2: { label: 'Scope 2 — Energie', note: 'Fernwärme, Strom, Kälte', color: '#E89A3C' },
+  scope_3: { label: 'Scope 3 — Vorgelagert', note: 'Wasser, Brennstoffvorketten', color: '#9A968B' },
+};
 
-// ── Komponente ──
+const nf = (n: number | null | undefined, d = 0) =>
+  n == null ? '—' : Number(n).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtPct = (n: number, d = 1) =>
+  (n > 0 ? '+' : '') + Number(n).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d }) + ' %';
+
+const TABS: Array<{ id: Tab; label: string; icon: typeof Leaf; badge?: number }> = [
+  { id: 'dashboard', label: 'CO₂-Bilanz', icon: Leaf },
+  { id: 'factors', label: 'Emissionsfaktoren', icon: SlidersHorizontal },
+  { id: 'calculate', label: 'Berechnung', icon: Calculator },
+];
+
+// ── Seite ──
 
 export default function EmissionsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
 
   return (
-    <div>
-      <PageHead
-        eyebrow="Umwelt"
-        title="CO₂-Emissionen"
-        actions={
-          <SegControl<Tab>
-            value={activeTab}
-            onChange={setActiveTab}
-            options={[
-              { value: 'dashboard', label: 'Dashboard' },
-              { value: 'factors', label: 'Emissionsfaktoren' },
-              { value: 'calculate', label: 'Berechnung' },
-            ]}
-          />
-        }
-      />
-      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
-        CO₂-Bilanzierung, Emissionsfaktoren und Reduktionsziele
-      </p>
+    <div className="umwelt">
+      <PageHead eyebrow="Umwelt" title="Emissionen" />
+      <div className="head-lead">
+        CO₂e-Bilanz nach GHG-Protocol — gespeist aus Zählerdaten und den hinterlegten
+        Emissionsfaktoren (BAFA, UBA, Lieferantenwerte). Aggregiert über alle aktiven Hauptzähler.
+      </div>
 
-      <div className="mt-4">
+      <div className="tabs" role="tablist" style={{ marginTop: 14 }}>
+        {TABS.map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={activeTab === t.id}
+              className={'tab' + (activeTab === t.id ? ' active' : '')}
+              onClick={() => setActiveTab(t.id)}
+            >
+              <Icon size={14} />
+              <span>{t.label}</span>
+              {t.badge != null && <span className="tab-badge">{t.badge}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="content stack" style={{ paddingTop: 16 }}>
         {activeTab === 'dashboard' && <DashboardPanel />}
         {activeTab === 'factors' && <FactorsPanel />}
         {activeTab === 'calculate' && <CalculatePanel />}
@@ -99,18 +139,33 @@ export default function EmissionsPage() {
   );
 }
 
-// ── Dashboard ──
+// ── Tab 1: CO₂-Bilanz ──
 
 function DashboardPanel() {
   const [dashboard, setDashboard] = useState<CO2Dashboard | null>(null);
+  const [prevMonthly, setPrevMonthly] = useState<number[] | null>(null);
   const [year, setYear] = useState(new Date().getFullYear());
   const [loading, setLoading] = useState(true);
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get<CO2Dashboard>(`/api/v1/emissions/dashboard?year=${year}`);
-      setDashboard(res.data);
+      const [cur, prev] = await Promise.all([
+        apiClient.get<CO2Dashboard>(`/api/v1/emissions/dashboard?year=${year}`),
+        apiClient
+          .get<CO2Dashboard>(`/api/v1/emissions/dashboard?year=${year - 1}`)
+          .catch(() => null),
+      ]);
+      setDashboard(cur.data);
+      if (prev?.data) {
+        const arr = Array(12).fill(0);
+        prev.data.monthly_trend.forEach((m) => {
+          if (m.month >= 1 && m.month <= 12) arr[m.month - 1] = m.co2_kg / 1000;
+        });
+        setPrevMonthly(arr);
+      } else {
+        setPrevMonthly(null);
+      }
     } catch {
       // Interceptor
     } finally {
@@ -127,120 +182,243 @@ function DashboardPanel() {
 
   const current = dashboard.current_year;
   const previous = dashboard.previous_year;
+  const trend = current?.trend_vs_previous ?? null;
+
+  // Monatsreihen (Tonnen)
+  const curMonthly = Array(12).fill(0);
+  dashboard.monthly_trend.forEach((m) => {
+    if (m.month >= 1 && m.month <= 12) curMonthly[m.month - 1] = m.co2_kg / 1000;
+  });
+  let lastIdx = -1;
+  for (let i = 0; i < 12; i++) {
+    if (curMonthly[i] > 0 || (prevMonthly && prevMonthly[i] > 0)) lastIdx = i;
+  }
+  const span = lastIdx >= 0 ? lastIdx + 1 : 12;
+  const curData = curMonthly.slice(0, span);
+  const prevData = prevMonthly ? prevMonthly.slice(0, span) : null;
+  const monthsLbl = MONTHS.slice(0, span);
+  const curYtd = curData.reduce((a, b) => a + b, 0);
+  const prevYtd = prevData ? prevData.reduce((a, b) => a + b, 0) : 0;
+  const saved = prevYtd - curYtd;
+
+  // Scope
+  const scopeEntries = Object.entries(dashboard.scope_breakdown);
+  const scopeMax = Math.max(...scopeEntries.map(([, v]) => v), 1);
+  const scopeTotal = scopeEntries.reduce((a, [, v]) => a + v, 0);
+
+  // Energieträger
+  const carriers = current?.by_energy_type ?? [];
+  const carrierMax = Math.max(...carriers.map((c) => c.co2_kg), 1);
+  const carrierTotal = carriers.reduce((a, c) => a + c.co2_kg, 0);
 
   return (
-    <div className="space-y-4">
+    <div className="stack">
       {/* Jahr-Auswahl */}
-      <div className="flex items-center gap-4">
-        <select className="input w-28" value={year} onChange={(e) => setYear(Number(e.target.value))}>
-          {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map((y) => (
-            <option key={y} value={y}>{y}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* KPI-Kacheln */}
-      <div className="grid grid-cols-4 gap-4">
-        <KPICard
-          label="CO₂ Gesamt"
-          value={current ? `${(Number(current.total_co2_kg) / 1000).toFixed(1)} t` : '0 t'}
-          subtitle={current?.trend_vs_previous != null
-            ? `${Number(current.trend_vs_previous) > 0 ? '+' : ''}${Number(current.trend_vs_previous).toFixed(1)} % vs. Vorjahr`
-            : undefined}
-          trend={current?.trend_vs_previous ?? undefined}
-          info={{ formula: 'Σ (Verbrauch_kWh × Faktor_g/kWh) ÷ 1000', text: 'Summe aller Zähler im gewählten Jahr. Emissionsfaktor je Energieträger aus BAFA/UBA.' }}
-        />
-        <KPICard
-          label="Verbrauch gesamt"
-          value={current ? `${(Number(current.total_consumption_kwh) / 1000).toFixed(0)} MWh` : '0 MWh'}
-          info={{ formula: 'Σ Verbrauch aller Zähler', text: 'Gesamtverbrauch aller aktiven Hauptzähler im Jahr, umgerechnet in MWh.' }}
-        />
-        <KPICard
-          label="Durchschn. Faktor"
-          value={current ? `${Number(current.avg_co2_g_per_kwh).toFixed(0)} g/kWh` : '–'}
-          info={{ formula: 'CO₂_gesamt_g ÷ Verbrauch_gesamt_kWh', text: 'Gewichteter Durchschnitt über alle Energieträger. Niedrigerer Wert = sauberer Energiemix.' }}
-        />
-        <KPICard
-          label="Vorjahr CO₂"
-          value={previous ? `${(Number(previous.total_co2_kg) / 1000).toFixed(1)} t` : '–'}
-          subtitle={`${year - 1}`}
-        />
-      </div>
-
-      {/* Monatlicher Verlauf */}
-      {dashboard.monthly_trend.length > 0 && (
-        <div className="card">
-          <h3 className="mb-3 text-sm font-semibold">CO₂-Emissionen pro Monat ({year})</h3>
-          <div className="flex items-end gap-1 h-44">
-            {dashboard.monthly_trend.map((m) => {
-              const maxCO2 = Math.max(...dashboard.monthly_trend.map((d) => d.co2_kg), 1);
-              const height = (m.co2_kg / maxCO2) * 100;
-              return (
-                <div key={m.month} className="flex-1 flex flex-col items-center gap-1">
-                  <div className="text-[10px] text-gray-500 font-mono">
-                    {m.co2_kg > 0 ? (m.co2_kg / 1000).toFixed(1) : ''}
-                  </div>
-                  <div
-                    className="w-full rounded-t bg-emerald-500"
-                    style={{ height: `${height}%`, minHeight: m.co2_kg > 0 ? '2px' : '0' }}
-                  />
-                  <div className="text-[10px] text-gray-500">{MONTHS[m.month - 1]}</div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-1 text-right text-[10px] text-gray-400">in Tonnen CO₂</div>
-        </div>
-      )}
-
-      {/* Nach Energietyp */}
-      {current && current.by_energy_type.length > 0 && (
-        <div className="card">
-          <h3 className="mb-3 text-sm font-semibold">Verteilung nach Energieträger</h3>
-          <div className="space-y-2">
-            {current.by_energy_type.map((et) => {
-              const pct = current.total_co2_kg > 0
-                ? (et.co2_kg / current.total_co2_kg) * 100
-                : 0;
-              return (
-                <div key={et.energy_type} className="flex items-center gap-3">
-                  <span className="w-24 text-sm truncate">
-                    {ENERGY_TYPE_LABELS[et.energy_type as EnergyType] || et.energy_type}
-                  </span>
-                  <div className="flex-1 h-5 rounded-full bg-gray-100 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-emerald-500"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <span className="w-20 text-right text-sm font-mono">
-                    {(et.co2_kg / 1000).toFixed(2)} t
-                  </span>
-                  <span className="w-14 text-right text-xs text-gray-500">
-                    {pct.toFixed(1)} %
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Scope-Aufschlüsselung */}
-      {Object.keys(dashboard.scope_breakdown).length > 0 && (
-        <div className="card">
-          <h3 className="mb-3 text-sm font-semibold">Scope-Aufschlüsselung</h3>
-          <div className="grid grid-cols-3 gap-4">
-            {Object.entries(dashboard.scope_breakdown).map(([scope, co2]) => (
-              <div key={scope} className="rounded-lg border bg-gray-50 p-4 text-center">
-                <div className="text-2xl font-bold text-emerald-600">
-                  {(co2 / 1000).toFixed(2)} t
-                </div>
-                <div className="text-xs text-gray-500 mt-1">
-                  {SCOPE_LABELS[scope] || scope}
-                </div>
-              </div>
+      <div className="toolbar-card">
+        <div className="field">
+          <label className="field-label">Berichtsjahr</label>
+          <select className="uselect" value={year} onChange={(e) => setYear(Number(e.target.value))}>
+            {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map((y) => (
+              <option key={y} value={y}>{y}</option>
             ))}
+          </select>
+        </div>
+      </div>
+
+      {/* KPI-Strip */}
+      <div className="kpi-strip">
+        <div className="kpi-cell accent" style={{ ['--accent' as string]: 'var(--fw-fernwaerme)' }}>
+          <div className="kpi-label">
+            <span className="ico"><Leaf size={13} /></span>CO₂e gesamt
+            <InfoTip title="CO₂e gesamt" formula="Σ (Verbrauch_kWh × Faktor_g/kWh) ÷ 1000">
+              Summe aller Zähler im gewählten Jahr. Emissionsfaktor je Energieträger aus BAFA/UBA/Lieferant.
+            </InfoTip>
+          </div>
+          <div className="kpi-value">
+            {current ? nf(current.total_co2_kg / 1000, 1) : '0'}<span className="unit">t CO₂e</span>
+          </div>
+          <div className="kpi-foot">
+            {trend != null ? (
+              <>
+                <span className={'kpi-delta ' + (trend < 0 ? 'good' : 'bad')}>{fmtPct(trend)}</span>
+                ggü. Vorjahr
+              </>
+            ) : (
+              <span>kein Vorjahresvergleich</span>
+            )}
+          </div>
+        </div>
+        <div className="kpi-cell">
+          <div className="kpi-label"><span className="ico"><Factory size={13} /></span>Verbrauch gesamt</div>
+          <div className="kpi-value">
+            {current ? nf(current.total_consumption_kwh / 1000, 0) : '0'}<span className="unit">MWh</span>
+          </div>
+          <div className="kpi-foot">über alle aktiven Hauptzähler</div>
+        </div>
+        <div className="kpi-cell">
+          <div className="kpi-label"><span className="ico"><Zap size={13} /></span>Ø Faktor</div>
+          <div className="kpi-value">
+            {current ? nf(current.avg_co2_g_per_kwh, 0) : '–'}<span className="unit">g/kWh</span>
+          </div>
+          <div className="kpi-foot">gewichtet über den Energiemix</div>
+        </div>
+        <div className="kpi-cell">
+          <div className="kpi-label"><span className="ico"><BarChart3 size={13} /></span>Vorjahr</div>
+          <div className="kpi-value">
+            {previous ? nf(previous.total_co2_kg / 1000, 1) : '–'}<span className="unit">t CO₂e</span>
+          </div>
+          <div className="kpi-foot">Bilanz {year - 1}</div>
+        </div>
+      </div>
+
+      <div className="row-2col">
+        {/* Monatsverlauf */}
+        <div className="card">
+          <div className="card-head">
+            <div>
+              <div className="card-title">
+                <span className="ico"><BarChart3 size={15} /></span>CO₂e je Monat — {year}
+                {prevData && <> vs. {year - 1}</>}
+              </div>
+              <div className="card-sub">Aus den hinterlegten Zählerwerten berechnete Monatsbilanz.</div>
+            </div>
+            {prevData && (
+              <div className="legend-row">
+                <span className="legend-mini"><span className="dot" style={{ background: 'var(--fw-fernwaerme)' }} />{year}</span>
+                <span className="legend-mini"><span className="dot" style={{ background: 'var(--ink-4)' }} />{year - 1}</span>
+              </div>
+            )}
+          </div>
+          {curData.some((v) => v > 0) ? (
+            <>
+              <MonthBars
+                data={curData}
+                prev={prevData}
+                months={monthsLbl}
+                color="var(--fw-fernwaerme)"
+                unit="t CO₂e"
+                decimals={1}
+                height={300}
+                tipTitle={(m) => m + ' ' + year}
+              />
+              {prevData && saved !== 0 && (
+                <div className="chart-foot">
+                  <span>
+                    <span className="strong">
+                      {saved > 0 ? '−' : '+'}{nf(Math.abs(saved), 1)} t
+                    </span>{' '}
+                    {saved > 0 ? 'eingespart' : 'mehr'} ggü. Vorjahreszeitraum
+                  </span>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="empty-state">
+              <div className="mark"><BarChart3 size={20} /></div>
+              <strong>Noch keine Monatsdaten</strong>
+              <p>Für {year} liegen keine berechneten CO₂-Werte vor. Starte eine Neuberechnung im Tab „Berechnung".</p>
+            </div>
+          )}
+        </div>
+
+        {/* Scope-Aufschlüsselung */}
+        <div className="card">
+          <div className="card-head">
+            <div className="card-title"><span className="ico"><Layers size={15} /></span>Nach Scope</div>
+          </div>
+          {scopeEntries.length > 0 ? (
+            <>
+              <div className="share-list">
+                {scopeEntries.map(([scope, co2]) => {
+                  const meta = SCOPE_SHORT[scope] || { label: scope, note: '', color: 'var(--ink-4)' };
+                  return (
+                    <div className="share-row" key={scope} style={{ gridTemplateColumns: '1fr 64px' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div className="share-name" style={{ marginBottom: 6 }}>
+                          <span className="dot" style={{ background: meta.color }} />{meta.label}
+                        </div>
+                        <div className="share-track" style={{ height: 14 }}>
+                          <div className="share-fill" style={{ width: `${(co2 / scopeMax) * 100}%`, background: meta.color }} />
+                        </div>
+                        {meta.note && <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 5 }}>{meta.note}</div>}
+                      </div>
+                      <div className="share-val" style={{ alignSelf: 'start' }}>
+                        {nf(co2 / 1000, 1)}
+                        <div style={{ fontSize: 10, color: 'var(--ink-3)', fontWeight: 400 }}>t CO₂e</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="chart-foot">
+                <span className="strong">{nf(scopeTotal / 1000, 1)} t CO₂e</span>
+                <span className="muted">gesamt · {year}</span>
+              </div>
+            </>
+          ) : (
+            <div className="empty-state">
+              <div className="mark"><Layers size={20} /></div>
+              <strong>Keine Scope-Daten</strong>
+              <p>Sobald Emissionen berechnet sind, erscheint hier die Aufteilung nach GHG-Scopes.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Energieträger-Tabelle */}
+      {carriers.length > 0 && (
+        <div className="card" style={{ padding: 0 }}>
+          <div className="card-head" style={{ padding: '16px 16px 0' }}>
+            <div className="card-title"><span className="ico"><TableIcon size={15} /></span>Emissionen nach Energieträger</div>
+            <div className="card-controls"><span className="scope-tag">{year}</span></div>
+          </div>
+          <div className="dtable-wrap" style={{ border: 'none' }}>
+            <table className="dtable">
+              <thead>
+                <tr>
+                  <th>Energieträger</th>
+                  <th className="num">Verbrauch</th>
+                  <th className="num">Ø Faktor</th>
+                  <th className="num">Anteil</th>
+                  <th className="num">CO₂e</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...carriers]
+                  .sort((a, b) => b.co2_kg - a.co2_kg)
+                  .map((c) => {
+                    const factor = c.consumption_kwh > 0 ? (c.co2_kg * 1000) / c.consumption_kwh : 0;
+                    const pct = carrierTotal > 0 ? (c.co2_kg / carrierTotal) * 100 : 0;
+                    const key = resolveEnergyKey(c.energy_type);
+                    const color = key ? EM_ENERGY[key].color : 'var(--ink-4)';
+                    return (
+                      <tr key={c.energy_type}>
+                        <td><EnergyChip type={c.energy_type} /></td>
+                        <td className="num">
+                          {nf(c.consumption_kwh / 1000, 0)} <span className="muted">MWh</span>
+                        </td>
+                        <td className="num">
+                          {nf(factor, 0)} <span className="muted">g/kWh</span>
+                        </td>
+                        <td className="num">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+                            <div className="share-track" style={{ width: 60, height: 6 }}>
+                              <div className="share-fill" style={{ width: `${(c.co2_kg / carrierMax) * 100}%`, background: color }} />
+                            </div>
+                            {nf(pct, 1)}%
+                          </div>
+                        </td>
+                        <td className="num strong">
+                          {nf(c.co2_kg / 1000, 1)} <span className="muted">t</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+            <div className="dtable-foot">
+              Summe {nf(carrierTotal / 1000, 1)} t CO₂e · {carriers.length} Energieträger
+            </div>
           </div>
         </div>
       )}
@@ -248,7 +426,7 @@ function DashboardPanel() {
   );
 }
 
-// ── Emissionsfaktoren ──
+// ── Tab 2: Emissionsfaktoren ──
 
 function FactorsPanel() {
   const [sources, setSources] = useState<EmissionFactorSource[]>([]);
@@ -268,24 +446,29 @@ function FactorsPanel() {
   const [saving, setSaving] = useState(false);
   const [autoFilled, setAutoFilled] = useState(false);
 
-  // Auto-Vorausfüllung: Wenn Quelle+Energieträger+Jahr einen bekannten Faktor ergeben
-  const tryAutoFill = useCallback((sourceId: string, energyType: string, year: string) => {
-    if (!sourceId || !year) { setAutoFilled(false); return; }
-    const sourceName = sources.find(s => s.id === sourceId)?.name;
-    const match = factors.find(
-      f => f.source_name === sourceName && f.energy_type === energyType && f.year === parseInt(year)
-    );
-    if (match) {
-      setForm(prev => ({
-        ...prev,
-        co2_g_per_kwh: String(Number(match.co2_g_per_kwh)),
-        scope: match.scope || 'scope_2',
-      }));
-      setAutoFilled(true);
-    } else {
-      setAutoFilled(false);
-    }
-  }, [sources, factors]);
+  const tryAutoFill = useCallback(
+    (sourceId: string, energyType: string, yr: string) => {
+      if (!sourceId || !yr) {
+        setAutoFilled(false);
+        return;
+      }
+      const sourceName = sources.find((s) => s.id === sourceId)?.name;
+      const match = factors.find(
+        (f) => f.source_name === sourceName && f.energy_type === energyType && f.year === parseInt(yr)
+      );
+      if (match) {
+        setForm((prev) => ({
+          ...prev,
+          co2_g_per_kwh: String(Number(match.co2_g_per_kwh)),
+          scope: match.scope || 'scope_2',
+        }));
+        setAutoFilled(true);
+      } else {
+        setAutoFilled(false);
+      }
+    },
+    [sources, factors]
+  );
 
   const loadFactors = useCallback(async () => {
     setLoading(true);
@@ -333,99 +516,115 @@ function FactorsPanel() {
   };
 
   return (
-    <div className="space-y-4">
-      {/* Filter */}
-      <div className="card flex gap-4 items-end">
-        <div>
-          <label className="label">Energieträger</label>
-          <select className="input w-40" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
-            <option value="">Alle</option>
-            {Object.entries(ENERGY_TYPE_LABELS).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="label">Jahr</label>
-          <input type="number" className="input w-24" placeholder="z.B. 2024"
-            value={filterYear} onChange={(e) => setFilterYear(e.target.value)} />
-        </div>
-        <button onClick={() => setShowModal(true)} className="btn-primary">+ Neuer Faktor</button>
-      </div>
-
-      {/* Quellen */}
+    <div className="stack">
+      {/* Quellen & Methodik */}
       {sources.length > 0 && (
         <div className="card">
-          <h3 className="mb-2 text-sm font-semibold">Datenquellen</h3>
-          <div className="flex flex-wrap gap-2">
+          <div className="card-head">
+            <div className="card-title"><span className="ico"><Info size={15} /></span>Quellen & Methodik</div>
+          </div>
+          <div className="stack" style={{ gap: 0 }}>
             {sources.map((s) => (
-              <span key={s.id} className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
-                {s.name}
-                {s.is_default && <span className="ml-1 text-primary-600">(Standard)</span>}
-              </span>
+              <div className="method-row" key={s.id}>
+                <div style={{ flexShrink: 0, marginTop: 1 }}>
+                  <SourceChip source={s.source_type} label={s.name} />
+                </div>
+                <div>
+                  <div className="mtitle">
+                    {s.name}
+                    {s.is_default && <span className="scope-tag" style={{ marginLeft: 8 }}>Standard</span>}
+                  </div>
+                  {s.description && <div className="mdesc">{s.description}</div>}
+                </div>
+              </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Faktor-Tabelle */}
-      <div className="card overflow-hidden p-0">
+      {/* Faktoren-Tabelle */}
+      <div className="card" style={{ padding: 0 }}>
+        <div className="card-head" style={{ padding: '16px 16px 0' }}>
+          <div className="card-title"><span className="ico"><SlidersHorizontal size={15} /></span>Hinterlegte Emissionsfaktoren</div>
+          <div className="card-controls">
+            <select className="uselect" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+              <option value="">Alle Träger</option>
+              {Object.entries(ENERGY_TYPE_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+            <input
+              type="number"
+              className="uinput mono"
+              placeholder="Jahr"
+              style={{ width: 92 }}
+              value={filterYear}
+              onChange={(e) => setFilterYear(e.target.value)}
+            />
+            <button className="btn-ghost small" onClick={() => setShowModal(true)}>
+              <Plus size={14} />Faktor hinzufügen
+            </button>
+          </div>
+        </div>
         {loading ? (
-          <LoadingSpinner />
+          <div style={{ padding: 24 }}><LoadingSpinner /></div>
         ) : factors.length === 0 ? (
-          <div className="p-8 text-center text-gray-400">
-            Keine Emissionsfaktoren gefunden. Importieren Sie die BAFA-Standardwerte oder legen Sie eigene Faktoren an.
+          <div className="empty-state">
+            <div className="mark"><SlidersHorizontal size={20} /></div>
+            <strong>Keine Emissionsfaktoren gefunden</strong>
+            <p>Importieren Sie die BAFA-Standardwerte oder legen Sie über „Faktor hinzufügen" eigene Faktoren an.</p>
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-              <tr>
-                <th className="px-4 py-2 text-left">Energieträger</th>
-                <th className="px-4 py-2 text-right">g CO₂/kWh</th>
-                <th className="px-4 py-2 text-center">Jahr</th>
-                <th className="px-4 py-2 text-left">Scope</th>
-                <th className="px-4 py-2 text-left">Quelle</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {factors.map((f) => (
-                <tr key={f.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 font-medium">
-                    {ENERGY_TYPE_LABELS[f.energy_type as EnergyType] || f.energy_type}
-                  </td>
-                  <td className="px-4 py-2 text-right font-mono font-bold">{Number(f.co2_g_per_kwh).toFixed(1)}</td>
-                  <td className="px-4 py-2 text-center">{f.year}</td>
-                  <td className="px-4 py-2">
-                    <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-                      {SCOPE_LABELS[f.scope || ''] || f.scope || '–'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-gray-500">{f.source_name || '–'}</td>
+          <div className="dtable-wrap" style={{ border: 'none' }}>
+            <table className="dtable">
+              <thead>
+                <tr>
+                  <th>Energieträger</th>
+                  <th className="num">Wert</th>
+                  <th>Scope</th>
+                  <th>Quelle</th>
+                  <th className="num">Jahr</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {factors.map((f) => (
+                  <tr key={f.id}>
+                    <td><EnergyChip type={f.energy_type} /></td>
+                    <td className="num strong">
+                      {Number(f.co2_g_per_kwh).toFixed(1)} <span className="muted">g/kWh</span>
+                    </td>
+                    <td><span className="scope-tag">{SCOPE_LABELS[f.scope || ''] || f.scope || '–'}</span></td>
+                    <td style={{ color: 'var(--ink-3)' }}>{f.source_name || '–'}</td>
+                    <td className="num">{f.year}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="dtable-foot">{factors.length} Faktoren hinterlegt</div>
+          </div>
         )}
       </div>
 
-      {/* Modal: Neuer Faktor */}
+      {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-            <h2 className="mb-4 text-lg font-bold">Neuer Emissionsfaktor</h2>
-            <form onSubmit={handleCreate} className="space-y-4">
-              {formError && (
-                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{formError}</div>
-              )}
+        <div className="umodal-overlay" onClick={() => setShowModal(false)}>
+          <div className="umwelt-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Neuer Emissionsfaktor</h2>
+            <form onSubmit={handleCreate}>
+              {formError && <div className="form-err">{formError}</div>}
 
-              <div>
-                <label className="label">Quelle *</label>
-                <select className="input" required value={form.source_id}
+              <div className="field">
+                <label className="field-label">Quelle *</label>
+                <select
+                  className="uselect"
+                  required
+                  value={form.source_id}
                   onChange={(e) => {
                     const val = e.target.value;
-                    setForm(prev => ({ ...prev, source_id: val }));
+                    setForm((prev) => ({ ...prev, source_id: val }));
                     tryAutoFill(val, form.energy_type, form.year);
-                  }}>
+                  }}
+                >
                   <option value="">– Quelle wählen –</option>
                   {sources.map((s) => (
                     <option key={s.id} value={s.id}>{s.name}</option>
@@ -433,51 +632,64 @@ function FactorsPanel() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Energieträger *</label>
-                  <select className="input" value={form.energy_type}
+              <div className="form-grid2">
+                <div className="field">
+                  <label className="field-label">Energieträger *</label>
+                  <select
+                    className="uselect"
+                    value={form.energy_type}
                     onChange={(e) => {
                       const val = e.target.value;
-                      setForm(prev => ({ ...prev, energy_type: val }));
+                      setForm((prev) => ({ ...prev, energy_type: val }));
                       tryAutoFill(form.source_id, val, form.year);
-                    }}>
+                    }}
+                  >
                     {Object.entries(ENERGY_TYPE_LABELS).map(([k, v]) => (
                       <option key={k} value={k}>{v}</option>
                     ))}
                   </select>
                 </div>
-                <div>
-                  <label className="label">Jahr *</label>
-                  <input type="number" className="input" required value={form.year}
+                <div className="field">
+                  <label className="field-label">Jahr *</label>
+                  <input
+                    type="number"
+                    className="uinput mono"
+                    required
+                    value={form.year}
                     onChange={(e) => {
                       const val = e.target.value;
-                      setForm(prev => ({ ...prev, year: val }));
+                      setForm((prev) => ({ ...prev, year: val }));
                       tryAutoFill(form.source_id, form.energy_type, val);
-                    }} />
+                    }}
+                  />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">g CO₂/kWh *</label>
-                  <input type="text" className={`input ${autoFilled ? 'border-green-300 bg-green-50' : ''}`}
-                    required placeholder="z.B. 363"
+              <div className="form-grid2">
+                <div className="field">
+                  <label className="field-label">g CO₂/kWh *</label>
+                  <input
+                    type="text"
+                    className={'uinput mono' + (autoFilled ? ' autofilled' : '')}
+                    required
+                    placeholder="z. B. 363"
                     value={form.co2_g_per_kwh}
                     onChange={(e) => {
                       setForm({ ...form, co2_g_per_kwh: e.target.value });
                       setAutoFilled(false);
-                    }} />
+                    }}
+                  />
                   {autoFilled && (
-                    <p className="mt-1 text-xs text-green-600">
-                      Automatisch vorausgefüllt aus vorhandenen Daten
-                    </p>
+                    <span style={{ fontSize: 11, color: 'var(--good)' }}>Automatisch vorausgefüllt aus vorhandenen Daten</span>
                   )}
                 </div>
-                <div>
-                  <label className="label">Scope</label>
-                  <select className="input" value={form.scope}
-                    onChange={(e) => setForm({ ...form, scope: e.target.value })}>
+                <div className="field">
+                  <label className="field-label">Scope</label>
+                  <select
+                    className="uselect"
+                    value={form.scope}
+                    onChange={(e) => setForm({ ...form, scope: e.target.value })}
+                  >
                     {Object.entries(SCOPE_LABELS).map(([k, v]) => (
                       <option key={k} value={k}>{v}</option>
                     ))}
@@ -485,10 +697,10 @@ function FactorsPanel() {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">Abbrechen</button>
+              <div className="modal-actions">
+                <button type="button" className="btn-ghost" onClick={() => setShowModal(false)}>Abbrechen</button>
                 <button type="submit" className="btn-primary" disabled={saving}>
-                  {saving ? 'Speichern...' : 'Anlegen'}
+                  {saving ? 'Speichern…' : 'Anlegen'}
                 </button>
               </div>
             </form>
@@ -499,7 +711,7 @@ function FactorsPanel() {
   );
 }
 
-// ── Berechnung ──
+// ── Tab 3: Berechnung ──
 
 function CalculatePanel() {
   const [startDate, setStartDate] = useState(() => {
@@ -526,78 +738,74 @@ function CalculatePanel() {
     }
   };
 
+  const hasError = result && result.calculated == null;
+  const hasWarn = result && (result.errors ?? 0) > 0;
+
   return (
     <div className="card">
-      <h2 className="mb-3 text-base font-semibold">CO₂-Neuberechnung</h2>
-      <p className="mb-4 text-sm text-gray-500">
-        Berechnet die CO₂-Emissionen für alle aktiven Zähler im gewählten Zeitraum
-        basierend auf den hinterlegten Emissionsfaktoren.
-      </p>
+      <div className="card-head">
+        <div>
+          <div className="card-title"><span className="ico"><Calculator size={15} /></span>CO₂-Bilanz neu berechnen</div>
+          <div className="card-sub">
+            Aggregiert alle Zählerwerte des Zeitraums mit den aktuell hinterlegten Emissionsfaktoren.
+          </div>
+        </div>
+      </div>
 
-      <div className="flex gap-4 items-end mb-4">
-        <div>
-          <label className="label">Von</label>
-          <input type="date" className="input" value={startDate}
-            onChange={(e) => setStartDate(e.target.value)} />
+      <div className="toolbar-card" style={{ marginBottom: 16 }}>
+        <div className="field">
+          <label className="field-label">Von</label>
+          <input type="date" className="uinput mono" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
         </div>
-        <div>
-          <label className="label">Bis</label>
-          <input type="date" className="input" value={endDate}
-            onChange={(e) => setEndDate(e.target.value)} />
+        <div className="field">
+          <label className="field-label">Bis</label>
+          <input type="date" className="uinput mono" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
         </div>
-        <button onClick={handleCalculate} className="btn-primary" disabled={calculating}>
-          {calculating ? 'Berechne...' : 'Berechnung starten'}
+        <button className="btn-primary" onClick={handleCalculate} disabled={calculating}>
+          {calculating ? <RefreshCw size={14} /> : <Play size={14} />}
+          {calculating ? 'Berechne…' : 'Neuberechnung starten'}
         </button>
       </div>
 
-      {result && (
-        <div className={`rounded-lg p-4 ${result.errors ? 'bg-yellow-50' : 'bg-green-50'}`}>
-          <p className={`font-medium ${result.errors ? 'text-yellow-700' : 'text-green-700'}`}>
-            {result.message}
-          </p>
+      {calculating && (
+        <div className="result-banner info">
+          <div className="result-icon"><RefreshCw size={18} /></div>
+          <div style={{ flex: 1 }}>
+            <div className="result-headline">Aggregiere Zählerdaten…</div>
+            <div className="result-sub">{startDate} – {endDate}</div>
+          </div>
+        </div>
+      )}
+
+      {result && !calculating && (
+        <div className={'result-banner' + (hasError ? ' warn' : hasWarn ? ' warn' : '')}>
+          <div className="result-icon">{hasError || hasWarn ? <Info size={18} /> : <Check size={18} />}</div>
+          <div style={{ flex: 1 }}>
+            <div className="result-headline">{hasError ? 'Berechnung fehlgeschlagen' : 'Berechnung abgeschlossen'}</div>
+            <div className="result-sub">{result.message}</div>
+          </div>
           {result.calculated != null && (
-            <div className="mt-2 grid grid-cols-2 gap-4 text-sm">
-              <div>Berechnet: <b className="text-green-600">{result.calculated}</b></div>
-              <div>Fehler: <b className={result.errors ? 'text-red-600' : 'text-gray-500'}>{result.errors ?? 0}</b></div>
+            <div className="result-stats">
+              <div className="result-stat">
+                <div className="v good">{nf(result.calculated)}</div>
+                <div className="l">berechnet</div>
+              </div>
+              <div className="result-stat">
+                <div className={'v' + ((result.errors ?? 0) > 0 ? ' bad' : '')}>{nf(result.errors ?? 0)}</div>
+                <div className="l">Fehler</div>
+              </div>
             </div>
           )}
         </div>
       )}
-    </div>
-  );
-}
 
-// ── Hilfs-Komponenten ──
-
-function KPICard({
-  label,
-  value,
-  subtitle,
-  trend,
-  info,
-}: {
-  label: string;
-  value: string;
-  subtitle?: string;
-  trend?: number;
-  info?: { formula: string; text: string };
-}) {
-  return (
-    <div className="card text-center">
-      <div className="text-2xl font-bold">{value}</div>
-      <div className="text-xs text-gray-500 mt-1">
-        {label}
-        {info && (
-          <InfoTip title={label} formula={info.formula}>{info.text}</InfoTip>
-        )}
-      </div>
-      {subtitle && (
-        <div className={`text-xs mt-1 ${
-          trend != null
-            ? trend > 0 ? 'text-red-500' : 'text-green-600'
-            : 'text-gray-400'
-        }`}>
-          {subtitle}
+      {!result && !calculating && (
+        <div className="result-banner info">
+          <div className="result-icon"><Info size={18} /></div>
+          <div style={{ flex: 1 }}>
+            <div className="result-headline">Bereit zur Berechnung</div>
+            <div className="result-sub">Wähle einen Zeitraum und starte die Aggregation der Zählerwerte.</div>
+          </div>
         </div>
       )}
     </div>
