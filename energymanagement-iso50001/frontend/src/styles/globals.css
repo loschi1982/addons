@@ -3374,3 +3374,35 @@ nav.flex.gap-6 > button.pb-2:hover { color: var(--ink); }
   .umwelt .tabs { overflow-x: auto; }
   .umwelt-modal .form-grid2 { grid-template-columns: 1fr; }
 }
+
+/* ─── Umwelt · Status-Pills & Config-Items (Wetter/Raumklima) ──────── */
+.umwelt .metric-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; }
+.umwelt .metric-status .dot { width: 7px; height: 7px; border-radius: 50%; }
+.umwelt .st-good { color: var(--good); } .umwelt .st-good-bg { background: var(--good); }
+.umwelt .st-warn { color: var(--warn); } .umwelt .st-warn-bg { background: var(--warn); }
+.umwelt .st-alert { color: var(--alert); } .umwelt .st-alert-bg { background: var(--alert); }
+.umwelt .st-info { color: var(--info); } .umwelt .st-info-bg { background: var(--info); }
+.umwelt .dtable .num .good { color: var(--good); }
+.umwelt .dtable .num .bad { color: var(--alert); }
+.umwelt .config-item {
+  display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center;
+  padding: 12px 0; border-top: 1px solid var(--line);
+}
+.umwelt .config-item:first-child { border-top: none; }
+.umwelt .row-action {
+  color: var(--ink-2); cursor: pointer; font-size: 12px;
+  border-bottom: 1px dashed var(--line-strong); text-decoration: none;
+}
+.umwelt .row-action:hover { color: var(--ink); }
+.umwelt .big-factor {
+  font-family: var(--font-mono); font-size: 52px; font-weight: 600;
+  letter-spacing: -0.03em; color: var(--ink); line-height: 1;
+}
+.umwelt .info-row {
+  display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center;
+  padding: 11px 0; border-top: 1px solid var(--line);
+}
+.umwelt .info-row:first-child { border-top: none; }
+.umwelt .info-row .il { font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 10px; }
+.umwelt .info-row .iv { font-family: var(--font-mono); font-size: 14px; font-weight: 500; color: var(--ink); }
+.umwelt .info-row .is { font-size: 11.5px; color: var(--ink-3); }

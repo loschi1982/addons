@@ -1,8 +1,25 @@
 import { useEffect, useState, useCallback } from 'react';
+import {
+  Thermometer,
+  Flame,
+  RadioTower,
+  SlidersHorizontal,
+  Calendar,
+  Info,
+  BarChart3,
+  Table as TableIcon,
+  Download,
+  Check,
+  RefreshCw,
+  Snowflake,
+  TrendingDown,
+} from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import InfoTip from '@/components/ui/InfoTip';
 import PageHead from '@/components/ui/PageHead';
-import SegControl from '@/components/ui/SegControl';
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import MultiLine from '@/components/umwelt/MultiLine';
+import MonthBars from '@/components/umwelt/MonthBars';
 
 // ── Typen ──
 
@@ -13,6 +30,7 @@ interface WeatherStation {
   latitude: number;
   longitude: number;
   altitude: number | null;
+  distance_km: number | null;
 }
 
 interface WeatherRecord {
@@ -39,6 +57,13 @@ interface MonthlyDegreeDay {
   long_term_avg_hdd: number | null;
 }
 
+interface DegreeDayResult {
+  station_name?: string;
+  total_hdd: number;
+  total_cdd: number;
+  monthly_data: MonthlyDegreeDay[];
+}
+
 interface CorrectionConfig {
   id: string;
   meter_id: string;
@@ -53,18 +78,29 @@ interface CorrectionConfig {
   is_active: boolean;
 }
 
-type Tab = 'stations' | 'data' | 'degree-days' | 'correction';
+type Tab = 'data' | 'degree-days' | 'stations' | 'correction';
 
 const MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+const num = (v: number | string | null | undefined) => (v == null ? null : Number(v));
+const nf = (n: number | null | undefined, d = 0) =>
+  n == null ? '—' : Number(n).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtPct = (n: number, d = 1) =>
+  (n > 0 ? '+' : '') + Number(n).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d }) + ' %';
 
-// ── Komponente ──
+const TABS: Array<{ id: Tab; label: string; icon: typeof Thermometer; badge?: number }> = [
+  { id: 'data', label: 'Wetterdaten', icon: Thermometer },
+  { id: 'degree-days', label: 'Gradtagszahlen', icon: Flame },
+  { id: 'stations', label: 'Stationen', icon: RadioTower },
+  { id: 'correction', label: 'Witterungskorrektur', icon: SlidersHorizontal },
+];
+
+// ── Seite ──
 
 export default function WeatherPage() {
-  const [activeTab, setActiveTab] = useState<Tab>('stations');
+  const [activeTab, setActiveTab] = useState<Tab>('data');
   const [stations, setStations] = useState<WeatherStation[]>([]);
   const [selectedStation, setSelectedStation] = useState('');
 
-  // Stationen laden
   useEffect(() => {
     (async () => {
       try {
@@ -78,34 +114,41 @@ export default function WeatherPage() {
   }, []);
 
   return (
-    <div>
-      <PageHead
-        eyebrow="Umwelt"
-        title="Wetterdaten"
-        actions={
-          <SegControl<Tab>
-            value={activeTab}
-            onChange={setActiveTab}
-            options={[
-              { value: 'stations', label: 'Stationen' },
-              { value: 'data', label: 'Wetterdaten' },
-              { value: 'degree-days', label: 'Gradtagszahlen' },
-              { value: 'correction', label: 'Witterungskorrektur' },
-            ]}
-          />
-        }
-      />
-      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
-        DWD-Wetterdaten, Gradtagszahlen und Witterungskorrektur
-      </p>
+    <div className="umwelt">
+      <PageHead eyebrow="Umwelt" title="Wetter" />
+      <div className="head-lead">
+        Wetter- und Gradtagszahl-Daten der DWD-Stationen (via BrightSky) — Grundlage für die
+        Witterungsbereinigung des Wärmeverbrauchs nach VDI 3807.
+      </div>
 
-      <div className="mt-4">
-        {activeTab === 'stations' && <StationsPanel stations={stations} />}
+      <div className="tabs" role="tablist" style={{ marginTop: 14 }}>
+        {TABS.map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={activeTab === t.id}
+              className={'tab' + (activeTab === t.id ? ' active' : '')}
+              onClick={() => setActiveTab(t.id)}
+            >
+              <Icon size={14} />
+              <span>{t.label}</span>
+              {t.badge != null && <span className="tab-badge">{t.badge}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="content stack" style={{ paddingTop: 16 }}>
         {activeTab === 'data' && (
           <WeatherDataPanel stations={stations} selectedStation={selectedStation} onSelectStation={setSelectedStation} />
         )}
         {activeTab === 'degree-days' && (
           <DegreeDaysPanel stations={stations} selectedStation={selectedStation} onSelectStation={setSelectedStation} />
+        )}
+        {activeTab === 'stations' && (
+          <StationsPanel stations={stations} selectedStation={selectedStation} onSelectStation={setSelectedStation} />
         )}
         {activeTab === 'correction' && <CorrectionPanel />}
       </div>
@@ -113,47 +156,7 @@ export default function WeatherPage() {
   );
 }
 
-// ── Stationen ──
-
-function StationsPanel({ stations }: { stations: WeatherStation[] }) {
-  return (
-    <div className="card">
-      <h2 className="mb-3 text-base font-semibold">Wetterstationen</h2>
-      {stations.length === 0 ? (
-        <p className="text-gray-400">
-          Keine Wetterstationen konfiguriert. Stationen werden automatisch per Seed-Daten oder manuell angelegt.
-        </p>
-      ) : (
-        <div className="overflow-hidden rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-              <tr>
-                <th className="px-4 py-2 text-left">Name</th>
-                <th className="px-4 py-2 text-left">DWD-ID</th>
-                <th className="px-4 py-2 text-right">Breitengrad</th>
-                <th className="px-4 py-2 text-right">Längengrad</th>
-                <th className="px-4 py-2 text-right">Höhe (m)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {stations.map((s) => (
-                <tr key={s.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 font-medium">{s.name}</td>
-                  <td className="px-4 py-2 font-mono text-gray-500">{s.dwd_station_id}</td>
-                  <td className="px-4 py-2 text-right font-mono">{Number(s.latitude).toFixed(4)}</td>
-                  <td className="px-4 py-2 text-right font-mono">{Number(s.longitude).toFixed(4)}</td>
-                  <td className="px-4 py-2 text-right">{s.altitude ?? '–'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Wetterdaten ──
+// ── Tab 1: Wetterdaten ──
 
 function WeatherDataPanel({
   stations,
@@ -168,11 +171,12 @@ function WeatherDataPanel({
   const [loading, setLoading] = useState(false);
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
-    d.setMonth(d.getMonth() - 1);
+    d.setDate(d.getDate() - 30);
     return d.toISOString().slice(0, 10);
   });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [fetching, setFetching] = useState(false);
+  const [fetchResult, setFetchResult] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     if (!selectedStation) return;
@@ -189,91 +193,200 @@ function WeatherDataPanel({
     }
   }, [selectedStation, startDate, endDate]);
 
+  useEffect(() => {
+    if (selectedStation) loadData();
+  }, [loadData, selectedStation]);
+
   const handleFetch = async () => {
     if (!selectedStation) return;
     setFetching(true);
+    setFetchResult(null);
     try {
       await apiClient.post(
         `/api/v1/weather/fetch?station_id=${selectedStation}&start_date=${startDate}&end_date=${endDate}`
       );
+      setFetchResult('Abruf erfolgreich — Daten aktualisiert.');
       await loadData();
     } catch {
-      // Interceptor
+      setFetchResult('Abruf fehlgeschlagen.');
     } finally {
       setFetching(false);
     }
   };
 
+  // Chart-Reihen
+  const sorted = [...records].sort((a, b) => a.date.localeCompare(b.date));
+  const labels = sorted.map((r) => r.date.slice(5)); // MM-DD
+  const meanS = sorted.map((r) => num(r.temp_avg));
+  const minS = sorted.map((r) => num(r.temp_min));
+  const maxS = sorted.map((r) => num(r.temp_max));
+  const latest = sorted[sorted.length - 1];
+  const periodHdd = sorted.reduce((a, r) => a + (num(r.heating_degree_days) || 0), 0);
+  const temps = meanS.filter((v): v is number => v != null);
+  const tMin = temps.length ? Math.min(...sorted.map((r) => num(r.temp_min) ?? num(r.temp_avg) ?? 0)) : 0;
+  const tMax = temps.length ? Math.max(...sorted.map((r) => num(r.temp_max) ?? num(r.temp_avg) ?? 0)) : 0;
+  const xEvery = Math.max(1, Math.ceil(labels.length / 14));
+
   return (
-    <div className="space-y-4">
-      <div className="card">
-        <div className="flex gap-4 items-end">
-          <div>
-            <label className="label">Station</label>
-            <select
-              className="input w-56"
-              value={selectedStation}
-              onChange={(e) => onSelectStation(e.target.value)}
-            >
-              <option value="">– Station wählen –</option>
-              {stations.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">Von</label>
-            <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Bis</label>
-            <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-          </div>
-          <button onClick={loadData} className="btn-primary" disabled={loading || !selectedStation}>
-            {loading ? 'Laden...' : 'Anzeigen'}
-          </button>
-          <button onClick={handleFetch} className="btn-secondary" disabled={fetching || !selectedStation}>
-            {fetching ? 'Abrufen...' : 'Vom DWD abrufen'}
-          </button>
+    <div className="stack">
+      {/* Steuerung */}
+      <div className="toolbar-card">
+        <div className="field">
+          <label className="field-label">Station</label>
+          <select className="uselect" value={selectedStation} onChange={(e) => onSelectStation(e.target.value)}>
+            <option value="">– Station wählen –</option>
+            {stations.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
         </div>
+        <div className="field">
+          <label className="field-label">Von</label>
+          <input type="date" className="uinput mono" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        </div>
+        <div className="field">
+          <label className="field-label">Bis</label>
+          <input type="date" className="uinput mono" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        </div>
+        <button className="btn-primary" onClick={loadData} disabled={loading || !selectedStation}>
+          {loading ? 'Laden…' : 'Anzeigen'}
+        </button>
+        <button className="btn-ghost" onClick={handleFetch} disabled={fetching || !selectedStation}>
+          <Download size={14} />
+          {fetching ? 'Abrufen…' : 'Vom DWD abrufen'}
+        </button>
       </div>
 
-      {records.length > 0 && (
-        <div className="card overflow-hidden p-0">
-          <div className="max-h-[500px] overflow-y-auto">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 border-b bg-gray-50 text-xs uppercase text-gray-500">
+      {fetchResult && (
+        <div className="result-banner">
+          <div className="result-icon"><Check size={18} /></div>
+          <div style={{ flex: 1 }}><div className="result-headline">{fetchResult}</div></div>
+        </div>
+      )}
+
+      {/* KPIs */}
+      {latest && (
+        <div className="kpi-strip">
+          <div className="kpi-cell accent" style={{ ['--accent' as string]: 'var(--fw-kaelte)' }}>
+            <div className="kpi-label"><span className="ico"><Thermometer size={13} /></span>Letzter Tag</div>
+            <div className="kpi-value">{nf(num(latest.temp_avg), 1)}<span className="unit">°C Ø</span></div>
+            <div className="kpi-foot">{new Date(latest.date).toLocaleDateString('de-DE')}</div>
+          </div>
+          <div className="kpi-cell">
+            <div className="kpi-label"><span className="ico"><Snowflake size={13} /></span>Spanne im Zeitraum</div>
+            <div className="kpi-value" style={{ fontSize: 22 }}>
+              {nf(tMin, 1)}–{nf(tMax, 1)}<span className="unit">°C</span>
+            </div>
+            <div className="kpi-foot">Min/Max Tagestemperaturen</div>
+          </div>
+          <div className="kpi-cell">
+            <div className="kpi-label"><span className="ico"><Flame size={13} /></span>Heizgradtage</div>
+            <div className="kpi-value">{nf(periodHdd, 0)}<span className="unit">Kd</span></div>
+            <div className="kpi-foot">Summe im Zeitraum</div>
+          </div>
+          <div className="kpi-cell">
+            <div className="kpi-label"><span className="ico"><Calendar size={13} /></span>Tageswerte</div>
+            <div className="kpi-value">{records.length}</div>
+            <div className="kpi-foot">Messtage geladen</div>
+          </div>
+        </div>
+      )}
+
+      {/* Temperaturverlauf */}
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <div className="card-title"><span className="ico"><Thermometer size={15} /></span>Temperaturverlauf</div>
+            <div className="card-sub">Min / Mittel / Max je Tag. Heizbereich unter 15 °C markiert.</div>
+          </div>
+          <div className="legend-row">
+            <span className="legend-mini"><span className="dot" style={{ background: 'var(--fw-fernwaerme)' }} />Max</span>
+            <span className="legend-mini"><span className="dot" style={{ background: 'var(--ink-2)' }} />Mittel</span>
+            <span className="legend-mini"><span className="dot" style={{ background: 'var(--fw-kaelte)' }} />Min</span>
+          </div>
+        </div>
+        {loading ? (
+          <LoadingSpinner />
+        ) : sorted.length > 0 ? (
+          <>
+            <MultiLine
+              series={[
+                { key: 'max', label: 'Max', color: 'var(--fw-fernwaerme)', data: maxS, unit: '°C' },
+                { key: 'mean', label: 'Mittel', color: 'var(--ink-2)', data: meanS, unit: '°C' },
+                { key: 'min', label: 'Min', color: 'var(--fw-kaelte)', data: minS, unit: '°C' },
+              ]}
+              labels={labels}
+              yUnit="°C"
+              decimals={1}
+              height={300}
+              xTickEvery={xEvery}
+              bands={[{ from: tMin < 15 ? tMin : 15, to: 15, color: 'var(--fw-fernwaerme)', opacity: 0.06 }]}
+            />
+            <div className="chart-foot">
+              <span className="legend-mini">
+                <span
+                  className="sw"
+                  style={{ width: 14, height: 9, borderRadius: 2, display: 'inline-block', background: 'color-mix(in srgb, var(--fw-fernwaerme) 18%, transparent)' }}
+                />
+                Heizbereich &lt; 15 °C
+              </span>
+              <span className="chart-note" style={{ marginLeft: 'auto' }}>BrightSky / DWD</span>
+            </div>
+          </>
+        ) : (
+          <div className="empty-state">
+            <div className="mark"><Thermometer size={20} /></div>
+            <strong>Keine Wetterdaten</strong>
+            <p>Für den gewählten Zeitraum liegen keine Messwerte vor. Rufe Daten über „Vom DWD abrufen" ab.</p>
+          </div>
+        )}
+      </div>
+
+      {/* Tageswerte */}
+      {sorted.length > 0 && (
+        <div className="card" style={{ padding: 0 }}>
+          <div className="card-head" style={{ padding: '16px 16px 0' }}>
+            <div className="card-title"><span className="ico"><Calendar size={15} /></span>Tageswerte</div>
+            <span className="scope-tag">{records.length} Tage</span>
+          </div>
+          <div className="dtable-wrap" style={{ border: 'none', maxHeight: 460, overflowY: 'auto' }}>
+            <table className="dtable">
+              <thead>
                 <tr>
-                  <th className="px-3 py-2 text-left">Datum</th>
-                  <th className="px-3 py-2 text-right">T_avg</th>
-                  <th className="px-3 py-2 text-right">T_min</th>
-                  <th className="px-3 py-2 text-right">T_max</th>
-                  <th className="px-3 py-2 text-right">HDD</th>
-                  <th className="px-3 py-2 text-right">CDD</th>
-                  <th className="px-3 py-2 text-right">Sonne (h)</th>
+                  <th>Datum</th>
+                  <th className="num">Min</th>
+                  <th className="num">Mittel</th>
+                  <th className="num">Max</th>
+                  <th className="num">HGT</th>
+                  <th>Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
-                {records.map((r) => (
-                  <tr key={r.id} className="hover:bg-gray-50">
-                    <td className="px-3 py-1.5">{new Date(r.date).toLocaleDateString('de-DE')}</td>
-                    <td className="px-3 py-1.5 text-right font-mono">{Number(r.temp_avg).toFixed(1)} °C</td>
-                    <td className="px-3 py-1.5 text-right font-mono text-blue-600">
-                      {r.temp_min != null ? Number(r.temp_min).toFixed(1) : '–'}
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-mono text-red-500">
-                      {r.temp_max != null ? Number(r.temp_max).toFixed(1) : '–'}
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-mono">{Number(r.heating_degree_days).toFixed(1)}</td>
-                    <td className="px-3 py-1.5 text-right font-mono">{Number(r.cooling_degree_days).toFixed(1)}</td>
-                    <td className="px-3 py-1.5 text-right font-mono">{r.sunshine_hours != null ? Number(r.sunshine_hours).toFixed(1) : '–'}</td>
-                  </tr>
-                ))}
+              <tbody>
+                {[...sorted].reverse().map((r) => {
+                  const mean = num(r.temp_avg);
+                  const hgt = num(r.heating_degree_days) || 0;
+                  return (
+                    <tr key={r.id}>
+                      <td className="cell-name mono">{new Date(r.date).toLocaleDateString('de-DE')}</td>
+                      <td className="num">{nf(num(r.temp_min), 1)}</td>
+                      <td className="num strong">{nf(mean, 1)}</td>
+                      <td className="num">{nf(num(r.temp_max), 1)}</td>
+                      <td className="num">
+                        {hgt > 0 ? <span style={{ color: 'var(--fw-fernwaerme)' }}>{nf(hgt, 1)}</span> : <span className="muted">0</span>}
+                      </td>
+                      <td>
+                        {hgt > 0 ? (
+                          <span className="metric-status st-warn"><span className="dot st-warn-bg" />Heiztag</span>
+                        ) : (
+                          <span className="metric-status st-good"><span className="dot st-good-bg" />frei</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
-          </div>
-          <div className="border-t bg-gray-50 px-3 py-2 text-xs text-gray-500">
-            {records.length} Tageswerte
+            <div className="dtable-foot">Heizgradtage aus DWD-Tagesmitteln · Heizgrenze 15 °C</div>
           </div>
         </div>
       )}
@@ -281,7 +394,7 @@ function WeatherDataPanel({
   );
 }
 
-// ── Gradtagszahlen ──
+// ── Tab 2: Gradtagszahlen ──
 
 function DegreeDaysPanel({
   stations,
@@ -292,11 +405,7 @@ function DegreeDaysPanel({
   selectedStation: string;
   onSelectStation: (id: string) => void;
 }) {
-  const [data, setData] = useState<{
-    total_hdd: number;
-    total_cdd: number;
-    monthly_data: MonthlyDegreeDay[];
-  } | null>(null);
+  const [data, setData] = useState<DegreeDayResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [year, setYear] = useState(new Date().getFullYear());
 
@@ -304,7 +413,7 @@ function DegreeDaysPanel({
     if (!selectedStation) return;
     setLoading(true);
     try {
-      const res = await apiClient.get(
+      const res = await apiClient.get<DegreeDayResult>(
         `/api/v1/weather/degree-days?station_id=${selectedStation}&start_date=${year}-01-01&end_date=${year}-12-31`
       );
       setData(res.data);
@@ -319,130 +428,175 @@ function DegreeDaysPanel({
     if (selectedStation) loadData();
   }, [loadData, selectedStation]);
 
+  const monthly = data?.monthly_data ?? [];
+  const totalHdd = num(data?.total_hdd) || 0;
+  const totalCdd = num(data?.total_cdd) || 0;
+  const normTotal = monthly.reduce((a, m) => a + (num(m.long_term_avg_hdd) || 0), 0);
+  const deviation = normTotal > 0 ? ((totalHdd - normTotal) / normTotal) * 100 : null;
+
+  // Monatsreihen für MonthBars
+  const istArr = monthly.map((m) => num(m.heating_degree_days) || 0);
+  const normArr = monthly.map((m) => num(m.long_term_avg_hdd) || 0);
+  const lbl = monthly.map((m) => MONTHS[m.month - 1]);
+  const hasNorm = normArr.some((v) => v > 0);
+
   return (
-    <div className="space-y-4">
-      <div className="card">
-        <div className="flex gap-4 items-end">
-          <div>
-            <label className="label">Station</label>
-            <select
-              className="input w-56"
-              value={selectedStation}
-              onChange={(e) => onSelectStation(e.target.value)}
-            >
-              <option value="">– Station wählen –</option>
-              {stations.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">Jahr</label>
-            <select className="input w-28" value={year} onChange={(e) => setYear(Number(e.target.value))}>
-              {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map((y) => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-          </div>
-          <button onClick={loadData} className="btn-primary" disabled={loading}>
-            {loading ? 'Laden...' : 'Anzeigen'}
-          </button>
+    <div className="stack">
+      <div className="toolbar-card">
+        <div className="field">
+          <label className="field-label">Station</label>
+          <select className="uselect" value={selectedStation} onChange={(e) => onSelectStation(e.target.value)}>
+            <option value="">– Station wählen –</option>
+            {stations.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label className="field-label">Jahr</label>
+          <select className="uselect" value={year} onChange={(e) => setYear(Number(e.target.value))}>
+            {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
         </div>
       </div>
 
-      {data && (
+      {loading ? (
+        <div className="card"><LoadingSpinner /></div>
+      ) : !data ? (
+        <div className="card text-gray-400">Keine Daten verfügbar.</div>
+      ) : (
         <>
-          {/* Zusammenfassung */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="card text-center">
-              <div className="text-3xl font-bold text-orange-600">{Number(data.total_hdd).toFixed(0)}</div>
-              <div className="text-sm text-gray-500 mt-1">
-                Heizgradtage (Gt20/15)
+          {/* KPIs */}
+          <div className="kpi-strip">
+            <div className="kpi-cell accent" style={{ ['--accent' as string]: 'var(--fw-fernwaerme)' }}>
+              <div className="kpi-label">
+                <span className="ico"><Flame size={13} /></span>Heizgradtage
                 <InfoTip title="Heizgradtage (HDD)" formula="Σ max(0, 15 − T_avg) pro Tag">
-                  Maß für den Heizenergiebedarf. Referenz: 15 °C Heizgrenze. Je höher der Wert, desto kälter die Periode.
+                  Maß für den Heizenergiebedarf. Je höher, desto kälter die Periode.
                 </InfoTip>
+              </div>
+              <div className="kpi-value">{nf(totalHdd, 0)}<span className="unit">Kd</span></div>
+              <div className="kpi-foot">{year} · Basis Gt 20/15</div>
+            </div>
+            <div className="kpi-cell">
+              <div className="kpi-label"><span className="ico"><BarChart3 size={13} /></span>Normaljahr</div>
+              <div className="kpi-value">{hasNorm ? nf(normTotal, 0) : '–'}<span className="unit">Kd</span></div>
+              <div className="kpi-foot">langjähriges Mittel</div>
+            </div>
+            <div className="kpi-cell">
+              <div className="kpi-label"><span className="ico"><TrendingDown size={13} /></span>Abweichung</div>
+              <div className="kpi-value" style={{ fontSize: 24 }}>
+                {deviation != null ? fmtPct(deviation) : '–'}
+              </div>
+              <div className="kpi-foot">
+                {deviation != null && (
+                  <span className={'kpi-delta ' + (deviation < 0 ? 'good' : 'bad')}>
+                    {deviation < 0 ? 'milder' : 'kälter'}
+                  </span>
+                )}
+                {deviation != null ? ' als das Mittel' : 'kein Referenzwert'}
               </div>
             </div>
-            <div className="card text-center">
-              <div className="text-3xl font-bold text-blue-600">{Number(data.total_cdd).toFixed(0)}</div>
-              <div className="text-sm text-gray-500 mt-1">
-                Kühlgradtage
-                <InfoTip title="Kühlgradtage (CDD)" formula="Σ max(0, T_avg − 24) pro Tag">
-                  Maß für den Kühlbedarf. Referenz: 24 °C. Je höher der Wert, desto wärmer die Periode.
-                </InfoTip>
-              </div>
+            <div className="kpi-cell">
+              <div className="kpi-label"><span className="ico"><Snowflake size={13} /></span>Kühlgradtage</div>
+              <div className="kpi-value">{nf(totalCdd, 0)}<span className="unit">Kd</span></div>
+              <div className="kpi-foot">{year} · Basis 24 °C</div>
             </div>
           </div>
 
-          {/* Monatstabelle */}
-          {data.monthly_data.length > 0 && (
-            <div className="card overflow-hidden p-0">
-              <table className="w-full text-sm">
-                <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-                  <tr>
-                    <th className="px-4 py-2 text-left">Monat</th>
-                    <th className="px-4 py-2 text-right">HDD</th>
-                    <th className="px-4 py-2 text-right">CDD</th>
-                    <th className="px-4 py-2 text-right">T_avg (°C)</th>
-                    <th className="px-4 py-2 text-right">Heiztage</th>
-                    <th className="px-4 py-2 text-right">Langzeit-Mittel HDD</th>
-                    <th className="px-4 py-2 text-right">Abweichung</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {data.monthly_data.map((m) => {
-                    const hdd = Number(m.heating_degree_days);
-                    const ltAvg = m.long_term_avg_hdd != null ? Number(m.long_term_avg_hdd) : null;
-                    const deviation = ltAvg != null && ltAvg > 0
-                        ? ((hdd - ltAvg) / ltAvg) * 100
-                        : null;
-                    return (
-                      <tr key={m.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 font-medium">{MONTHS[m.month - 1]} {m.year}</td>
-                        <td className="px-4 py-2 text-right font-mono">{hdd.toFixed(1)}</td>
-                        <td className="px-4 py-2 text-right font-mono">{Number(m.cooling_degree_days).toFixed(1)}</td>
-                        <td className="px-4 py-2 text-right font-mono">{Number(m.avg_temperature).toFixed(1)}</td>
-                        <td className="px-4 py-2 text-right">{m.heating_days}</td>
-                        <td className="px-4 py-2 text-right font-mono text-gray-500">
-                          {ltAvg != null ? ltAvg.toFixed(1) : '–'}
-                        </td>
-                        <td className="px-4 py-2 text-right font-mono">
-                          {deviation != null ? (
-                            <span className={deviation > 0 ? 'text-red-500' : 'text-green-600'}>
-                              {deviation > 0 ? '+' : ''}{deviation.toFixed(1)} %
-                            </span>
-                          ) : '–'}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+          {/* MonthBars */}
+          {monthly.length > 0 && (
+            <div className="card">
+              <div className="card-head">
+                <div>
+                  <div className="card-title">
+                    <span className="ico"><BarChart3 size={15} /></span>Heizgradtage je Monat — {year}
+                    {hasNorm && <> vs. Normaljahr</>}
+                  </div>
+                  <div className="card-sub">VDI 3807. Liegt die IST-Kurve unter dem Normaljahr, war der Monat milder.</div>
+                </div>
+                {hasNorm && (
+                  <div className="legend-row">
+                    <span className="legend-mini"><span className="dot" style={{ background: 'var(--fw-fernwaerme)' }} />IST {year}</span>
+                    <span className="legend-mini"><span className="dot" style={{ background: 'var(--ink-4)' }} />Normaljahr</span>
+                  </div>
+                )}
+              </div>
+              <MonthBars
+                data={istArr}
+                prev={hasNorm ? normArr : null}
+                months={lbl}
+                color="var(--fw-fernwaerme)"
+                prevColor="var(--ink-4)"
+                unit="Kd"
+                decimals={0}
+                height={300}
+                tipTitle={(m) => m + ' ' + year + ' · HGT'}
+              />
+              {hasNorm && (
+                <div className="chart-foot">
+                  <span>YTD <span className="strong">{nf(totalHdd, 0)} Kd</span> vs. {nf(normTotal, 0)} Kd Norm</span>
+                  <span className="muted">·</span>
+                  <span>
+                    <span className="strong">{nf(Math.abs(normTotal - totalHdd), 0)} Kd</span>{' '}
+                    {totalHdd < normTotal ? 'weniger' : 'mehr'} Heizbedarf
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Balkendiagramm (einfach, CSS-basiert) */}
-          {data.monthly_data.length > 0 && (
-            <div className="card">
-              <h3 className="mb-3 text-sm font-semibold">Heizgradtage pro Monat</h3>
-              <div className="flex items-end gap-1 h-40">
-                {data.monthly_data.map((m) => {
-                  const maxHDD = Math.max(...data.monthly_data.map((d) => Number(d.heating_degree_days)), 1);
-                  const hddVal = Number(m.heating_degree_days);
-                  const height = (hddVal / maxHDD) * 100;
-                  return (
-                    <div key={m.id} className="flex-1 flex flex-col items-center gap-1">
-                      <div className="text-[10px] text-gray-500 font-mono">
-                        {hddVal > 0 ? hddVal.toFixed(0) : ''}
-                      </div>
-                      <div
-                        className="w-full rounded-t bg-orange-400"
-                        style={{ height: `${height}%`, minHeight: hddVal > 0 ? '2px' : '0' }}
-                      />
-                      <div className="text-[10px] text-gray-500">{MONTHS[m.month - 1]}</div>
-                    </div>
-                  );
-                })}
+          {/* Monatsbilanz */}
+          {monthly.length > 0 && (
+            <div className="card" style={{ padding: 0 }}>
+              <div className="card-head" style={{ padding: '16px 16px 0' }}>
+                <div className="card-title"><span className="ico"><TableIcon size={15} /></span>Monatsbilanz Gradtagszahlen</div>
+              </div>
+              <div className="dtable-wrap" style={{ border: 'none' }}>
+                <table className="dtable">
+                  <thead>
+                    <tr>
+                      <th>Monat</th>
+                      <th className="num">IST {year}</th>
+                      <th className="num">Ø Temp.</th>
+                      <th className="num">Heiztage</th>
+                      <th className="num">Normaljahr</th>
+                      <th className="num">Abw. v. Norm</th>
+                      <th>Bewertung</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthly.map((m) => {
+                      const ist = num(m.heating_degree_days) || 0;
+                      const norm = num(m.long_term_avg_hdd);
+                      const dev = norm != null && norm > 0 ? ((ist - norm) / norm) * 100 : null;
+                      return (
+                        <tr key={m.id}>
+                          <td className="cell-name">{MONTHS[m.month - 1]} {m.year}</td>
+                          <td className="num strong">{nf(ist, 0)}</td>
+                          <td className="num">{nf(num(m.avg_temperature), 1)} °C</td>
+                          <td className="num">{m.heating_days}</td>
+                          <td className="num" style={{ color: 'var(--ink-3)' }}>{norm != null ? nf(norm, 0) : '—'}</td>
+                          <td className="num">
+                            {dev != null ? <span className={dev < 0 ? 'good' : 'bad'}>{fmtPct(dev)}</span> : <span className="muted">—</span>}
+                          </td>
+                          <td>
+                            {dev == null ? (
+                              <span className="muted">—</span>
+                            ) : dev < 0 ? (
+                              <span className="metric-status st-good"><span className="dot st-good-bg" />milder</span>
+                            ) : (
+                              <span className="metric-status st-alert"><span className="dot st-alert-bg" />kälter</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div className="dtable-foot">Einheit Kelvin-Tage (Kd) · Basis 20/15 °C nach VDI 3807 · Quelle DWD</div>
               </div>
             </div>
           )}
@@ -452,7 +606,136 @@ function DegreeDaysPanel({
   );
 }
 
-// ── Witterungskorrektur ──
+// ── Tab 3: Stationen ──
+
+function StationsPanel({
+  stations,
+  selectedStation,
+  onSelectStation,
+}: {
+  stations: WeatherStation[];
+  selectedStation: string;
+  onSelectStation: (id: string) => void;
+}) {
+  const [startDate, setStartDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0, 10);
+  });
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [fetching, setFetching] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  const handleFetch = async () => {
+    if (!selectedStation) return;
+    setFetching(true);
+    setResult(null);
+    try {
+      await apiClient.post(
+        `/api/v1/weather/fetch?station_id=${selectedStation}&start_date=${startDate}&end_date=${endDate}`
+      );
+      setResult({ ok: true, msg: 'DWD-Abruf erfolgreich abgeschlossen.' });
+    } catch {
+      setResult({ ok: false, msg: 'DWD-Abruf fehlgeschlagen.' });
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  return (
+    <div className="stack">
+      <div className="card" style={{ padding: 0 }}>
+        <div className="card-head" style={{ padding: '16px 16px 0' }}>
+          <div>
+            <div className="card-title"><span className="ico"><RadioTower size={15} /></span>Wetterstationen</div>
+            <div className="card-sub">DWD-Stationen via BrightSky-Integration (Open Data). Auswahl steuert den Datenabruf.</div>
+          </div>
+          <span className="scope-tag">{stations.length} Stationen</span>
+        </div>
+        {stations.length === 0 ? (
+          <div className="empty-state">
+            <div className="mark"><RadioTower size={20} /></div>
+            <strong>Keine Stationen konfiguriert</strong>
+            <p>Wetterstationen werden per Seed-Daten oder manuell angelegt.</p>
+          </div>
+        ) : (
+          <div className="dtable-wrap" style={{ border: 'none', maxHeight: 520, overflowY: 'auto' }}>
+            <table className="dtable">
+              <thead>
+                <tr>
+                  <th>Station</th>
+                  <th className="num">Höhe</th>
+                  <th className="num">Entfernung</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {stations.map((s) => (
+                  <tr key={s.id} style={s.id === selectedStation ? { background: 'var(--surface-2)' } : undefined}>
+                    <td>
+                      <div className="cell-name">{s.name}</div>
+                      <div className="cell-sub mono">
+                        DWD {s.dwd_station_id} · {Number(s.latitude).toFixed(3)} N, {Number(s.longitude).toFixed(3)} O
+                      </div>
+                    </td>
+                    <td className="num">{s.altitude != null ? `${Number(s.altitude).toFixed(0)} m` : '—'}</td>
+                    <td className="num">{s.distance_km != null ? `${Number(s.distance_km).toFixed(1)} km` : '—'}</td>
+                    <td className="num">
+                      <a className="row-action" onClick={() => onSelectStation(s.id)}>
+                        {s.id === selectedStation ? 'gewählt' : 'auswählen'}
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="dtable-foot">Bezug via BrightSky-Integration (DWD Open Data)</div>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="card-head">
+          <div className="card-title"><span className="ico"><RefreshCw size={15} /></span>DWD-Daten abrufen</div>
+        </div>
+        <div className="toolbar-card" style={{ marginBottom: 14 }}>
+          <div className="field grow">
+            <label className="field-label">Station</label>
+            <select className="uselect" value={selectedStation} onChange={(e) => onSelectStation(e.target.value)}>
+              <option value="">– Station wählen –</option>
+              {stations.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label className="field-label">Von</label>
+            <input type="date" className="uinput mono" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          </div>
+          <div className="field">
+            <label className="field-label">Bis</label>
+            <input type="date" className="uinput mono" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          </div>
+          <button className="btn-primary" onClick={handleFetch} disabled={fetching || !selectedStation}>
+            <Download size={14} />
+            {fetching ? 'Abrufen…' : 'Jetzt abrufen'}
+          </button>
+        </div>
+        {result && (
+          <div className={'result-banner' + (result.ok ? '' : ' warn')}>
+            <div className="result-icon">{result.ok ? <Check size={18} /> : <Info size={18} />}</div>
+            <div style={{ flex: 1 }}>
+              <div className="result-headline">{result.msg}</div>
+              <div className="result-sub">{startDate} – {endDate}</div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Tab 4: Witterungskorrektur ──
 
 function CorrectionPanel() {
   const [configs, setConfigs] = useState<CorrectionConfig[]>([]);
@@ -471,60 +754,81 @@ function CorrectionPanel() {
     })();
   }, []);
 
+  const active = configs.filter((c) => c.is_active).length;
+
   return (
-    <div className="card">
-      <h2 className="mb-3 text-base font-semibold">
-        Witterungskorrektur-Konfigurationen
-        <InfoTip title="Witterungskorrektur" formula="Korr. = Grundlast + (V − Grundlast) × HDD_ref ÷ HDD_ist">
-          VDI 3807: Normalisiert den Heizenergieverbrauch auf ein Referenzklima, um witterungsbedingte Schwankungen auszugleichen.
-        </InfoTip>
-      </h2>
-      <p className="mb-4 text-sm text-gray-500">
-        Witterungskorrektur normalisiert den Heizenergieverbrauch auf ein Referenzklima (VDI 3807).
-        Ein milder Winter braucht weniger Heizenergie – ohne Korrektur sieht das fälschlich nach Einsparung aus.
-      </p>
+    <div className="stack">
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <div className="card-title">
+              <span className="ico"><SlidersHorizontal size={15} /></span>Witterungsbereinigung (VDI 3807)
+              <InfoTip title="Witterungskorrektur" formula="Korr. = Grundlast + (V − Grundlast) × HGT_ref ÷ HGT_ist">
+                Normalisiert den Heizenergieverbrauch auf ein Referenzklima, um witterungsbedingte Schwankungen auszugleichen.
+              </InfoTip>
+            </div>
+            <div className="card-sub">
+              Rechnet den Wärmeverbrauch auf ein durchschnittliches Wetterjahr um — für faire Vorjahres- und
+              Benchmark-Vergleiche. Aktivierung erfolgt je Heizungszähler.
+            </div>
+          </div>
+          <span className="scope-tag">{active} aktiv</span>
+        </div>
+      </div>
 
       {loading ? (
-        <p className="text-gray-400">Laden...</p>
+        <div className="card"><LoadingSpinner /></div>
       ) : configs.length === 0 ? (
-        <p className="text-gray-400">
-          Keine Witterungskorrektur konfiguriert. Aktivieren Sie die Witterungskorrektur bei den
-          betroffenen Heizungszählern.
-        </p>
+        <div className="card">
+          <div className="empty-state">
+            <div className="mark"><SlidersHorizontal size={20} /></div>
+            <strong>Keine Witterungskorrektur konfiguriert</strong>
+            <p>
+              Aktiviere die Witterungskorrektur bei den betroffenen Heizungszählern. Sobald eine Konfiguration
+              angelegt ist, erscheint sie hier mit Methode, Innentemperatur, Heizgrenze und Referenz-HGT.
+            </p>
+          </div>
+        </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-gray-50 text-xs uppercase text-gray-500">
-              <tr>
-                <th className="px-4 py-2 text-left">Zähler-ID</th>
-                <th className="px-4 py-2 text-left">Methode</th>
-                <th className="px-4 py-2 text-right">Innentemp.</th>
-                <th className="px-4 py-2 text-right">Heizgrenze</th>
-                <th className="px-4 py-2 text-right">Grundlast %</th>
-                <th className="px-4 py-2 text-right">Referenz-HDD</th>
-                <th className="px-4 py-2 text-center">Aktiv</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {configs.map((c) => (
-                <tr key={c.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 font-mono text-xs">{c.meter_id.slice(0, 8)}...</td>
-                  <td className="px-4 py-2">
-                    <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
-                      {c.method === 'degree_day' ? 'VDI 3807' : c.method}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-right">{c.indoor_temp} °C</td>
-                  <td className="px-4 py-2 text-right">{c.heating_limit} °C</td>
-                  <td className="px-4 py-2 text-right">{c.base_load_percent ?? '–'} %</td>
-                  <td className="px-4 py-2 text-right font-mono">{c.reference_hdd ?? 'auto'}</td>
-                  <td className="px-4 py-2 text-center">
-                    <span className={`inline-block h-2.5 w-2.5 rounded-full ${c.is_active ? 'bg-green-500' : 'bg-gray-300'}`} />
-                  </td>
+        <div className="card" style={{ padding: 0 }}>
+          <div className="card-head" style={{ padding: '16px 16px 0' }}>
+            <div className="card-title"><span className="ico"><TableIcon size={15} /></span>Konfigurationen je Zähler</div>
+          </div>
+          <div className="dtable-wrap" style={{ border: 'none' }}>
+            <table className="dtable">
+              <thead>
+                <tr>
+                  <th>Zähler</th>
+                  <th>Methode</th>
+                  <th className="num">Innentemp.</th>
+                  <th className="num">Heizgrenze</th>
+                  <th className="num">Grundlast</th>
+                  <th className="num">Referenz-HGT</th>
+                  <th>Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {configs.map((c) => (
+                  <tr key={c.id}>
+                    <td className="cell-name mono">{c.meter_id.slice(0, 8)}…</td>
+                    <td><span className="scope-tag">{c.method === 'degree_day' ? 'VDI 3807' : c.method}</span></td>
+                    <td className="num">{c.indoor_temp} °C</td>
+                    <td className="num">{c.heating_limit} °C</td>
+                    <td className="num">{c.base_load_percent != null ? `${c.base_load_percent} %` : '—'}</td>
+                    <td className="num mono">{c.reference_hdd ?? 'auto'}</td>
+                    <td>
+                      {c.is_active ? (
+                        <span className="metric-status st-good"><span className="dot st-good-bg" />aktiv</span>
+                      ) : (
+                        <span className="metric-status"><span className="dot" style={{ background: 'var(--ink-4)' }} />inaktiv</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="dtable-foot">{configs.length} Konfigurationen · {active} aktiv</div>
+          </div>
         </div>
       )}
     </div>
