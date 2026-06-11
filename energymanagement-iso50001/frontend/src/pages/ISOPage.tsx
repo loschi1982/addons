@@ -195,25 +195,6 @@ const TABS = [
   { id: 'nonconformities', label: 'Nichtkonformitäten', icon: Shield },
 ];
 
-const STATUS_COLORS: Record<string, string> = {
-  planned: 'bg-gray-100 text-gray-700',
-  in_progress: 'bg-blue-100 text-blue-700',
-  completed: 'bg-green-100 text-green-700',
-  open: 'bg-yellow-100 text-yellow-700',
-  closed: 'bg-green-100 text-green-700',
-  overdue: 'bg-red-100 text-red-700',
-  compliant: 'bg-green-100 text-green-700',
-  partially_compliant: 'bg-yellow-100 text-yellow-700',
-  non_compliant: 'bg-red-100 text-red-700',
-  not_assessed: 'bg-gray-100 text-gray-700',
-  draft: 'bg-gray-100 text-gray-700',
-  active: 'bg-green-100 text-green-700',
-  archived: 'bg-gray-100 text-gray-500',
-  on_track: 'bg-green-100 text-green-700',
-  at_risk: 'bg-yellow-100 text-yellow-700',
-  behind: 'bg-red-100 text-red-700',
-};
-
 const COMPLIANCE_LABELS: Record<string, string> = {
   compliant: 'Konform',
   partially_compliant: 'Teilweise konform',
@@ -231,10 +212,24 @@ function formatDate(iso: string): string {
   }
 }
 
+const STATUS_TONE: Record<string, string> = {
+  planned: 'neutral', draft: 'neutral', not_assessed: 'neutral', archived: 'neutral',
+  in_progress: 'info', open: 'warn', at_risk: 'warn', partially_compliant: 'warn', behind: 'alert',
+  overdue: 'alert', non_compliant: 'alert',
+  completed: 'good', closed: 'good', compliant: 'good', active: 'good', on_track: 'good',
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  planned: 'Geplant', in_progress: 'In Umsetzung', completed: 'Abgeschlossen', open: 'Offen',
+  closed: 'Geschlossen', overdue: 'Überfällig', compliant: 'Konform', partially_compliant: 'Teilw. konform',
+  non_compliant: 'Nicht konform', not_assessed: 'Nicht bewertet', draft: 'Entwurf', active: 'Aktiv',
+  archived: 'Archiviert', on_track: 'Im Plan', at_risk: 'Gefährdet', behind: 'Im Rückstand',
+};
+
 function StatusBadge({ status }: { status: string }) {
-  const color = STATUS_COLORS[status] || 'bg-gray-100 text-gray-700';
-  const label = status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${color}`}>{label}</span>;
+  const tone = STATUS_TONE[status] || 'neutral';
+  const label = STATUS_LABEL[status] || status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  return <span className={`iso-pill ${tone}`}><span className="dot" />{label}</span>;
 }
 
 /* ── Hauptkomponente ── */
@@ -243,34 +238,28 @@ export default function ISOPage() {
   const [activeTab, setActiveTab] = useState('context');
 
   return (
-    <div>
+    <div className="iso">
       <PageHead eyebrow="ISO 50001" title="ISO 50001 Management" />
-      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
-        Kontext, Energiepolitik, Ziele, Risiken, Audits und Dokumentation
-      </p>
+      <p className="iso-sub">Kontext, Energiepolitik, Ziele, Risiken, Audits und Dokumentation</p>
 
       {/* Tab-Navigation */}
-      <div className="mt-4 overflow-x-auto" style={{ borderBottom: '1px solid var(--line)' }}>
-        <nav className="flex gap-0 -mb-px">
-          {TABS.map(tab => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
-                  isActive
-                    ? 'border-[var(--ink)] text-[var(--ink)]'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <Icon size={15} />
-                {tab.label}
-              </button>
-            );
-          })}
-        </nav>
+      <div className="iso-tabs" role="tablist" style={{ marginTop: 14 }}>
+        {TABS.map(tab => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => setActiveTab(tab.id)}
+              className={'iso-tab' + (isActive ? ' active' : '')}
+            >
+              <span className="iso-tab-ico"><Icon size={15} /></span>
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Tab-Inhalte */}
@@ -344,22 +333,18 @@ function ContextTab() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Kontext der Organisation (Kap. 4)</h2>
-        <div className="flex gap-2">
-          {ctx && <span className="text-sm text-gray-500">Version {ctx.version} | Geprüft: {formatDate(ctx.last_reviewed)}</span>}
+    <div className="iso-pane">
+      <div className="iso-sec-head">
+        <h2 className="iso-sec-title">Kontext der Organisation<span className="clause">Kap. 4</span></h2>
+        <div className="iso-sec-actions">
+          {ctx && <span className="text-sm" style={{ color: 'var(--ink-3)' }}>Version {ctx.version} · Geprüft {formatDate(ctx.last_reviewed)}</span>}
           {!editing ? (
-            <button onClick={() => setEditing(true)} className="btn-primary text-sm flex items-center gap-1">
-              <Edit2 size={14} /> Bearbeiten
-            </button>
+            <button onClick={() => setEditing(true)} className="btn-primary"><Edit2 size={14} /> Bearbeiten</button>
           ) : (
-            <div className="flex gap-2">
-              <button onClick={() => setEditing(false)} className="btn-secondary text-sm">Abbrechen</button>
-              <button onClick={handleSave} disabled={saving} className="btn-primary text-sm flex items-center gap-1">
-                <Save size={14} /> {saving ? 'Speichern…' : 'Speichern'}
-              </button>
-            </div>
+            <>
+              <button onClick={() => setEditing(false)} className="btn-line">Abbrechen</button>
+              <button onClick={handleSave} disabled={saving} className="btn-primary"><Save size={14} /> {saving ? 'Speichern…' : 'Speichern'}</button>
+            </>
           )}
         </div>
       </div>
@@ -427,10 +412,11 @@ function ContextTab() {
           </div>
         </div>
       ) : (
-        <div className="card text-center py-12 text-gray-500">
-          <Building2 size={40} className="mx-auto mb-3 text-gray-300" />
-          <p>Noch kein Kontext definiert.</p>
-          <button onClick={() => setEditing(true)} className="btn-primary text-sm mt-3">Kontext anlegen</button>
+        <div className="iso-empty">
+          <div className="mark"><Building2 size={20} /></div>
+          <strong>Noch kein Kontext definiert</strong>
+          <span>Lege den Geltungsbereich des EnMS sowie interne/externe Themen und interessierte Parteien an (ISO 50001 Kap. 4).</span>
+          <button onClick={() => setEditing(true)} className="btn-primary" style={{ marginTop: 6 }}>Kontext anlegen</button>
         </div>
       )}
     </div>
@@ -479,7 +465,7 @@ function PolicyTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Energiepolitik (Kap. 5.2)</h2>
+        <h2 className="iso-sec-title">Energiepolitik<span className="clause">Kap. 5.2</span></h2>
         <button onClick={() => { setEditId(null); setForm({ title: '', content: '', approved_by: '', approved_date: '', valid_from: '', valid_to: '', is_current: true }); setShowForm(true); }} className="btn-primary text-sm flex items-center gap-1">
           <Plus size={14} /> Neue Politik
         </button>
@@ -528,7 +514,7 @@ function PolicyTab() {
       ))}
 
       {policies.length === 0 && !showForm && (
-        <div className="card text-center py-8 text-gray-500">Noch keine Energiepolitik definiert.</div>
+        <div className="iso-empty"><div className="mark"><FileText size={20} /></div><strong>Noch keine Energiepolitik definiert.</strong></div>
       )}
     </div>
   );
@@ -598,7 +584,7 @@ function RolesTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Rollen & Verantwortlichkeiten (Kap. 5.3)</h2>
+        <h2 className="iso-sec-title">Rollen & Verantwortlichkeiten<span className="clause">Kap. 5.3</span></h2>
         <button onClick={resetForm} className="btn-primary text-sm flex items-center gap-1"><Plus size={14} /> Neue Rolle</button>
       </div>
 
@@ -657,7 +643,7 @@ function RolesTab() {
       </div>
 
       {roles.length === 0 && !showForm && (
-        <div className="card text-center py-8 text-gray-500">Noch keine Rollen definiert.</div>
+        <div className="iso-empty"><div className="mark"><FileText size={20} /></div><strong>Noch keine Rollen definiert.</strong></div>
       )}
     </div>
   );
@@ -714,7 +700,7 @@ function ObjectivesTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Energieziele & Aktionspläne (Kap. 6.2)</h2>
+        <h2 className="iso-sec-title">Energieziele & Aktionspläne<span className="clause">Kap. 6.2</span></h2>
         <button onClick={() => setShowForm(true)} className="btn-primary text-sm flex items-center gap-1"><Plus size={14} /> Neues Ziel</button>
       </div>
 
@@ -802,7 +788,7 @@ function ObjectivesTab() {
       ))}
 
       {objectives.length === 0 && !showForm && (
-        <div className="card text-center py-8 text-gray-500">Noch keine Energieziele definiert.</div>
+        <div className="iso-empty"><div className="mark"><FileText size={20} /></div><strong>Noch keine Energieziele definiert.</strong></div>
       )}
     </div>
   );
@@ -844,7 +830,7 @@ function RisksTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Risiken & Chancen (Kap. 6.1)</h2>
+        <h2 className="iso-sec-title">Risiken & Chancen<span className="clause">Kap. 6.1</span></h2>
         <button onClick={() => setShowForm(true)} className="btn-primary text-sm flex items-center gap-1"><Plus size={14} /> Neu</button>
       </div>
 
@@ -923,7 +909,7 @@ function RisksTab() {
       </div>
 
       {risks.length === 0 && !showForm && (
-        <div className="card text-center py-8 text-gray-500">Noch keine Risiken oder Chancen erfasst.</div>
+        <div className="iso-empty"><div className="mark"><FileText size={20} /></div><strong>Noch keine Risiken oder Chancen erfasst.</strong></div>
       )}
     </div>
   );
@@ -975,7 +961,7 @@ function LegalTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Rechtskataster (Kap. 9.1.2)</h2>
+        <h2 className="iso-sec-title">Rechtskataster<span className="clause">Kap. 9.1.2</span></h2>
         <button onClick={() => setShowForm(true)} className="btn-primary text-sm flex items-center gap-1"><Plus size={14} /> Neue Anforderung</button>
       </div>
 
@@ -1039,7 +1025,7 @@ function LegalTab() {
       </div>
 
       {reqs.length === 0 && !showForm && (
-        <div className="card text-center py-8 text-gray-500">Noch keine Rechtsanforderungen erfasst.</div>
+        <div className="iso-empty"><div className="mark"><FileText size={20} /></div><strong>Noch keine Rechtsanforderungen erfasst.</strong></div>
       )}
     </div>
   );
@@ -1100,7 +1086,7 @@ function DocumentsTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Dokumentenlenkung (Kap. 7.5)</h2>
+        <h2 className="iso-sec-title">Dokumentenlenkung<span className="clause">Kap. 7.5</span></h2>
         <button onClick={() => setShowForm(true)} className="btn-primary text-sm flex items-center gap-1"><Plus size={14} /> Neues Dokument</button>
       </div>
 
@@ -1186,7 +1172,7 @@ function DocumentsTab() {
       </div>
 
       {docs.length === 0 && !showForm && (
-        <div className="card text-center py-8 text-gray-500">Noch keine Dokumente angelegt.</div>
+        <div className="iso-empty"><div className="mark"><FileText size={20} /></div><strong>Noch keine Dokumente angelegt.</strong></div>
       )}
     </div>
   );
@@ -1245,7 +1231,7 @@ function AuditsTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Interne Audits (Kap. 9.2)</h2>
+        <h2 className="iso-sec-title">Interne Audits<span className="clause">Kap. 9.2</span></h2>
         <div className="flex gap-2">
           <button onClick={async () => {
             try {
@@ -1372,7 +1358,7 @@ function AuditsTab() {
       ))}
 
       {audits.length === 0 && !showForm && (
-        <div className="card text-center py-8 text-gray-500">Noch keine Audits geplant.</div>
+        <div className="iso-empty"><div className="mark"><FileText size={20} /></div><strong>Noch keine Audits geplant.</strong></div>
       )}
     </div>
   );
@@ -1429,7 +1415,7 @@ function ReviewsTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Managementbewertung (Kap. 9.3)</h2>
+        <h2 className="iso-sec-title">Managementbewertung<span className="clause">Kap. 9.3</span></h2>
         <button onClick={() => setShowForm(true)} className="btn-primary text-sm flex items-center gap-1"><Plus size={14} /> Neue Bewertung</button>
       </div>
 
@@ -1552,7 +1538,7 @@ function ReviewsTab() {
       ))}
 
       {reviews.length === 0 && !showForm && (
-        <div className="card text-center py-8 text-gray-500">Noch keine Managementbewertungen durchgeführt.</div>
+        <div className="iso-empty"><div className="mark"><FileText size={20} /></div><strong>Noch keine Managementbewertungen durchgeführt.</strong></div>
       )}
     </div>
   );
@@ -1602,7 +1588,7 @@ function NonconformitiesTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Nichtkonformitäten & Korrekturmaßnahmen (Kap. 10.1)</h2>
+        <h2 className="iso-sec-title">Nichtkonformitäten & Korrekturmaßnahmen<span className="clause">Kap. 10.1</span></h2>
         <button onClick={() => setShowForm(true)} className="btn-primary text-sm flex items-center gap-1"><Plus size={14} /> Neue NK</button>
       </div>
 
@@ -1740,7 +1726,7 @@ function NonconformitiesTab() {
       })}
 
       {ncs.length === 0 && !showForm && (
-        <div className="card text-center py-8 text-gray-500">Keine Nichtkonformitäten erfasst.</div>
+        <div className="iso-empty"><div className="mark"><FileText size={20} /></div><strong>Keine Nichtkonformitäten erfasst.</strong></div>
       )}
     </div>
   );

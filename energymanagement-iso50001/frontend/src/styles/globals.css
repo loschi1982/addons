@@ -4379,3 +4379,145 @@ nav.flex.gap-6 > button.pb-2:hover { color: var(--ink); }
 .kosten .link-btn { background: none; border: none; padding: 0; font-size: 12px; font-weight: 500; color: var(--info); cursor: pointer; }
 .kosten .link-btn:hover { text-decoration: underline; }
 .kosten .date-input input::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
+
+/* ════════════════════════════════════════════════════════════════════
+   ISO 50001 Management — gescopt unter .iso (adaptiert iso.css)
+   10 Tabs. Enthält Design-Klassen + Bridge-Regeln, damit die generischen
+   Primitive (.label/.input/table/.btn-*) der Tabs den Look erben.
+   ════════════════════════════════════════════════════════════════════ */
+.iso .iso-sub { font-size: 13px; color: var(--ink-3); margin: 4px 0 0; }
+
+/* Tab-Leiste */
+.iso .iso-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: thin; }
+.iso .iso-tabs::-webkit-scrollbar { height: 4px; }
+.iso .iso-tabs::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 99px; }
+.iso .iso-tab { display: inline-flex; align-items: center; gap: 7px; padding: 10px 14px 12px; font-size: 13px; font-weight: 500; color: var(--ink-3); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; background: none; cursor: pointer; transition: color 140ms, border-color 140ms; }
+.iso .iso-tab:hover { color: var(--ink); }
+.iso .iso-tab.active { color: var(--ink); border-bottom-color: var(--fw-fernwaerme); font-weight: 600; }
+.iso .iso-tab .iso-tab-ico { color: var(--ink-4); display: inline-flex; transition: color 140ms; }
+.iso .iso-tab.active .iso-tab-ico { color: var(--fw-fernwaerme); }
+
+.iso .iso-pane { display: flex; flex-direction: column; gap: 16px; }
+
+/* Sektions-Kopf */
+.iso .iso-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.iso .iso-sec-title { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; margin: 0; display: flex; align-items: baseline; gap: 9px; color: var(--ink); }
+.iso .iso-sec-title .clause { font-size: 12px; font-weight: 500; color: var(--ink-4); font-family: var(--font-mono); }
+.iso .iso-sec-actions { display: flex; align-items: center; gap: 8px; }
+
+/* Buttons (inkl. Bridge für .btn-secondary) */
+.iso .btn-primary { display: inline-flex; align-items: center; gap: 7px; background: var(--ink); color: var(--surface); border: 1px solid var(--ink); padding: 8px 14px; border-radius: var(--r-sm); font-size: 12.5px; font-weight: 600; cursor: pointer; transition: box-shadow 140ms, opacity 140ms; }
+.iso .btn-primary:hover { box-shadow: 0 4px 14px -6px rgba(0,0,0,0.4); }
+.iso .btn-primary:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
+[data-theme="dark"] .iso .btn-primary { background: var(--fw-fernwaerme); border-color: var(--fw-fernwaerme); color: #1A1206; }
+.iso .btn-line, .iso .btn-secondary { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--surface); padding: 8px 14px; border-radius: var(--r-sm); font-size: 12.5px; font-weight: 500; color: var(--ink-2); cursor: pointer; transition: border-color 140ms, color 140ms; }
+.iso .btn-line:hover, .iso .btn-secondary:hover { border-color: var(--line-strong); color: var(--ink); }
+.iso .btn-mini { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: var(--surface); padding: 5px 9px; border-radius: 6px; font-size: 11.5px; font-weight: 500; color: var(--ink-3); cursor: pointer; transition: border-color 140ms, color 140ms; }
+.iso .btn-mini:hover { border-color: var(--line-strong); color: var(--ink); }
+.iso .btn-mini.danger:hover { color: var(--alert); border-color: color-mix(in srgb, var(--alert) 40%, var(--line)); }
+
+/* Formular-Panel */
+.iso .iso-form-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.iso .iso-form-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.iso .iso-form-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
+.iso .iso-form-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+
+/* Formular-Felder + Bridge (.label/.input/textarea/select) */
+.iso .iso-grid { display: grid; gap: 14px 18px; }
+.iso .iso-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+.iso .iso-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+.iso .span-2 { grid-column: span 2; }
+.iso .span-all { grid-column: 1 / -1; }
+.iso .iso-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.iso .iso-label, .iso .label { font-size: 12px; font-weight: 500; color: var(--ink-2); display: block; margin-bottom: 6px; }
+.iso .iso-field .iso-label { margin-bottom: 0; }
+.iso .iso-input, .iso .iso-textarea, .iso .iso-select,
+.iso .input, .iso input[type="text"], .iso input[type="date"], .iso input[type="number"], .iso textarea, .iso select {
+  width: 100%; font-family: var(--font-sans); font-size: 13px; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  padding: 9px 12px; transition: border-color 140ms, box-shadow 140ms;
+}
+.iso .iso-input::placeholder, .iso .iso-textarea::placeholder, .iso .input::placeholder, .iso textarea::placeholder { color: var(--ink-4); }
+.iso .iso-input:focus, .iso .iso-textarea:focus, .iso .iso-select:focus,
+.iso .input:focus, .iso input:focus, .iso textarea:focus, .iso select:focus {
+  outline: none; border-color: var(--fw-fernwaerme); box-shadow: 0 0 0 3px color-mix(in srgb, var(--fw-fernwaerme) 18%, transparent);
+}
+.iso .iso-textarea, .iso textarea { resize: vertical; min-height: 86px; line-height: 1.5; }
+.iso .iso-select, .iso select { appearance: none; cursor: pointer; padding-right: 34px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239A968B' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; background-size: 15px; }
+[data-theme="dark"] .iso .iso-select, [data-theme="dark"] .iso select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235C6470' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); }
+.iso .iso-num { font-family: var(--font-mono); font-feature-settings: "tnum"; }
+
+/* KPI-Karten */
+.iso .iso-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.iso .iso-kpi { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px; display: flex; flex-direction: column; align-items: center; gap: 7px; text-align: center; transition: border-color 200ms, box-shadow 200ms; }
+.iso .iso-kpi:hover { border-color: var(--line-strong); box-shadow: 0 6px 20px -12px rgba(20,20,20,0.16); }
+.iso .iso-kpi .dot { width: 11px; height: 11px; border-radius: 50%; }
+.iso .iso-kpi .kpi-num { font-size: 30px; font-weight: 600; font-family: var(--font-mono); font-feature-settings: "tnum"; letter-spacing: -0.02em; line-height: 1; color: var(--ink); }
+.iso .iso-kpi .kpi-label { font-size: 12px; color: var(--ink-3); }
+
+/* Tabelle (Grid-basiert + Bridge für <table>) */
+.iso .iso-table { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
+.iso .iso-tr { display: grid; align-items: center; gap: 14px; padding: 12px 18px; border-top: 1px solid var(--line); }
+.iso .iso-tr:first-child { border-top: none; }
+.iso .iso-tr.head { background: var(--surface-2); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); font-weight: 600; }
+.iso .iso-tr.body:hover { background: var(--surface-2); }
+.iso .iso-td-strong { font-weight: 600; color: var(--ink); }
+.iso .iso-td-mono { font-family: var(--font-mono); font-feature-settings: "tnum"; }
+.iso .iso-td-dim { color: var(--ink-3); }
+.iso .iso-td-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.iso .iso-table-empty { padding: 40px 18px; text-align: center; color: var(--ink-3); font-size: 13px; }
+.iso .card table { width: 100%; font-size: 13px; }
+.iso .card table thead th, .iso table thead th { text-align: left; padding: 9px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); font-weight: 600; border-bottom: 1px solid var(--line); }
+.iso table tbody td { padding: 10px 12px; border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.iso table tbody tr:last-child td { border-bottom: none; }
+
+/* Status-Pillen */
+.iso .iso-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+.iso .iso-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.iso .iso-pill.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 36%, transparent); background: color-mix(in srgb, var(--good) 12%, transparent); }
+.iso .iso-pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 36%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.iso .iso-pill.alert { color: var(--alert); border-color: color-mix(in srgb, var(--alert) 36%, transparent); background: color-mix(in srgb, var(--alert) 12%, transparent); }
+.iso .iso-pill.info { color: var(--info); border-color: color-mix(in srgb, var(--info) 36%, transparent); background: color-mix(in srgb, var(--info) 12%, transparent); }
+.iso .iso-pill.neutral { color: var(--ink-3); }
+.iso .iso-typebadge { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 600; padding: 3px 8px; border-radius: 5px; border: 1px solid var(--line); }
+.iso .iso-typebadge.risk { color: var(--alert); border-color: color-mix(in srgb, var(--alert) 30%, var(--line)); background: color-mix(in srgb, var(--alert) 8%, var(--surface)); }
+.iso .iso-typebadge.chance { color: var(--good); border-color: color-mix(in srgb, var(--good) 30%, var(--line)); background: color-mix(in srgb, var(--good) 8%, var(--surface)); }
+.iso .iso-score { display: inline-grid; place-items: center; min-width: 30px; height: 24px; padding: 0 7px; border-radius: 6px; font-family: var(--font-mono); font-weight: 700; font-size: 12.5px; }
+
+/* Listen-Karten */
+.iso .iso-list { display: flex; flex-direction: column; gap: 12px; }
+.iso .iso-cardlist { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.iso .iso-item { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px; display: flex; flex-direction: column; gap: 12px; transition: border-color 200ms, box-shadow 200ms; }
+.iso .iso-item:hover { border-color: var(--line-strong); box-shadow: 0 6px 20px -12px rgba(20,20,20,0.16); }
+.iso .iso-item-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.iso .iso-item-title { font-size: 14.5px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+.iso .iso-item-meta { font-size: 11.5px; color: var(--ink-4); font-family: var(--font-mono); margin-top: 2px; }
+.iso .iso-item-text { font-size: 12.5px; color: var(--ink-2); line-height: 1.55; }
+.iso .iso-item-foot { display: flex; flex-wrap: wrap; gap: 8px 18px; padding-top: 12px; border-top: 1px solid var(--line); }
+.iso .iso-kv { display: flex; flex-direction: column; gap: 2px; }
+.iso .iso-kv .k { font-size: 10px; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; }
+.iso .iso-kv .v { font-size: 12.5px; color: var(--ink); font-weight: 500; }
+.iso .iso-kv .v.mono { font-family: var(--font-mono); font-feature-settings: "tnum"; }
+.iso .iso-bullets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.iso .iso-bullets li { font-size: 12px; color: var(--ink-2); line-height: 1.4; padding-left: 14px; position: relative; }
+.iso .iso-bullets li::before { content: ""; position: absolute; left: 3px; top: 7px; width: 4px; height: 4px; border-radius: 50%; background: var(--ink-4); }
+.iso .iso-block-label { font-size: 10px; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 5px; }
+.iso .iso-progress { display: flex; flex-direction: column; gap: 6px; }
+.iso .iso-ptrack { height: 7px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
+.iso .iso-pfill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--good), #34D399); }
+.iso .iso-pvals { display: flex; align-items: baseline; justify-content: space-between; font-size: 11.5px; color: var(--ink-3); }
+.iso .iso-pvals strong { color: var(--ink); font-family: var(--font-mono); font-weight: 600; }
+
+/* Review-Panels */
+.iso .iso-review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.iso .iso-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.iso .iso-panel-title { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; color: var(--ink); }
+
+/* Leerer Zustand */
+.iso .iso-empty { background: var(--surface); border: 1px dashed var(--line-strong); border-radius: var(--r-lg); padding: 44px 24px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+.iso .iso-empty .mark { width: 42px; height: 42px; border-radius: 11px; background: var(--surface-2); display: grid; place-items: center; color: var(--ink-3); margin-bottom: 4px; }
+.iso .iso-empty strong { font-size: 14px; color: var(--ink); }
+.iso .iso-empty span { font-size: 12.5px; color: var(--ink-3); max-width: 380px; line-height: 1.5; }
+
+@media (max-width: 1180px) { .iso .iso-cardlist, .iso .iso-review-grid { grid-template-columns: 1fr; } }
+@media (max-width: 980px) { .iso .iso-grid.cols-2, .iso .iso-grid.cols-3 { grid-template-columns: 1fr; } .iso .span-2 { grid-column: auto; } .iso .iso-kpis { grid-template-columns: repeat(2, 1fr); } }
