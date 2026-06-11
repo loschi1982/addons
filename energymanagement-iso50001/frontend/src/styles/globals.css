@@ -4166,3 +4166,212 @@ nav.flex.gap-6 > button.pb-2:hover { color: var(--ink); }
   .sch .field-row.c2 { grid-template-columns: 1fr; }
   .sch .sch-top { flex-direction: column; gap: 10px; }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   Kosten & Wirtschaft — gescopt unter .kosten (adaptiert kosten.css)
+   3 Tabs: Wirtschaftlichkeit / Kostenumlage / Verträge
+   ════════════════════════════════════════════════════════════════════ */
+.kosten .tab-body { display: flex; flex-direction: column; gap: 16px; }
+.kosten .tab-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.kosten .tab-title { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin: 0; color: var(--ink); }
+.kosten .tab-sub { font-size: 13px; color: var(--ink-3); margin: 4px 0 0; max-width: 720px; }
+.kosten .btn-ghost { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface); padding: 7px 12px; border-radius: var(--r-sm); font-size: 12.5px; font-weight: 500; color: var(--ink); cursor: pointer; }
+.kosten .btn-ghost:hover { border-color: var(--line-strong); }
+.kosten .btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Annahmen-Banner */
+.kosten .assume-banner { display: flex; align-items: center; gap: 12px; background: color-mix(in srgb, var(--info) 8%, var(--surface)); border: 1px solid color-mix(in srgb, var(--info) 26%, var(--line)); border-radius: var(--r-md); padding: 11px 16px; }
+.kosten .assume-items { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
+.kosten .assume-items .al { color: var(--ink-3); }
+.kosten .assume-items strong { color: var(--ink); font-family: var(--font-mono); font-weight: 600; }
+.kosten .assume-items .adim { color: var(--ink-4); font-size: 11.5px; }
+.kosten .assume-items .adot { color: var(--ink-4); }
+
+/* Portfolio-KPI-Grid */
+.kosten .pf-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+.kosten .pf-grid.umlage-grid { grid-template-columns: repeat(4, 1fr); }
+.kosten .pf-grid.vertrag-grid { grid-template-columns: repeat(3, 1fr); max-width: 760px; }
+.kosten .pf-kpi { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 15px 16px; display: flex; flex-direction: column; gap: 9px; transition: border-color 200ms, box-shadow 200ms; }
+.kosten .pf-kpi:hover { border-color: var(--line-strong); box-shadow: 0 6px 20px -12px rgba(20,20,20,0.18); }
+.kosten .pf-kpi-top { display: flex; align-items: center; gap: 8px; }
+.kosten .pf-ico { width: 24px; height: 24px; border-radius: 6px; flex-shrink: 0; display: grid; place-items: center; background: var(--surface-2); color: var(--ink-3); }
+.kosten .pf-label { font-size: 11px; color: var(--ink-3); font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+.kosten .pf-value-row { display: flex; align-items: baseline; gap: 5px; }
+.kosten .pf-value { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; font-family: var(--font-mono); font-feature-settings: "tnum"; color: var(--ink); }
+.kosten .pf-value.good { color: var(--good); }
+.kosten .pf-value.bad { color: var(--alert); }
+.kosten .pf-unit { font-size: 12px; color: var(--ink-3); font-family: var(--font-mono); }
+.kosten .pf-sub { font-size: 11.5px; color: var(--ink-4); }
+
+/* Toolbar (Filter + Sort) */
+.kosten .wd-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.kosten .chip-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.kosten .fchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface); padding: 6px 12px; border-radius: 99px; font-size: 12.5px; font-weight: 500; color: var(--ink-2); cursor: pointer; transition: border-color 140ms, color 140ms; }
+.kosten .fchip:hover { border-color: var(--line-strong); }
+.kosten .fchip.active { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+[data-theme="dark"] .kosten .fchip.active { color: #1A1206; background: var(--fw-fernwaerme); border-color: var(--fw-fernwaerme); }
+.kosten .fchip .fcount { font-family: var(--font-mono); font-size: 11px; background: var(--surface-2); color: var(--ink-3); padding: 0 6px; border-radius: 99px; }
+.kosten .fchip.active .fcount { background: rgba(255,255,255,0.18); color: #fff; }
+[data-theme="dark"] .kosten .fchip.active .fcount { background: rgba(0,0,0,0.18); color: #1A1206; }
+.kosten .sort-group { display: flex; align-items: center; gap: 10px; }
+.kosten .sort-label { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.kosten .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; background: var(--surface); }
+.kosten .seg button { padding: 6px 11px; font-size: 12px; font-weight: 500; color: var(--ink-3); background: none; border: none; border-right: 1px solid var(--line); cursor: pointer; transition: background 140ms, color 140ms; }
+.kosten .seg button:last-child { border-right: none; }
+.kosten .seg button:hover { color: var(--ink); }
+.kosten .seg button.seg-active { background: var(--ink); color: var(--surface); font-weight: 600; }
+[data-theme="dark"] .kosten .seg button.seg-active { background: var(--fw-fernwaerme); color: #1A1206; }
+
+/* Master-Detail */
+.kosten .wd-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr); gap: 16px; align-items: start; }
+.kosten .wd-list { display: flex; flex-direction: column; gap: 8px; }
+.kosten .m-row { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: 13px 14px; display: flex; flex-direction: column; gap: 11px; cursor: pointer; transition: border-color 160ms, box-shadow 160ms; }
+.kosten .m-row:hover { border-color: var(--line-strong); box-shadow: 0 4px 16px -10px rgba(20,20,20,0.2); }
+.kosten .m-row.active { border-color: var(--fw-fernwaerme); box-shadow: 0 0 0 1px var(--fw-fernwaerme), 0 6px 20px -12px rgba(232,154,60,0.4); }
+.kosten .m-row-main { display: flex; flex-direction: column; gap: 6px; }
+.kosten .m-row-title { display: flex; align-items: center; gap: 8px; }
+.kosten .m-name { font-size: 13.5px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kosten .m-row-sub { display: flex; align-items: center; gap: 10px; }
+.kosten .m-area { font-size: 11.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kosten .m-row-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.kosten .m-metric { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.kosten .mm-label { font-size: 9.5px; color: var(--ink-4); text-transform: uppercase; letter-spacing: 0.05em; }
+.kosten .mm-val { font-size: 13px; font-weight: 600; font-family: var(--font-mono); font-feature-settings: "tnum"; color: var(--ink); }
+.kosten .mm-val.pos { color: var(--good); }
+.kosten .mm-val.neg { color: var(--alert); }
+.kosten .m-pb { gap: 4px; }
+.kosten .pb-track { height: 4px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
+.kosten .pb-fill { height: 100%; border-radius: 99px; }
+.kosten .pb-fill.fast { background: var(--good); }
+.kosten .pb-fill.mid { background: var(--fw-fernwaerme); }
+.kosten .pb-fill.slow { background: var(--ink-4); }
+
+/* Detail-Panel */
+.kosten .wd-detail-wrap { position: sticky; top: 16px; }
+.kosten .wd-detail { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px; display: flex; flex-direction: column; gap: 16px; }
+.kosten .wd-empty { background: var(--surface); border: 1px dashed var(--line-strong); border-radius: var(--r-lg); padding: 48px 24px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+.kosten .wd-empty .mark { width: 44px; height: 44px; border-radius: 11px; background: var(--surface-2); display: grid; place-items: center; color: var(--ink-3); margin-bottom: 4px; }
+.kosten .wd-empty strong { font-size: 14px; color: var(--ink); }
+.kosten .wd-empty div { font-size: 12.5px; color: var(--ink-3); line-height: 1.5; }
+.kosten .wd-detail-head { display: flex; flex-direction: column; gap: 8px; }
+.kosten .wd-dh-top { display: flex; align-items: center; gap: 8px; }
+.kosten .wd-ref { margin-left: auto; font-size: 11px; font-family: var(--font-mono); color: var(--ink-4); }
+.kosten .wd-detail-head h3 { font-size: 17px; font-weight: 600; letter-spacing: -0.015em; margin: 2px 0 0; line-height: 1.25; color: var(--ink); }
+.kosten .wd-dh-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.kosten .wd-area { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-3); }
+.kosten .wd-note { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; margin: 2px 0 0; }
+
+/* Badges & Status */
+.kosten .k-echip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 99px; white-space: nowrap; }
+.kosten .k-echip .dot { width: 7px; height: 7px; border-radius: 50%; }
+.kosten .k-typebadge { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600; padding: 3px 8px; border-radius: 5px; border: 1px solid var(--line); color: var(--ink-2); background: var(--surface-2); }
+.kosten .k-typebadge.plan { color: var(--info); border-color: color-mix(in srgb, var(--info) 30%, var(--line)); background: color-mix(in srgb, var(--info) 8%, var(--surface)); }
+.kosten .k-typebadge.vb { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 30%, var(--line)); background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.kosten .k-status { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 600; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--line); color: var(--ink-2); }
+.kosten .k-status .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.kosten .k-status.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 36%, transparent); background: color-mix(in srgb, var(--good) 12%, transparent); }
+.kosten .k-status.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 36%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.kosten .k-status.info { color: var(--info); border-color: color-mix(in srgb, var(--info) 36%, transparent); background: color-mix(in srgb, var(--info) 12%, transparent); }
+.kosten .k-status.neutral { color: var(--ink-3); }
+
+/* Metrik-Zellen */
+.kosten .wd-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.kosten .metric-cell { background: var(--surface); padding: 11px 13px; display: flex; flex-direction: column; gap: 3px; }
+.kosten .metric-label { font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.kosten .metric-value { font-size: 17px; font-weight: 600; font-family: var(--font-mono); font-feature-settings: "tnum"; color: var(--ink); letter-spacing: -0.01em; }
+.kosten .metric-value.good { color: var(--good); }
+.kosten .metric-value.bad { color: var(--alert); }
+.kosten .metric-sub { font-size: 10.5px; color: var(--ink-4); }
+
+/* Detail-Karten + Chart */
+.kosten .wd-card { border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.kosten .wd-card-head { display: flex; flex-direction: column; gap: 2px; }
+.kosten .wd-card-title { font-size: 13px; font-weight: 600; color: var(--ink); }
+.kosten .wd-card-sub { font-size: 11.5px; color: var(--ink-3); }
+.kosten .wd-card-sub strong { color: var(--ink); font-family: var(--font-mono); }
+.kosten .amort-chart { width: 100%; }
+.kosten .amort-axis { font-size: 10px; fill: var(--chart-muted); font-family: var(--font-mono); }
+.kosten .amort-zero { font-size: 9.5px; fill: var(--ink-3); font-weight: 600; }
+.kosten .amort-pblabel { font-size: 11px; fill: #fff; font-weight: 700; font-family: var(--font-mono); }
+.kosten .amort-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; font-size: 11px; color: var(--ink-3); }
+.kosten .amort-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.kosten .amort-legend .ll { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.kosten .amort-legend .ll.dash { background: repeating-linear-gradient(90deg, var(--ink-3) 0 3px, transparent 3px 6px) !important; }
+.kosten .amort-legend .lm { width: 11px; height: 11px; border: 2px solid; border-radius: 50%; display: inline-block; }
+
+/* Cashflow-Tabelle */
+.kosten .cf-table { border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
+.kosten .cf-row { display: grid; grid-template-columns: 1.1fr 1fr 1fr 1fr; align-items: center; padding: 7px 12px; font-size: 12px; border-top: 1px solid var(--line); }
+.kosten .cf-row:first-child { border-top: none; }
+.kosten .cf-head { background: var(--surface-2); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); font-weight: 600; }
+.kosten .cf-row .num { text-align: right; font-family: var(--font-mono); font-feature-settings: "tnum"; }
+.kosten .cf-year { color: var(--ink-2); font-family: var(--font-mono); }
+.kosten .cf-row .num.pos { color: var(--good); }
+.kosten .cf-row .num.neg { color: var(--alert); }
+.kosten .cf-row.pb { background: color-mix(in srgb, var(--fw-fernwaerme) 9%, var(--surface)); }
+.kosten .cf-row.pb .cf-year { color: var(--warn); font-weight: 600; }
+.kosten .cf-scroll { max-height: 232px; overflow-y: auto; }
+
+/* Berechnungsgrundlagen */
+.kosten .calc-basis { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 14px 18px; }
+.kosten .cb-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); margin-bottom: 8px; }
+.kosten .calc-basis ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.kosten .calc-basis li { font-size: 12px; color: var(--ink-2); line-height: 1.45; padding-left: 14px; position: relative; }
+.kosten .calc-basis li::before { content: "·"; position: absolute; left: 4px; color: var(--ink-4); }
+.kosten .calc-basis strong { color: var(--ink); font-weight: 600; }
+
+/* Kostenumlage */
+.kosten .period-bar { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 14px 16px; }
+.kosten .pf-field { display: flex; flex-direction: column; gap: 5px; }
+.kosten .pf-field label { font-size: 10.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.kosten .date-input { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--surface); border-radius: var(--r-sm); padding: 7px 11px; font-size: 12.5px; font-family: var(--font-mono); color: var(--ink); min-width: 130px; }
+.kosten .period-note { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ink-3); }
+.kosten .umlage-table { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
+.kosten .ut-row { display: grid; grid-template-columns: minmax(180px, 1.6fr) minmax(120px, 1.4fr) 120px 150px 120px; align-items: center; gap: 16px; padding: 10px 18px; }
+.kosten .ut-head { background: var(--surface-2); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); font-weight: 600; border-bottom: 1px solid var(--line); }
+.kosten .ut-head .num, .kosten .ut-row .num { text-align: right; }
+.kosten .ut-row + .ut-row { border-top: 1px solid var(--line); }
+.kosten .ut-unit { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.kosten .ut-uname { font-size: 12.5px; font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kosten .ut-kwh, .kosten .ut-cost { font-family: var(--font-mono); font-feature-settings: "tnum"; font-size: 13px; font-weight: 600; color: var(--ink); }
+.kosten .ut-kwh { color: var(--ink-2); font-weight: 500; }
+.kosten .ut-row .u { font-size: 10.5px; color: var(--ink-4); font-weight: 400; }
+.kosten .share-wrap { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.kosten .share-track { width: 70px; height: 6px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
+.kosten .share-fill { height: 100%; background: var(--fw-fernwaerme); border-radius: 99px; }
+.kosten .share-wrap span { font-size: 11.5px; font-family: var(--font-mono); color: var(--ink-3); min-width: 42px; text-align: right; }
+.kosten .ut-total { background: var(--surface-2); border-top: 2px solid var(--line-strong); font-weight: 600; }
+.kosten .ut-total > div:first-child { font-size: 12.5px; color: var(--ink); }
+.kosten .ut-total .num { font-family: var(--font-mono); font-size: 13.5px; color: var(--ink); }
+
+/* Verträge */
+.kosten .ct-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.kosten .ct-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px; display: flex; flex-direction: column; gap: 15px; transition: border-color 200ms, box-shadow 200ms; }
+.kosten .ct-card:hover { border-color: var(--line-strong); box-shadow: 0 8px 26px -14px rgba(20,20,20,0.22); }
+.kosten .ct-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.kosten .ct-energy { display: flex; align-items: center; gap: 11px; }
+.kosten .ct-eico { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; }
+.kosten .ct-supplier { font-size: 14px; font-weight: 600; color: var(--ink); }
+.kosten .ct-nr { font-size: 11px; font-family: var(--font-mono); color: var(--ink-4); margin-top: 1px; }
+.kosten .ct-term { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; background: var(--surface-2); border-radius: var(--r-sm); }
+.kosten .ct-term-dates { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-family: var(--font-mono); color: var(--ink); }
+.kosten .ct-arrow { color: var(--ink-4); }
+.kosten .ct-remain { font-size: 11.5px; color: var(--ink-3); font-weight: 500; }
+.kosten .ct-remain.warn { color: var(--warn); font-weight: 600; }
+.kosten .ct-prices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.kosten .ct-price { display: flex; flex-direction: column; gap: 3px; }
+.kosten .cp-label { font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.kosten .cp-val { font-size: 14px; font-weight: 600; font-family: var(--font-mono); font-feature-settings: "tnum"; color: var(--ink); }
+.kosten .ct-foot { display: flex; gap: 16px; border-top: 1px solid var(--line); margin-top: 1px; padding-top: 12px; }
+.kosten .empty-pad { padding: 48px 24px; text-align: center; color: var(--ink-3); font-size: 13px; background: var(--surface); border: 1px dashed var(--line-strong); border-radius: var(--r-lg); }
+
+@media (max-width: 1180px) {
+  .kosten .pf-grid, .kosten .pf-grid.umlage-grid { grid-template-columns: repeat(2, 1fr); }
+  .kosten .wd-split { grid-template-columns: 1fr; }
+  .kosten .wd-detail-wrap { position: static; }
+  .kosten .ct-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 720px) {
+  .kosten .pf-grid, .kosten .pf-grid.umlage-grid, .kosten .pf-grid.vertrag-grid { grid-template-columns: 1fr; }
+  .kosten .m-row-metrics { grid-template-columns: repeat(2, 1fr); }
+}
