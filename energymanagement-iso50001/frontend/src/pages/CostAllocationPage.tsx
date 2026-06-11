@@ -1,11 +1,15 @@
-import { useState, useCallback } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { RefreshCw, Euro, Zap, Building2 } from 'lucide-react';
+/**
+ * CostAllocationPage – Tab „Kostenumlage" von Kosten & Wirtschaft.
+ * Anteilige Energie-/Kostenverteilung auf Nutzungseinheiten (Zähler-Zuordnung).
+ * Redesign nach Claude-Design-Handoff (kosten.css, gescopt unter .kosten).
+ */
+
+import { useState, useCallback, useEffect } from 'react';
+import { RefreshCw, Wallet, Zap, Building2, Ruler, Info, Calendar } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import PageTabs, { COST_TABS } from '@/components/layout/PageTabs';
 import PageHead from '@/components/ui/PageHead';
-
-/* ── Typen ── */
+import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
 interface AllocationUnit {
   usage_unit_id: string;
@@ -30,23 +34,18 @@ interface AllocationData {
   data_available: boolean;
 }
 
-/* ── Farbenpalette ── */
-const CHART_COLORS = [
-  'var(--ink)', '#2E86AB', '#A23B72', '#F18F01', '#C73E1D',
-  '#3B1F2B', '#44BBA4', '#E94F37', '#393E41', '#84A98C',
-];
-
-/* ── Hilfsfunktionen ── */
-
-function fmt(value: number, digits = 1): string {
-  return value.toLocaleString('de-DE', { maximumFractionDigits: digits });
-}
-
-function fmtEur(value: number): string {
-  return value.toLocaleString('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 });
-}
-
-/* ── Hauptkomponente ── */
+const nf = (v: number, d = 0) => v.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+const eurShort = (v: number) => {
+  const a = Math.abs(v);
+  if (a >= 1e6) return nf(v / 1e6, 1) + ' Mio €';
+  if (a >= 1000) return nf(Math.round(v / 1000)) + 'k €';
+  return nf(Math.round(v)) + ' €';
+};
+const kwhShort = (v: number) => {
+  if (Math.abs(v) >= 1e6) return nf(v / 1e6, 2) + ' GWh';
+  if (Math.abs(v) >= 1000) return nf(Math.round(v / 1000)) + ' MWh';
+  return nf(Math.round(v)) + ' kWh';
+};
 
 export default function CostAllocationPage() {
   const currentYear = new Date().getFullYear();
@@ -55,16 +54,13 @@ export default function CostAllocationPage() {
   const [data, setData] = useState<AllocationData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<'cost' | 'kwh'>('cost');
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({ start_date: startDate, end_date: endDate });
-      const res = await apiClient.get<AllocationData>(
-        `/api/v1/analytics/cost-allocation?${params}`
-      );
+      const res = await apiClient.get<AllocationData>(`/api/v1/analytics/cost-allocation?${params}`);
       setData(res.data);
     } catch {
       setError('Kostenumlage konnte nicht geladen werden.');
@@ -73,235 +69,141 @@ export default function CostAllocationPage() {
     }
   }, [startDate, endDate]);
 
-  const chartData = data?.units.map((u, i) => ({
-    name: u.code ?? u.usage_unit_name.slice(0, 20),
-    fullName: u.usage_unit_name,
-    value: view === 'cost' ? u.cost_net : u.kwh,
-    color: CHART_COLORS[i % CHART_COLORS.length],
-  })) ?? [];
+  useEffect(() => { load(); }, [load]);
+
+  const units = data?.units ?? [];
+  const totalCost = data?.grand_total_cost_net ?? 0;
+  const totalKwh = data?.grand_total_kwh ?? 0;
+  const totalArea = units.reduce((s, u) => s + (u.area_m2 ?? 0), 0);
+  const avgCostPerM2 = totalArea > 0 ? totalCost / totalArea : null;
+  const sorted = [...units].sort((a, b) => b.cost_net - a.cost_net);
+  const maxShare = Math.max(...sorted.map((u) => (totalCost > 0 ? u.cost_net / totalCost : 0)), 0.01);
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="kosten">
       <PageTabs tabs={COST_TABS} />
       <PageHead eyebrow="Kosten & Wirtschaft" title="Kostenumlage" />
-      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
-        Anteilige Energie- und Kostenverteilung auf Nutzungseinheiten (basierend auf Zähler-Zuordnungen)
-      </p>
 
-      {/* Filter */}
-      <div className="card p-4 flex flex-wrap gap-4 items-end">
-        <div>
-          <label className="label">Von</label>
-          <input
-            type="date"
-            className="input w-40"
-            value={startDate}
-            onChange={e => setStartDate(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label">Bis</label>
-          <input
-            type="date"
-            className="input w-40"
-            value={endDate}
-            onChange={e => setEndDate(e.target.value)}
-          />
-        </div>
-        <button
-          className="btn-primary flex items-center gap-2"
-          onClick={load}
-          disabled={loading}
-        >
-          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-          Laden
-        </button>
-      </div>
+      <div className="tab-body" style={{ marginTop: 12 }}>
+        <p className="tab-sub" style={{ marginTop: 0 }}>
+          Anteilige Energie- und Kostenverteilung auf Nutzungseinheiten (basierend auf Zähler-Zuordnungen)
+        </p>
 
-      {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-red-700">{error}</div>
-      )}
-
-      {data && (
-        <>
-          {!data.data_available && (
-            <div className="card p-8 text-center text-gray-400">
-              <Building2 size={40} className="mx-auto mb-3 opacity-30" />
-              <p className="font-medium">Keine Zuordnungsdaten vorhanden</p>
-              <p className="text-sm mt-1">
-                Zähler müssen Nutzungseinheiten zugeordnet sein und Ablesungen mit Kostendaten enthalten.
-              </p>
+        {/* Zeitraum */}
+        <div className="period-bar">
+          <div className="pf-field">
+            <label>Von</label>
+            <div className="date-input"><Calendar size={13} color="var(--ink-3)" /><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={{ border: 'none', background: 'transparent', font: 'inherit', color: 'var(--ink)', outline: 'none' }} /></div>
+          </div>
+          <div className="pf-field">
+            <label>Bis</label>
+            <div className="date-input"><Calendar size={13} color="var(--ink-3)" /><input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={{ border: 'none', background: 'transparent', font: 'inherit', color: 'var(--ink)', outline: 'none' }} /></div>
+          </div>
+          <button className="btn-ghost" onClick={load} disabled={loading}><RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Laden</button>
+          {data && (
+            <div className="period-note">
+              <Info size={13} color="var(--ink-3)" />
+              Verteilung aus {units.length} Nutzungseinheiten mit Zähler-Zuordnung &amp; Kostendaten
             </div>
           )}
-
-          {data.data_available && (
-            <>
-              {/* KPI-Karten */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="card p-4">
-                  <div className="flex items-center gap-2 text-gray-500 text-sm mb-1">
-                    <Euro size={16} />
-                    Gesamtkosten (netto)
-                  </div>
-                  <p className="text-2xl font-bold text-[var(--ink)]">
-                    {fmtEur(data.grand_total_cost_net)}
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    {data.period_start} – {data.period_end}
-                  </p>
-                </div>
-                <div className="card p-4">
-                  <div className="flex items-center gap-2 text-gray-500 text-sm mb-1">
-                    <Zap size={16} />
-                    Gesamtverbrauch
-                  </div>
-                  <p className="text-2xl font-bold text-gray-800">
-                    {fmt(data.grand_total_kwh)} kWh
-                  </p>
-                </div>
-                <div className="card p-4">
-                  <div className="flex items-center gap-2 text-gray-500 text-sm mb-1">
-                    <Building2 size={16} />
-                    Nutzungseinheiten
-                  </div>
-                  <p className="text-2xl font-bold text-gray-800">{data.units.length}</p>
-                </div>
-              </div>
-
-              {/* Chart */}
-              <div className="card p-4">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-base font-semibold text-gray-900">
-                    Verteilung nach Nutzungseinheit
-                  </h2>
-                  <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
-                    <button
-                      className={`px-3 py-1 transition-colors ${
-                        view === 'cost'
-                          ? 'bg-[var(--ink)] text-white'
-                          : 'text-gray-600 hover:bg-gray-50'
-                      }`}
-                      onClick={() => setView('cost')}
-                    >
-                      Kosten €
-                    </button>
-                    <button
-                      className={`px-3 py-1 transition-colors ${
-                        view === 'kwh'
-                          ? 'bg-[var(--ink)] text-white'
-                          : 'text-gray-600 hover:bg-gray-50'
-                      }`}
-                      onClick={() => setView('kwh')}
-                    >
-                      Verbrauch kWh
-                    </button>
-                  </div>
-                </div>
-                <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={chartData} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
-                    <XAxis
-                      dataKey="name"
-                      tick={{ fontSize: 11 }}
-                      angle={-40}
-                      textAnchor="end"
-                      height={70}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11 }}
-                      tickFormatter={(v: number) =>
-                        view === 'cost'
-                          ? `${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v.toFixed(0)} €`
-                          : v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v.toFixed(0)
-                      }
-                    />
-                    <Tooltip
-                      formatter={(value: number) =>
-                        view === 'cost'
-                          ? [fmtEur(value), 'Kosten netto']
-                          : [`${fmt(value)} kWh`, 'Verbrauch']
-                      }
-                      labelFormatter={(label: string) => {
-                        const unit = chartData.find(d => d.name === label);
-                        return unit?.fullName ?? label;
-                      }}
-                    />
-                    <Bar dataKey="value" radius={[3, 3, 0, 0]}>
-                      {chartData.map((entry, index) => (
-                        <Cell key={index} fill={entry.color} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Tabelle */}
-              <div className="card overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-[var(--ink)] text-white">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-semibold">Nutzungseinheit</th>
-                      <th className="px-3 py-2 text-left font-semibold">Code</th>
-                      <th className="px-3 py-2 text-left font-semibold">Mieter</th>
-                      <th className="px-3 py-2 text-right font-semibold">Fläche m²</th>
-                      <th className="px-3 py-2 text-right font-semibold">Verbrauch kWh</th>
-                      <th className="px-3 py-2 text-right font-semibold">kWh/m²</th>
-                      <th className="px-3 py-2 text-right font-semibold">Kosten netto €</th>
-                      <th className="px-3 py-2 text-right font-semibold">€/m²</th>
-                      <th className="px-3 py-2 text-right font-semibold">Zähler</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.units.map((u, i) => (
-                      <tr key={u.usage_unit_id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                        <td className="px-3 py-2 font-medium text-gray-800">{u.usage_unit_name}</td>
-                        <td className="px-3 py-2 text-gray-500">{u.code ?? '–'}</td>
-                        <td className="px-3 py-2 text-gray-600">{u.tenant_name ?? '–'}</td>
-                        <td className="px-3 py-2 text-right text-gray-600">
-                          {u.area_m2 != null ? fmt(u.area_m2, 0) : '–'}
-                        </td>
-                        <td className="px-3 py-2 text-right font-medium">{fmt(u.kwh)}</td>
-                        <td className="px-3 py-2 text-right text-gray-600">
-                          {u.kwh_per_m2 != null ? fmt(u.kwh_per_m2) : '–'}
-                        </td>
-                        <td className="px-3 py-2 text-right font-semibold text-[var(--ink)]">
-                          {fmtEur(u.cost_net)}
-                        </td>
-                        <td className="px-3 py-2 text-right text-gray-600">
-                          {u.cost_per_m2 != null ? `${fmt(u.cost_per_m2)} €` : '–'}
-                        </td>
-                        <td className="px-3 py-2 text-right text-gray-400">{u.meter_count}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot className="bg-gray-100 font-semibold">
-                    <tr>
-                      <td className="px-3 py-2 text-gray-800" colSpan={4}>Gesamt</td>
-                      <td className="px-3 py-2 text-right">{fmt(data.grand_total_kwh)}</td>
-                      <td className="px-3 py-2 text-right">–</td>
-                      <td className="px-3 py-2 text-right text-[var(--ink)]">
-                        {fmtEur(data.grand_total_cost_net)}
-                      </td>
-                      <td className="px-3 py-2 text-right">–</td>
-                      <td />
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </>
-          )}
-        </>
-      )}
-
-      {!data && !loading && (
-        <div className="card p-12 text-center text-gray-400">
-          <Euro size={48} className="mx-auto mb-4 opacity-30" />
-          <p className="text-lg font-medium">Kostenumlage laden</p>
-          <p className="text-sm mt-1">
-            Zeitraum wählen und „Laden" klicken, um die Kostenverteilung anzuzeigen.
-          </p>
         </div>
-      )}
+
+        {error && (
+          <div style={{ background: 'color-mix(in srgb, var(--alert) 8%, var(--surface))', border: '1px solid color-mix(in srgb, var(--alert) 30%, var(--line))', borderRadius: 'var(--r-md)', padding: '12px 14px', color: 'var(--alert)', fontSize: 13 }}>{error}</div>
+        )}
+
+        {loading ? (
+          <div className="card" style={{ padding: 24 }}><LoadingSpinner /></div>
+        ) : !data || !data.data_available || units.length === 0 ? (
+          <div className="empty-pad">
+            <strong style={{ display: 'block', color: 'var(--ink)', marginBottom: 6 }}>Keine Zuordnungsdaten vorhanden</strong>
+            Zähler müssen Nutzungseinheiten zugeordnet sein und Ablesungen mit Kostendaten enthalten.
+          </div>
+        ) : (
+          <>
+            {/* Summen */}
+            <div className="pf-grid umlage-grid">
+              <PortfolioKpi Icon={Wallet} label="Umgelegte Kosten (netto)" value={eurShort(totalCost)} sub={`${data.period_start} – ${data.period_end}`} />
+              <PortfolioKpi Icon={Zap} label="Verteilte Energie" value={kwhShort(totalKwh)} sub="über alle Nutzungseinheiten" />
+              <PortfolioKpi Icon={Building2} label="Nutzungseinheiten" value={String(units.length)} sub={`${units.reduce((s, u) => s + u.meter_count, 0)} Zähler zugeordnet`} />
+              <PortfolioKpi Icon={Ruler} label="Ø Kosten je m²" value={avgCostPerM2 != null ? nf(avgCostPerM2, 2) + ' €' : '—'} sub={totalArea > 0 ? nf(totalArea, 0) + ' m² Gesamtfläche' : 'keine Flächendaten'} />
+            </div>
+
+            {/* Tabelle */}
+            <div className="umlage-table">
+              <div className="ut-row ut-head">
+                <div>Nutzungseinheit</div>
+                <div>Fläche / Zähler</div>
+                <div className="num">Verbrauch</div>
+                <div className="num">Anteil</div>
+                <div className="num">Kosten netto</div>
+              </div>
+              {sorted.map((u) => {
+                const share = totalCost > 0 ? u.cost_net / totalCost : 0;
+                return (
+                  <div className="ut-row" key={u.usage_unit_id}>
+                    <div className="ut-unit">
+                      <div style={{ minWidth: 0 }}>
+                        <div className="ut-uname">{u.usage_unit_name}</div>
+                        {(u.code || u.tenant_name) && (
+                          <div style={{ fontSize: 11, color: 'var(--ink-4)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {[u.code, u.tenant_name].filter(Boolean).join(' · ')}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                      {u.area_m2 != null ? `${nf(u.area_m2, 0)} m²` : '—'}
+                      {u.kwh_per_m2 != null && <span style={{ color: 'var(--ink-4)' }}> · {nf(u.kwh_per_m2)} kWh/m²</span>}
+                      <span style={{ color: 'var(--ink-4)' }}> · {u.meter_count} Z.</span>
+                    </div>
+                    <div className="num ut-kwh">{nf(u.kwh / 1000, 1)} <span className="u">MWh</span></div>
+                    <div className="num">
+                      <div className="share-wrap">
+                        <div className="share-track"><div className="share-fill" style={{ width: `${(share / maxShare) * 100}%` }} /></div>
+                        <span>{(share * 100).toLocaleString('de-DE', { maximumFractionDigits: 1 })} %</span>
+                      </div>
+                    </div>
+                    <div className="num ut-cost">{nf(u.cost_net, 0)} <span className="u">€</span></div>
+                  </div>
+                );
+              })}
+              <div className="ut-row ut-total">
+                <div>Gesamt</div>
+                <div>{totalArea > 0 ? `${nf(totalArea, 0)} m²` : ''}</div>
+                <div className="num">{nf(totalKwh / 1000, 1)} <span className="u">MWh</span></div>
+                <div className="num">100 %</div>
+                <div className="num">{nf(totalCost, 0)} <span className="u">€</span></div>
+              </div>
+            </div>
+
+            <div className="calc-basis">
+              <div className="cb-title">Berechnungsgrundlagen</div>
+              <ul>
+                <li><strong>Zuordnung:</strong> Verbrauch je Nutzungseinheit aus zugeordneten Zählern (Haupt-/Unterzähler-Hierarchie)</li>
+                <li><strong>Kosten:</strong> Netto-Kosten aus den Ablesungen mit hinterlegten Kostendaten im gewählten Zeitraum</li>
+                <li><strong>Anteil:</strong> Kosten der Nutzungseinheit ÷ Gesamtkosten des Zeitraums</li>
+              </ul>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PortfolioKpi({ Icon, label, value, unit, sub, tone }: { Icon: typeof Wallet; label: string; value: string; unit?: string; sub?: string; tone?: string }) {
+  return (
+    <div className="pf-kpi">
+      <div className="pf-kpi-top">
+        <span className="pf-ico"><Icon size={14} /></span>
+        <span className="pf-label">{label}</span>
+      </div>
+      <div className="pf-value-row">
+        <span className={'pf-value' + (tone ? ' ' + tone : '')}>{value}</span>
+        {unit && <span className="pf-unit">{unit}</span>}
+      </div>
+      {sub && <div className="pf-sub">{sub}</div>}
     </div>
   );
 }

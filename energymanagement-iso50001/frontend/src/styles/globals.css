@@ -4375,3 +4375,7 @@ nav.flex.gap-6 > button.pb-2:hover { color: var(--ink); }
   .kosten .pf-grid, .kosten .pf-grid.umlage-grid, .kosten .pf-grid.vertrag-grid { grid-template-columns: 1fr; }
   .kosten .m-row-metrics { grid-template-columns: repeat(2, 1fr); }
 }
+
+.kosten .link-btn { background: none; border: none; padding: 0; font-size: 12px; font-weight: 500; color: var(--info); cursor: pointer; }
+.kosten .link-btn:hover { text-decoration: underline; }
+.kosten .date-input input::-webkit-calendar-picker-indicator { opacity: 0.5; cursor: pointer; }
