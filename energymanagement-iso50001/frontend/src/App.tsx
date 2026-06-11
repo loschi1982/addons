@@ -12,7 +12,6 @@ import SitesPage from '@/pages/SitesPage';
 import MetersPage from '@/pages/MetersPage';
 import ReadingsPage from '@/pages/ReadingsPage';
 import ConsumersPage from '@/pages/ConsumersPage';
-import SchemasPage from '@/pages/SchemasPage';
 import EmissionsPage from '@/pages/EmissionsPage';
 import WeatherPage from '@/pages/WeatherPage';
 import ClimatePage from '@/pages/ClimatePage';
@@ -84,7 +83,8 @@ export default function App() {
         <Route path="readings" element={<ReadingsPage />} />
         <Route path="consumers" element={<ConsumersPage />} />
         <Route path="energy-review" element={<EnergyReviewPage />} />
-        <Route path="schemas/*" element={<SchemasPage />} />
+        <Route path="schemas" element={<Navigate to="/analytics?tab=schema" replace />} />
+        <Route path="schemas/*" element={<Navigate to="/analytics?tab=schema" replace />} />
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="emissions" element={<EmissionsPage />} />
         <Route path="weather" element={<WeatherPage />} />

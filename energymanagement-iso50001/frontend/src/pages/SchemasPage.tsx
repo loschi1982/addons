@@ -8,7 +8,6 @@ import {
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS } from '@/types';
 import InfoTip from '@/components/ui/InfoTip';
-import PageHead from '@/components/ui/PageHead';
 
 /* ── Typen ── */
 
@@ -193,7 +192,7 @@ function getRootConsumption(tree: TreeNode): number {
 
 /* ── Hauptkomponente ── */
 
-export default function SchemasPage() {
+export function EnergySchemaPanel() {
   const [roots, setRoots] = useState<SchemaRoot[]>([]);
   const [selectedTree, setSelectedTree] = useState<TreeNode | null>(null);
   const [selectedRoot, setSelectedRoot] = useState<SchemaRoot | null>(null);
@@ -270,21 +269,17 @@ export default function SchemasPage() {
 
   return (
     <div>
-      <PageHead
-        eyebrow="Stammdaten"
-        title="Energieschema"
-        actions={
-          !selectedTree ? (
-            <button onClick={() => setShowAddModal(true)} className="btn-primary flex items-center gap-1.5">
-              <Plus className="h-4 w-4" />
-              Betrachtungspunkt hinzufügen
-            </button>
-          ) : undefined
-        }
-      />
-      <p style={{ marginTop: -4, fontSize: 12, color: 'var(--ink-3)' }}>
-        Zählerstränge als Baumstruktur visualisieren – basierend auf der Zähler-Hierarchie.
-      </p>
+      <div className="flex items-center justify-between gap-4" style={{ marginBottom: 8 }}>
+        <p style={{ fontSize: 12, color: 'var(--ink-3)', margin: 0 }}>
+          Zählerstränge als Baumstruktur visualisieren – basierend auf der Zähler-Hierarchie.
+        </p>
+        {!selectedTree && (
+          <button onClick={() => setShowAddModal(true)} className="btn-primary flex items-center gap-1.5">
+            <Plus className="h-4 w-4" />
+            Betrachtungspunkt hinzufügen
+          </button>
+        )}
+      </div>
 
       {!selectedTree ? (
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

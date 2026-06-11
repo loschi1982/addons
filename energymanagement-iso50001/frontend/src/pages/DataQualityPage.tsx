@@ -131,7 +131,7 @@ function PlausibilityBanner({ warnings, onReload }: { warnings: PlausibilityWarn
                 <li key={i} className="text-sm text-orange-700">
                   {w.meter_id ? (
                     <button
-                      onClick={() => navigate(`/schemas?meter_id=${w.meter_id}`)}
+                      onClick={() => navigate(`/analytics?tab=schema&meter_id=${w.meter_id}`)}
                       className="font-medium hover:underline text-left"
                       title="Im Energieschema öffnen"
                     >

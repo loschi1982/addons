@@ -17,6 +17,7 @@ import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import PageHead from '@/components/ui/PageHead';
+import { EnergySchemaPanel } from '@/pages/SchemasPage';
 
 const MonthlyComparisonPage = lazy(() => import('./MonthlyComparisonPage'));
 const EnergyBalancePage = lazy(() => import('./EnergyBalancePage'));
@@ -152,6 +153,7 @@ const TAB_GROUPS: TabGroup[] = [
       { key: 'heatmap', label: 'Lastprofil' },
       { key: 'duration_curve', label: 'Dauerlinie' },
       { key: 'sankey', label: 'Energiefluss' },
+      { key: 'schema', label: 'Energieschema' },
       { key: 'self_consumption', label: 'Eigenverbrauch' },
       { key: 'weather', label: 'Witterungskorrektur' },
       { key: 'weather_regression', label: 'Wetter-Regression' },
@@ -338,6 +340,7 @@ export default function AnalyticsPage() {
             {tab === 'self_consumption' && <SelfConsumptionTab />}
             {tab === 'heatmap' && <HeatmapTab meters={filteredMeters} />}
             {tab === 'sankey' && <SankeyTab meters={filteredMeters} />}
+            {tab === 'schema' && <EnergySchemaPanel />}
             {tab === 'duration_curve' && <DurationCurveTab meters={filteredMeters} />}
             {tab === 'cumulative' && <CumulativeTab meters={filteredMeters} siteId={siteId} />}
             {tab === 'weather' && <WeatherCorrectionTab meters={filteredMeters} />}

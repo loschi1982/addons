@@ -20,7 +20,6 @@ import {
   Leaf,
   Settings,
   Globe,
-  Network,
   Euro,
   BookOpen,
   GraduationCap,
@@ -56,7 +55,6 @@ const navGroups: NavGroup[] = [
     items: [
       { path: '/sites', labelKey: 'nav.sites', icon: Building2 },
       { path: '/meters', labelKey: 'nav.meters', icon: Gauge },
-      { path: '/schemas', labelKey: 'nav.schema', icon: Network },
       { path: '/readings', labelKey: 'nav.readings', icon: ClipboardList },
       { path: '/outliers', labelKey: 'nav.outliers', icon: AlertTriangle },
       { path: '/consumers', labelKey: 'nav.consumers', icon: Zap },
