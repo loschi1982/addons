@@ -29,7 +29,10 @@ from app.models.snapshot import MeterConsumptionStat
 OUTLIER_SNAPSHOT_KEY = "outlier_snapshot_default"
 OUTLIER_DEFAULT_FACTOR = 10.0
 OUTLIER_DEFAULT_MIN_VALUE = 100.0
-OUTLIER_SNAPSHOT_LIMIT = 2000
+# Pro Energieart die Top-N (nach Faktor) ablegen, damit auch der Energieart-
+# Filter im Endpunkt vollständig ist. Der Endpunkt liefert max. 500 Zeilen.
+OUTLIER_PER_TYPE_LIMIT = 500
+OUTLIER_PER_METER_LIMIT = 500
 
 logger = structlog.get_logger()
 
@@ -78,39 +81,53 @@ class ReadingService:
         self,
         factor: float = OUTLIER_DEFAULT_FACTOR,
         min_value: float = OUTLIER_DEFAULT_MIN_VALUE,
-        limit: int = OUTLIER_SNAPSHOT_LIMIT,
     ) -> int:
         """Default-Ausreißerliste vorberechnen und in AppSetting ablegen.
 
         Findet die Ausreißer-Readings (consumption > max(median×Faktor, min_value))
-        über die vorberechnete Median-Tabelle und legt das Ergebnis als JSON ab.
-        Der /readings/outliers-Endpunkt liefert für die Default-Parameter dann
-        direkt aus diesem Snapshot (Sub-Sekunde), statt über alle Timescale-
-        Chunks zu scannen. Muss NACH recompute_consumption_stats laufen.
+        über die vorberechnete Median-Tabelle und legt je Energieart die Top-N
+        (nach Faktor) als JSON ab – so ist auch der Energieart-Filter im Endpunkt
+        vollständig. Der /readings/outliers-Endpunkt liefert für die Default-
+        Parameter dann direkt aus diesem Snapshot (Sub-Sekunde), statt über alle
+        Timescale-Chunks zu scannen. Muss NACH recompute_consumption_stats laufen.
         """
         rows = (await self.db.execute(text(
             """
-            SELECT mr.id, s.meter_id, m.name AS meter_name, m.energy_type,
-                   mr.timestamp, mr.value, mr.consumption, mr.quality,
-                   s.median_consumption AS median
-            FROM meter_consumption_stats s
-            JOIN meters m ON m.id = s.meter_id
-            JOIN LATERAL (
-                SELECT r.id, r.timestamp, r.value, r.consumption, r.quality
-                FROM meter_readings r
-                WHERE r.meter_id = s.meter_id
-                  AND r.quality <> 'outlier'
-                  AND r.consumption > GREATEST(s.median_consumption * :factor, :min_value)
-                ORDER BY r.consumption DESC
-                LIMIT :limit
-            ) mr ON true
-            WHERE s.median_consumption >= 1
-              AND m.is_active = true
-              AND m.is_feed_in IS NOT TRUE
-            ORDER BY (mr.consumption / s.median_consumption) DESC
-            LIMIT :limit
+            WITH ranked AS (
+                SELECT mr.id, s.meter_id, m.name AS meter_name, m.energy_type,
+                       mr.timestamp, mr.value, mr.consumption, mr.quality,
+                       s.median_consumption AS median,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY m.energy_type
+                           ORDER BY mr.consumption / s.median_consumption DESC
+                       ) AS rn
+                FROM meter_consumption_stats s
+                JOIN meters m ON m.id = s.meter_id
+                JOIN LATERAL (
+                    SELECT r.id, r.timestamp, r.value, r.consumption, r.quality
+                    FROM meter_readings r
+                    WHERE r.meter_id = s.meter_id
+                      AND r.quality <> 'outlier'
+                      AND r.consumption > GREATEST(s.median_consumption * :factor, :min_value)
+                    ORDER BY r.consumption DESC
+                    LIMIT :per_meter_limit
+                ) mr ON true
+                WHERE s.median_consumption >= 1
+                  AND m.is_active = true
+                  AND m.is_feed_in IS NOT TRUE
+            )
+            SELECT id, meter_id, meter_name, energy_type, timestamp, value,
+                   consumption, quality, median
+            FROM ranked
+            WHERE rn <= :per_type_limit
+            ORDER BY (consumption / median) DESC
             """
-        ), {"factor": factor, "min_value": min_value, "limit": limit})).all()
+        ), {
+            "factor": factor,
+            "min_value": min_value,
+            "per_meter_limit": OUTLIER_PER_METER_LIMIT,
+            "per_type_limit": OUTLIER_PER_TYPE_LIMIT,
+        })).all()
 
         items = []
         for r in rows:
