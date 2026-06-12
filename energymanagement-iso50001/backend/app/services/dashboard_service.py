@@ -48,7 +48,7 @@ def _auth_join(query, *, month_expr):
     ).table_valued(
         column("meter_id", PGUUID(as_uuid=True)),
         column("month", TIMESTAMP(timezone=True)),
-    )
+    ).render_derived(with_types=True)
     return query.join(
         auth,
         and_(auth.c.meter_id == Meter.id, auth.c.month == month_expr),
@@ -422,7 +422,7 @@ class DashboardService:
         prev_start = date(period_start.year - 1, period_start.month, period_start.day)
         prev_end = date(period_end.year - 1, period_end.month, period_end.day)
 
-        def _log_section_error(section: str, exc: Exception) -> None:
+        async def _log_section_error(section: str, exc: Exception) -> None:
             import traceback as _tb
             logger.error(f"dashboard_{section}_error", error=str(exc))
             try:
@@ -433,6 +433,12 @@ class DashboardService:
                 )
             except Exception:
                 pass
+            # Aborted-Transaction zurücksetzen, damit ein Section-Fehler nicht
+            # alle folgenden Sektionen mitreißt.
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
 
         try:
             kpi_cards = await _timed("kpi_cards", self._build_kpi_cards(
@@ -440,7 +446,7 @@ class DashboardService:
                 candidates, cur_mids, cur_months, virtual_meters, allocation_factors,
             ))
         except Exception as e:
-            _log_section_error("kpi", e)
+            await _log_section_error("kpi", e)
             kpi_cards = []
 
         try:
@@ -448,7 +454,7 @@ class DashboardService:
                 period_start, period_end, cur_mids, cur_months, virtual_meters, allocation_factors,
             ))
         except Exception as e:
-            _log_section_error("breakdown", e)
+            await _log_section_error("breakdown", e)
             breakdown = []
 
         try:
@@ -456,7 +462,7 @@ class DashboardService:
                 period_start, period_end, granularity, cur_mids, cur_months,
             ))
         except Exception as e:
-            _log_section_error("chart", e)
+            await _log_section_error("chart", e)
             chart = []
 
         try:
@@ -464,7 +470,7 @@ class DashboardService:
                 period_start, period_end, cur_mids, cur_months, virtual_meters, allocation_factors,
             ))
         except Exception as e:
-            _log_section_error("top_consumers", e)
+            await _log_section_error("top_consumers", e)
             top_consumers = []
 
         # Alerts und Plausibilitätswarnungen werden separat über
@@ -476,7 +482,7 @@ class DashboardService:
         try:
             enpi = await _timed("enpi", self._get_enpi_overview(period_start, period_end))
         except Exception as e:
-            logger.error("dashboard_enpi_error", error=str(e))
+            await _log_section_error("enpi", e)
             enpi = []
 
         logger.info(
