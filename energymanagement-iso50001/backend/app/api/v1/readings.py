@@ -190,18 +190,28 @@ async def detect_outliers(
     )).scalar()
 
     if has_stats:
+        # LATERAL erzwingt pro Zähler einen Index-Range-Scan auf
+        # (meter_id, consumption): es werden nur die wenigen Readings über dem
+        # Schwellwert gelesen, kein voller Tabellen-Scan. m wird zuerst gefiltert
+        # (aktiv, kein Einspeiser, optional energy_type), dann je Zähler gejoint.
         sql = """
-            SELECT mr.id, mr.meter_id, m.name AS meter_name, m.energy_type,
+            SELECT mr.id, s.meter_id, m.name AS meter_name, m.energy_type,
                    mr.timestamp, mr.value, mr.consumption, mr.quality,
                    s.median_consumption AS median
             FROM meter_consumption_stats s
             JOIN meters m ON m.id = s.meter_id
-            JOIN meter_readings mr ON mr.meter_id = s.meter_id
+            JOIN LATERAL (
+                SELECT r.id, r.timestamp, r.value, r.consumption, r.quality
+                FROM meter_readings r
+                WHERE r.meter_id = s.meter_id
+                  AND r.quality <> 'outlier'
+                  AND r.consumption > GREATEST(s.median_consumption * :factor, :min_value)
+                ORDER BY r.consumption DESC
+                LIMIT 500
+            ) mr ON true
             WHERE s.median_consumption >= 1
               AND m.is_active = true
               AND m.is_feed_in IS NOT TRUE
-              AND mr.quality <> 'outlier'
-              AND mr.consumption > GREATEST(s.median_consumption * :factor, :min_value)
               {energy_filter}
             ORDER BY (mr.consumption / s.median_consumption) DESC
             LIMIT 500
