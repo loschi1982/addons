@@ -11,7 +11,7 @@ from decimal import Decimal
 
 import structlog
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, bindparam, func, select, text
+from sqlalchemy import and_, bindparam, cast, column, func, select, text
 from sqlalchemy.dialects.postgresql import ARRAY, TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,9 +43,12 @@ def _auth_join(query, *, month_expr):
     Ablesung in einem Monat verdrängt seine Unterzähler dort nicht mehr.
     """
     auth = func.unnest(
-        bindparam("auth_mids", type_=ARRAY(PGUUID(as_uuid=True))),
-        bindparam("auth_months", type_=ARRAY(TIMESTAMP(timezone=True))),
-    ).table_valued("meter_id", "month")
+        cast(bindparam("auth_mids"), ARRAY(PGUUID(as_uuid=True))),
+        cast(bindparam("auth_months"), ARRAY(TIMESTAMP(timezone=True))),
+    ).table_valued(
+        column("meter_id", PGUUID(as_uuid=True)),
+        column("month", TIMESTAMP(timezone=True)),
+    )
     return query.join(
         auth,
         and_(auth.c.meter_id == Meter.id, auth.c.month == month_expr),
@@ -419,13 +422,25 @@ class DashboardService:
         prev_start = date(period_start.year - 1, period_start.month, period_start.day)
         prev_end = date(period_end.year - 1, period_end.month, period_end.day)
 
+        def _log_section_error(section: str, exc: Exception) -> None:
+            import traceback as _tb
+            logger.error(f"dashboard_{section}_error", error=str(exc))
+            try:
+                from app.core import log_buffer
+                log_buffer.write(
+                    level="ERROR", source=f"dashboard/{section}",
+                    message=str(exc), details={"traceback": _tb.format_exc()[-1800:]},
+                )
+            except Exception:
+                pass
+
         try:
             kpi_cards = await _timed("kpi_cards", self._build_kpi_cards(
                 period_start, period_end, prev_start, prev_end,
                 candidates, cur_mids, cur_months, virtual_meters, allocation_factors,
             ))
         except Exception as e:
-            logger.error("dashboard_kpi_error", error=str(e))
+            _log_section_error("kpi", e)
             kpi_cards = []
 
         try:
@@ -433,7 +448,7 @@ class DashboardService:
                 period_start, period_end, cur_mids, cur_months, virtual_meters, allocation_factors,
             ))
         except Exception as e:
-            logger.error("dashboard_breakdown_error", error=str(e))
+            _log_section_error("breakdown", e)
             breakdown = []
 
         try:
@@ -441,7 +456,7 @@ class DashboardService:
                 period_start, period_end, granularity, cur_mids, cur_months,
             ))
         except Exception as e:
-            logger.error("dashboard_chart_error", error=str(e))
+            _log_section_error("chart", e)
             chart = []
 
         try:
@@ -449,7 +464,7 @@ class DashboardService:
                 period_start, period_end, cur_mids, cur_months, virtual_meters, allocation_factors,
             ))
         except Exception as e:
-            logger.error("dashboard_top_consumers_error", error=str(e))
+            _log_section_error("top_consumers", e)
             top_consumers = []
 
         # Alerts und Plausibilitätswarnungen werden separat über
