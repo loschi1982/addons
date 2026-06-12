@@ -1683,19 +1683,30 @@ class AnalyticsService:
             "steam": "#EF4444", "other": "#9CA3AF",
         }
 
-        # Zähler-Mengen je Jahr auflösen — maßgebliche Zähler je Strang (keine
-        # Eltern+Kind-Doppelzählung); explizite Auswahl hat Vorrang.
+        # Zähler-Mengen je Jahr auflösen. Bei Auto-Auflösung: Kandidaten (nicht
+        # reduziert) + je-MONAT maßgebliche (Zähler, Monat)-Paare, damit ein
+        # Hauptzähler mit Teil-Daten seine Unterzähler nur in eigenen Monaten
+        # verdrängt. Explizite Auswahl hat Vorrang (keine Reduktion).
+        from app.services.meter_hierarchy import resolve_authoritative_pairs_by_month
         user_meter_ids = list(meter_ids) if meter_ids else None
 
-        async def _ids_for_year(year: int) -> list[uuid.UUID]:
+        async def _candidates_and_pairs(year: int):
             if user_meter_ids is not None:
-                return user_meter_ids
-            return await self._resolve_total_meter_ids(
-                date(year, 1, 1), date(year, 12, 31), site_id=site_id,
+                return user_meter_ids, None
+            ys, ye = date(year, 1, 1), date(year, 12, 31)
+            pairs = await resolve_authoritative_pairs_by_month(self.db, ys, ye, site_id=site_id)
+            cand_q = select(Meter.id).where(
+                Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,
+                Meter.is_virtual == False,  # noqa: E712
             )
+            if site_id is not None:
+                cand_q = cand_q.where(Meter.site_id == site_id)
+            cand = [r[0] for r in (await self.db.execute(cand_q)).all()]
+            return cand, pairs
 
-        ids_a = await _ids_for_year(year_a)
-        ids_b = await _ids_for_year(year_b)
+        ids_a, pairs_a = await _candidates_and_pairs(year_a)
+        ids_b, pairs_b = await _candidates_and_pairs(year_b)
         label_ids = list({*ids_a, *ids_b})
         if not label_ids:
             return {"year_a": year_a, "year_b": year_b, "energy_types": [], "months": [], "rows": []}
@@ -1713,8 +1724,9 @@ class AnalyticsService:
             if m.energy_type not in et_set:
                 et_set[m.energy_type] = m.unit or "kWh"
 
-        async def _monthly_by_et(year: int, ids: list[uuid.UUID]) -> dict[str, dict[int, float]]:
-            """Ergibt {energy_type: {month: native_consumption}}"""
+        async def _monthly_by_et(year: int, ids: list[uuid.UUID], pairs) -> dict[str, dict[int, float]]:
+            """Ergibt {energy_type: {month: native_consumption}} – je Monat
+            gefiltert auf die maßgeblichen (Zähler, Monat)-Paare."""
             if not ids:
                 return {et: {} for et in et_set}
             year_start = datetime(year, 1, 1, tzinfo=timezone.utc)
@@ -1722,6 +1734,7 @@ class AnalyticsService:
 
             rows = (await self.db.execute(
                 select(
+                    Meter.id,
                     Meter.energy_type,
                     func.extract("month", MeterReading.timestamp).label("month_num"),
                     func.sum(MeterReading.consumption).label("total"),
@@ -1733,18 +1746,21 @@ class AnalyticsService:
                     MeterReading.timestamp >= year_start,
                     MeterReading.timestamp < year_end,
                 )
-                .group_by(Meter.energy_type, text("month_num"))
+                .group_by(Meter.id, Meter.energy_type, text("month_num"))
             )).all()
 
             result: dict[str, dict[int, float]] = {et: {} for et in et_set}
             for row in rows:
+                mo = int(row.month_num)
+                if pairs is not None and (row.id, (year, mo)) not in pairs:
+                    continue
                 et = row.energy_type
                 if et in result:
-                    result[et][int(row.month_num)] = float(row.total or 0)
+                    result[et][mo] = result[et].get(mo, 0.0) + float(row.total or 0)
             return result
 
-        data_a = await _monthly_by_et(year_a, ids_a)
-        data_b = await _monthly_by_et(year_b, ids_b)
+        data_a = await _monthly_by_et(year_a, ids_a, pairs_a)
+        data_b = await _monthly_by_et(year_b, ids_b, pairs_b)
 
         months_meta = [{"month": m, "label": MONTH_LABELS[m - 1]} for m in range(1, 13)]
 
@@ -1831,12 +1847,24 @@ class AnalyticsService:
             "steam": "#EF4444", "other": "#9CA3AF",
         }
 
-        # Zähler laden — maßgebliche Zähler je Strang (keine Eltern+Kind-
-        # Doppelzählung); explizite Auswahl hat Vorrang.
+        # Zähler laden. Bei Auto-Auflösung: Kandidaten (nicht reduziert) + je-MONAT
+        # maßgebliche (Zähler, Monat)-Paare, damit ein Hauptzähler mit Teil-Daten
+        # seine Unterzähler nur in eigenen Monaten verdrängt. Explizite Auswahl
+        # hat Vorrang (keine Reduktion).
+        from app.services.meter_hierarchy import resolve_authoritative_pairs_by_month
+        month_pairs = None
         if not meter_ids:
-            meter_ids = await self._resolve_total_meter_ids(
-                start_date, end_date, site_id=site_id,
+            month_pairs = await resolve_authoritative_pairs_by_month(
+                self.db, start_date, end_date, site_id=site_id,
             )
+            cand_q = select(Meter.id).where(
+                Meter.is_active == True,  # noqa: E712
+                Meter.is_feed_in != True,
+                Meter.is_virtual == False,  # noqa: E712
+            )
+            if site_id is not None:
+                cand_q = cand_q.where(Meter.site_id == site_id)
+            meter_ids = [r[0] for r in (await self.db.execute(cand_q)).all()]
         meter_query = select(Meter).where(Meter.is_active == True)  # noqa: E712
         if meter_ids:
             meter_query = meter_query.where(Meter.id.in_(meter_ids))
@@ -1885,6 +1913,7 @@ class AnalyticsService:
 
         agg_rows = (await self.db.execute(
             select(
+                Meter.id,
                 Meter.energy_type,
                 func.extract("year", MeterReading.timestamp).label("yr"),
                 func.extract("month", MeterReading.timestamp).label("mo"),
@@ -1898,14 +1927,23 @@ class AnalyticsService:
                 MeterReading.timestamp >= period_start_ts,
                 MeterReading.timestamp < period_end_ts,
             )
-            .group_by(Meter.energy_type, text("yr"), text("mo"))
+            .group_by(Meter.id, Meter.energy_type, text("yr"), text("mo"))
         )).all()
 
-        # In Lookup umwandeln: (energy_type, year, month) → (consumption, cost)
+        # In Lookup umwandeln: (energy_type, year, month) → (consumption, cost) –
+        # je Monat auf die maßgeblichen (Zähler, Monat)-Paare gefiltert.
         agg_lookup: dict[tuple, tuple[Decimal, Decimal]] = {}
         for agg_row in agg_rows:
-            key = (agg_row.energy_type, int(agg_row.yr), int(agg_row.mo))
-            agg_lookup[key] = (agg_row.consumption or Decimal("0"), agg_row.cost_net or Decimal("0"))
+            yr = int(agg_row.yr)
+            mo = int(agg_row.mo)
+            if month_pairs is not None and (agg_row.id, (yr, mo)) not in month_pairs:
+                continue
+            key = (agg_row.energy_type, yr, mo)
+            cur = agg_lookup.get(key, (Decimal("0"), Decimal("0")))
+            agg_lookup[key] = (
+                cur[0] + (agg_row.consumption or Decimal("0")),
+                cur[1] + (agg_row.cost_net or Decimal("0")),
+            )
 
         for year, month_num in months:
             values: dict[str, dict] = {}
