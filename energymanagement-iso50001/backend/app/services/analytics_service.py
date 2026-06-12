@@ -1723,30 +1723,31 @@ class AnalyticsService:
 
     # ── Monatlicher Jahresvergleich (CAFM-Anforderung) ──
 
+    @cached("analytics_monthly_comparison", ttl=300)
     async def get_monthly_comparison(
         self,
-        year_a: int,
-        year_b: int,
+        years: list[int],
         energy_types: list[str] | None = None,
         meter_ids: list[uuid.UUID] | None = None,
         site_id: uuid.UUID | None = None,
     ) -> dict:
         """
-        Monatlicher Verbrauchsvergleich zweier Jahre, aufgeschlüsselt nach Energieträgern.
+        Monatlicher Verbrauchsvergleich BELIEBIG VIELER Jahre, aufgeschlüsselt
+        nach Energieträgern. Δ% wird im Frontend (gegen Vorjahr/Basisjahr) berechnet.
 
         Rückgabe:
           {
-            "year_a": 2024, "year_b": 2025,
-            "energy_types": [{"key": "electricity", "label": "Strom", "unit": "kWh", "color": "#F59E0B"}],
+            "years": [2023, 2024, 2025],
+            "energy_types": [{"key","label","unit","color"}],
             "months": [{"month": 1, "label": "Jan"}, ...],
-            "rows": [{
-              "month": 1, "label": "Jan",
-              "values": {
-                "electricity": {"year_a": 1234.5, "year_b": 1100.0, "delta_pct": -10.9, "unit": "kWh"}
-              }
-            }]
+            "rows": [{ "month": 1, "label": "Jan",
+              "values": { "electricity": { "by_year": {"2023": v, "2024": v, ...}, "unit": "kWh" } } }]
           }
         """
+        years = sorted({int(y) for y in years})[:8]
+        if not years:
+            return {"years": [], "energy_types": [], "months": [], "rows": []}
+
         ET_LABELS: dict[str, str] = {
             "electricity": "Strom", "natural_gas": "Erdgas", "heating_oil": "Heizöl",
             "district_heating": "Fernwärme", "district_cooling": "Kälte",
@@ -1762,18 +1763,14 @@ class AnalyticsService:
             "steam": "#EF4444", "other": "#9CA3AF",
         }
 
-        # Zähler-Mengen je Jahr auflösen. Bei Auto-Auflösung: Kandidaten (nicht
-        # reduziert) + je-MONAT maßgebliche (Zähler, Monat)-Paare, damit ein
-        # Hauptzähler mit Teil-Daten seine Unterzähler nur in eigenen Monaten
-        # verdrängt. Explizite Auswahl hat Vorrang (keine Reduktion).
         from app.services.meter_hierarchy import resolve_authoritative_pairs_by_month
         user_meter_ids = list(meter_ids) if meter_ids else None
 
-        async def _candidates_and_pairs(year: int):
-            if user_meter_ids is not None:
-                return user_meter_ids, None
-            ys, ye = date(year, 1, 1), date(year, 12, 31)
-            pairs = await resolve_authoritative_pairs_by_month(self.db, ys, ye, site_id=site_id)
+        # Kandidaten sind periodenunabhängig (Filter hängen nicht vom Jahr ab) →
+        # einmal laden. Die maßgeblichen (Zähler, Monat)-Paare hingegen je Jahr.
+        if user_meter_ids is not None:
+            candidate_ids = user_meter_ids
+        else:
             cand_q = select(Meter.id).where(
                 Meter.is_active == True,  # noqa: E712
                 Meter.is_feed_in != True,
@@ -1781,22 +1778,27 @@ class AnalyticsService:
             )
             if site_id is not None:
                 cand_q = cand_q.where(Meter.site_id == site_id)
-            cand = [r[0] for r in (await self.db.execute(cand_q)).all()]
-            return cand, pairs
+            candidate_ids = [r[0] for r in (await self.db.execute(cand_q)).all()]
 
-        ids_a, pairs_a = await _candidates_and_pairs(year_a)
-        ids_b, pairs_b = await _candidates_and_pairs(year_b)
-        label_ids = list({*ids_a, *ids_b})
-        if not label_ids:
-            return {"year_a": year_a, "year_b": year_b, "energy_types": [], "months": [], "rows": []}
+        if not candidate_ids:
+            return {"years": years, "energy_types": [], "months": [], "rows": []}
+
+        pairs_by_year: dict[int, object] = {}
+        for y in years:
+            if user_meter_ids is not None:
+                pairs_by_year[y] = None
+            else:
+                pairs_by_year[y] = await resolve_authoritative_pairs_by_month(
+                    self.db, date(y, 1, 1), date(y, 12, 31), site_id=site_id,
+                )
 
         # Energiearten/Einheiten für Labels bestimmen
-        meter_query = select(Meter).where(Meter.id.in_(label_ids))
+        meter_query = select(Meter).where(Meter.id.in_(candidate_ids))
         if energy_types:
             meter_query = meter_query.where(Meter.energy_type.in_(energy_types))
         meters = list((await self.db.execute(meter_query)).scalars().all())
         if not meters:
-            return {"year_a": year_a, "year_b": year_b, "energy_types": [], "months": [], "rows": []}
+            return {"years": years, "energy_types": [], "months": [], "rows": []}
 
         et_set: dict[str, str] = {}  # energy_type → primary_unit
         for m in meters:
@@ -1808,7 +1810,6 @@ class AnalyticsService:
             gefiltert auf die maßgeblichen (Zähler, Monat)-Paare."""
             if not ids:
                 return {et: {} for et in et_set}
-            # Aus der Vorberechnung (Fallback live) – kein Readings-Scan.
             rows = await self._monthly_rows(date(year, 1, 1), date(year, 12, 31), ids)
             result: dict[str, dict[int, float]] = {et: {} for et in et_set}
             for (mid, et, _unit, _yr, mo, cons, _cost) in rows:
@@ -1818,8 +1819,9 @@ class AnalyticsService:
                     result[et][mo] = result[et].get(mo, 0.0) + float(cons or 0)
             return result
 
-        data_a = await _monthly_by_et(year_a, ids_a, pairs_a)
-        data_b = await _monthly_by_et(year_b, ids_b, pairs_b)
+        data_by_year: dict[int, dict] = {}
+        for y in years:
+            data_by_year[y] = await _monthly_by_et(y, candidate_ids, pairs_by_year[y])
 
         months_meta = [{"month": m, "label": MONTH_LABELS[m - 1]} for m in range(1, 13)]
 
@@ -1827,17 +1829,11 @@ class AnalyticsService:
         for month_num in range(1, 13):
             values: dict[str, dict] = {}
             for et, unit in et_set.items():
-                val_a = data_a[et].get(month_num, 0)
-                val_b = data_b[et].get(month_num, 0)
-                delta_pct = None
-                if val_a > 0:
-                    delta_pct = round((val_b - val_a) / val_a * 100, 1)
-                values[et] = {
-                    "year_a": round(val_a, 2),
-                    "year_b": round(val_b, 2),
-                    "delta_pct": delta_pct,
-                    "unit": unit,
+                by_year = {
+                    str(y): round(data_by_year[y][et].get(month_num, 0), 2)
+                    for y in years
                 }
+                values[et] = {"by_year": by_year, "unit": unit}
             rows.append({
                 "month": month_num,
                 "label": MONTH_LABELS[month_num - 1],
@@ -1855,8 +1851,7 @@ class AnalyticsService:
         ]
 
         return {
-            "year_a": year_a,
-            "year_b": year_b,
+            "years": years,
             "energy_types": et_meta,
             "months": months_meta,
             "rows": rows,

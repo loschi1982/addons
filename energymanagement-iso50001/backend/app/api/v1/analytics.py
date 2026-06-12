@@ -8,7 +8,7 @@ Verteilungen, Anomalien und CO₂-Reduktionspfade bereit.
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -213,8 +213,11 @@ async def get_cumulative(
 
 @router.get("/monthly-comparison")
 async def get_monthly_comparison(
-    year_a: int = Query(..., description="Basisjahr (z.B. 2024)"),
-    year_b: int = Query(..., description="Vergleichsjahr (z.B. 2025)"),
+    years: str | None = Query(None, description="Kommagetrennte Jahre, z.B. 2022,2023,2024"),
+    from_year: int | None = Query(None, description="Bereichsanfang (inkl.)"),
+    to_year: int | None = Query(None, description="Bereichsende (inkl.)"),
+    year_a: int | None = Query(None, description="Alt: Basisjahr (abwärtskompatibel)"),
+    year_b: int | None = Query(None, description="Alt: Vergleichsjahr (abwärtskompatibel)"),
     energy_types: str | None = Query(None, description="Kommagetrennte Energiearten (electricity,natural_gas,…)"),
     meter_ids: str | None = Query(None, description="Kommagetrennte Zähler-IDs"),
     site_id: uuid.UUID | None = Query(None, description="Standort-ID"),
@@ -222,15 +225,27 @@ async def get_monthly_comparison(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Monatlicher Vergleich zweier Jahre nach Energieträger.
+    Monatlicher Vergleich mehrerer Jahre nach Energieträger.
 
-    Gibt für jeden Monat (1–12) und jeden Energieträger die nativen Verbräuche
-    beider Jahre sowie die prozentuale Abweichung zurück.
+    Jahresauswahl (Priorität): `years` (Einzeljahre) → `from_year`/`to_year`
+    (Bereich) → `year_a`/`year_b` (alt, zwei Jahre). Pro Monat (1–12) und
+    Energieträger die nativen Verbräuche je Jahr (Δ% berechnet das Frontend).
     """
+    year_list: list[int] = []
+    if years:
+        year_list = [int(y.strip()) for y in years.split(",") if y.strip()]
+    elif from_year is not None and to_year is not None:
+        lo, hi = sorted((from_year, to_year))
+        year_list = list(range(lo, hi + 1))
+    elif year_a is not None and year_b is not None:
+        year_list = [year_a, year_b]
+    if not year_list:
+        raise HTTPException(status_code=400, detail="Bitte Jahre angeben (years, from_year/to_year oder year_a/year_b).")
+
     service = AnalyticsService(db)
     ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")] if meter_ids else None
     et_filter = [e.strip() for e in energy_types.split(",")] if energy_types else None
-    return await service.get_monthly_comparison(year_a, year_b, et_filter, ids, site_id=site_id)
+    return await service.get_monthly_comparison(year_list, et_filter, ids, site_id=site_id)
 
 
 @router.get("/energy-balance")
