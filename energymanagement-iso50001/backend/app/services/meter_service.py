@@ -10,7 +10,9 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import structlog
-from sqlalchemy import func, or_, select
+from sqlalchemy import bindparam, func, or_, select, text
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -82,21 +84,28 @@ class MeterService:
         result = await self.db.execute(query)
         meters = result.scalars().all()
 
-        # Letzten Messwert pro Zähler laden
+        # Letzten Messwert pro Zähler laden – per LATERAL über den Unique-Index
+        # (meter_id, timestamp). DISTINCT ON über die gesamte meter_readings-
+        # Hypertable würde sonst alle Chunks scannen (ohne Zeit-Filter) und je
+        # nach Datenmenge zig Sekunden dauern. Der LATERAL macht je Zähler einen
+        # Index-Scan ORDER BY timestamp DESC LIMIT 1.
         meter_ids = [m.id for m in meters]
         latest_by_meter: dict[uuid.UUID, tuple[Decimal, datetime]] = {}
         if meter_ids:
-            latest_query = (
-                select(
-                    MeterReading.meter_id,
-                    MeterReading.value,
-                    MeterReading.timestamp,
-                )
-                .where(MeterReading.meter_id.in_(meter_ids))
-                .distinct(MeterReading.meter_id)
-                .order_by(MeterReading.meter_id, MeterReading.timestamp.desc())
-            )
-            latest_result = await self.db.execute(latest_query)
+            latest_stmt = text(
+                """
+                SELECT t.meter_id, lr.value, lr.timestamp
+                FROM unnest(:ids) AS t(meter_id)
+                JOIN LATERAL (
+                    SELECT value, timestamp
+                    FROM meter_readings r
+                    WHERE r.meter_id = t.meter_id
+                    ORDER BY r.timestamp DESC
+                    LIMIT 1
+                ) lr ON true
+                """
+            ).bindparams(bindparam("ids", type_=ARRAY(PGUUID(as_uuid=True))))
+            latest_result = await self.db.execute(latest_stmt, {"ids": meter_ids})
             for row in latest_result.all():
                 latest_by_meter[row.meter_id] = (row.value, row.timestamp)
 
