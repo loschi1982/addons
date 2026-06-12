@@ -6,12 +6,15 @@ Zeitreihenvergleiche und Anomalie-Erkennung bereit.
 """
 
 import uuid
+from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import structlog
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, case, extract, func, select, text
+from sqlalchemy import and_, bindparam, case, extract, func, select, text
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -22,7 +25,7 @@ from app.models.emission import CO2Calculation, EmissionFactor
 from app.models.meter import Meter
 from app.models.reading import MeterReading
 from app.models.site import Building, Site, UsageUnit
-from app.models.snapshot import AnalyticsSnapshot
+from app.models.snapshot import AnalyticsSnapshot, MeterMonthlyConsumption
 from app.services.snapshot_periods import resolve_period
 
 logger = structlog.get_logger()
@@ -348,6 +351,79 @@ class AnalyticsService:
         if energy_type is not None:
             q = q.where(Meter.energy_type == energy_type)
         return [row[0] for row in (await self.db.execute(q)).all()]
+
+    async def _monthly_rows(
+        self,
+        period_start: date,
+        period_end: date,
+        meter_id_list: list[uuid.UUID],
+    ) -> list[tuple]:
+        """Monatswerte je (Zähler, Energieart, Jahr, Monat) für Monatsvergleich/
+        Energiebilanz.
+
+        Liest aus der Vorberechnung meter_monthly_consumption (schnell); fällt auf
+        eine Live-Aggregation über meter_readings zurück, solange die Vorberechnung
+        leer ist. Rückgabe: (meter_id, energy_type, unit, year, month,
+        consumption_native, cost_net).
+        """
+        if not meter_id_list:
+            return []
+        has_pc = (await self.db.execute(
+            select(MeterMonthlyConsumption.id).limit(1)
+        )).first() is not None
+        if has_pc:
+            start_key = period_start.year * 12 + period_start.month
+            end_key = period_end.year * 12 + period_end.month
+            ym = MeterMonthlyConsumption.year * 12 + MeterMonthlyConsumption.month
+            rows = (await self.db.execute(
+                select(
+                    MeterMonthlyConsumption.meter_id,
+                    MeterMonthlyConsumption.energy_type,
+                    MeterMonthlyConsumption.unit,
+                    MeterMonthlyConsumption.year,
+                    MeterMonthlyConsumption.month,
+                    MeterMonthlyConsumption.consumption_native,
+                    MeterMonthlyConsumption.cost_net,
+                ).where(
+                    MeterMonthlyConsumption.meter_id.in_(meter_id_list),
+                    ym >= start_key,
+                    ym <= end_key,
+                )
+            )).all()
+            return [
+                (r.meter_id, r.energy_type, r.unit, int(r.year), int(r.month),
+                 r.consumption_native or Decimal("0"), r.cost_net)
+                for r in rows
+            ]
+        # Fallback: live über meter_readings
+        ts_start = datetime(period_start.year, period_start.month, 1, tzinfo=timezone.utc)
+        end_y = period_end.year + (1 if period_end.month == 12 else 0)
+        end_m = (period_end.month % 12) + 1
+        ts_end = datetime(end_y, end_m, 1, tzinfo=timezone.utc)
+        rows = (await self.db.execute(
+            select(
+                Meter.id,
+                Meter.energy_type,
+                Meter.unit,
+                func.extract("year", MeterReading.timestamp).label("yr"),
+                func.extract("month", MeterReading.timestamp).label("mo"),
+                func.sum(MeterReading.consumption).label("cons"),
+                func.sum(MeterReading.cost_net).label("cost"),
+            )
+            .join(MeterReading, MeterReading.meter_id == Meter.id)
+            .where(
+                Meter.id.in_(meter_id_list),
+                MeterReading.consumption.isnot(None),
+                MeterReading.timestamp >= ts_start,
+                MeterReading.timestamp < ts_end,
+            )
+            .group_by(Meter.id, Meter.energy_type, Meter.unit, text("yr"), text("mo"))
+        )).all()
+        return [
+            (r.id, r.energy_type, r.unit, int(r.yr), int(r.mo),
+             r.cons or Decimal("0"), r.cost)
+            for r in rows
+        ]
 
     async def _get_difference_series(
         self,
@@ -1322,54 +1398,57 @@ class AnalyticsService:
         """
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
-        meters_result = await self.db.execute(
-            select(Meter).where(
-                Meter.is_active == True,  # noqa: E712
-                Meter.is_feed_in != True,  # Einspeisezähler ausschließen
+        meters_by_id = {
+            m.id: m for m in (await self.db.execute(
+                select(Meter).where(
+                    Meter.is_active == True,  # noqa: E712
+                    Meter.is_feed_in != True,  # Einspeisezähler ausschließen
+                )
+            )).scalars().all()
+        }
+        if not meters_by_id:
+            return []
+
+        # EINE Query mit PARTITION BY meter_id statt einer LAG-Query je Zähler.
+        # Der CTE läuft über ALLE Zeilen (auch value=0 Fehlauslesungen), damit
+        # prev_value1/prev_value2 korrekt sind; erst das äußere WHERE schließt
+        # Null-Ablesungen als Artefakte aus.
+        sql = text("""
+            WITH all_readings AS (
+                SELECT
+                    meter_id, id, timestamp, value, consumption,
+                    LAG(value, 1) OVER (PARTITION BY meter_id ORDER BY timestamp) AS prev_value1,
+                    LAG(value, 2) OVER (PARTITION BY meter_id ORDER BY timestamp) AS prev_value2,
+                    EXTRACT(EPOCH FROM (
+                        timestamp - LAG(timestamp) OVER (PARTITION BY meter_id ORDER BY timestamp)
+                    )) / 3600.0 AS gap_hours
+                FROM meter_readings
+                WHERE meter_id = ANY(:meter_ids)
+                  AND timestamp >= :cutoff
             )
-        )
-        meters = list(meters_result.scalars().all())
+            SELECT meter_id, id, timestamp, consumption, gap_hours
+            FROM all_readings
+            WHERE consumption IS NOT NULL
+              AND consumption > 0
+              AND gap_hours IS NOT NULL
+              AND gap_hours > 0
+              AND COALESCE(prev_value1, 1) > 0
+              AND COALESCE(prev_value2, 1) > 0
+              AND (prev_value2 IS NULL OR prev_value2 = 0
+                   OR prev_value1 / prev_value2 BETWEEN 0.01 AND 100)
+            ORDER BY meter_id, timestamp
+        """).bindparams(bindparam("meter_ids", type_=ARRAY(PGUUID(as_uuid=True))))
+        all_rows = (await self.db.execute(
+            sql, {"meter_ids": list(meters_by_id.keys()), "cutoff": cutoff}
+        )).fetchall()
+
+        by_meter: dict[uuid.UUID, list] = defaultdict(list)
+        for r in all_rows:
+            by_meter[r.meter_id].append(r)
 
         anomalies = []
-        for meter in meters:
-            # LAG-Query: Zeitabstand + Vorgängerwerte berechnen.
-            # Wichtig: CTE läuft über ALLE Zeilen (auch value=0 Fehlauslesungen),
-            # damit prev_value1/prev_value2 korrekt gefüllt sind.
-            # Erst im äußeren WHERE werden Null-Ablesungen als Artefakte ausgeschlossen.
-            sql = text("""
-                WITH all_readings AS (
-                    SELECT
-                        id,
-                        timestamp,
-                        value,
-                        consumption,
-                        LAG(value, 1) OVER (ORDER BY timestamp) AS prev_value1,
-                        LAG(value, 2) OVER (ORDER BY timestamp) AS prev_value2,
-                        EXTRACT(EPOCH FROM (
-                            timestamp - LAG(timestamp) OVER (ORDER BY timestamp)
-                        )) / 3600.0 AS gap_hours
-                    FROM meter_readings
-                    WHERE meter_id = :meter_id
-                      AND timestamp >= :cutoff
-                )
-                SELECT id, timestamp, consumption, gap_hours
-                FROM all_readings
-                WHERE consumption IS NOT NULL
-                  AND consumption > 0
-                  AND gap_hours IS NOT NULL
-                  AND gap_hours > 0
-                  AND COALESCE(prev_value1, 1) > 0
-                  AND COALESCE(prev_value2, 1) > 0
-                  -- Dezimalfehler im Vorgänger: Ratio pv1/pv2 außerhalb [0.01, 100] → ausschließen
-                  AND (prev_value2 IS NULL OR prev_value2 = 0
-                       OR prev_value1 / prev_value2 BETWEEN 0.01 AND 100)
-                ORDER BY timestamp
-            """)
-            result = await self.db.execute(
-                sql, {"meter_id": str(meter.id), "cutoff": cutoff}
-            )
-            rows = result.fetchall()
-
+        for mid, rows in by_meter.items():
+            meter = meters_by_id[mid]
             if len(rows) < 5:
                 continue
 
@@ -1729,34 +1808,14 @@ class AnalyticsService:
             gefiltert auf die maßgeblichen (Zähler, Monat)-Paare."""
             if not ids:
                 return {et: {} for et in et_set}
-            year_start = datetime(year, 1, 1, tzinfo=timezone.utc)
-            year_end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
-
-            rows = (await self.db.execute(
-                select(
-                    Meter.id,
-                    Meter.energy_type,
-                    func.extract("month", MeterReading.timestamp).label("month_num"),
-                    func.sum(MeterReading.consumption).label("total"),
-                )
-                .join(MeterReading, MeterReading.meter_id == Meter.id)
-                .where(
-                    Meter.id.in_(ids),
-                    MeterReading.consumption.isnot(None),
-                    MeterReading.timestamp >= year_start,
-                    MeterReading.timestamp < year_end,
-                )
-                .group_by(Meter.id, Meter.energy_type, text("month_num"))
-            )).all()
-
+            # Aus der Vorberechnung (Fallback live) – kein Readings-Scan.
+            rows = await self._monthly_rows(date(year, 1, 1), date(year, 12, 31), ids)
             result: dict[str, dict[int, float]] = {et: {} for et in et_set}
-            for row in rows:
-                mo = int(row.month_num)
-                if pairs is not None and (row.id, (year, mo)) not in pairs:
+            for (mid, et, _unit, _yr, mo, cons, _cost) in rows:
+                if pairs is not None and (mid, (year, mo)) not in pairs:
                     continue
-                et = row.energy_type
                 if et in result:
-                    result[et][mo] = result[et].get(mo, 0.0) + float(row.total or 0)
+                    result[et][mo] = result[et].get(mo, 0.0) + float(cons or 0)
             return result
 
         data_a = await _monthly_by_et(year_a, ids_a, pairs_a)
@@ -1805,6 +1864,7 @@ class AnalyticsService:
 
     # ── Energiebilanz (CAFM-Anforderung) ──
 
+    @cached("analytics_energy_balance", ttl=300)
     async def get_energy_balance(
         self,
         start_date: date,
@@ -1905,44 +1965,21 @@ class AnalyticsService:
         grand_total_kwh = 0.0
         grand_total_cost_net = 0.0
 
-        # EINE Query für den gesamten Zeitraum statt pro Meter × Monat × Energietyp
+        # Monatswerte aus der Vorberechnung (Fallback live) – kein Readings-Scan.
         meter_id_list = [m.id for m in meters]
-        period_start_ts = datetime(months[0][0], months[0][1], 1, tzinfo=timezone.utc)
-        last_y, last_m = months[-1]
-        period_end_ts = datetime(last_y + (1 if last_m == 12 else 0), (last_m % 12) + 1, 1, tzinfo=timezone.utc)
-
-        agg_rows = (await self.db.execute(
-            select(
-                Meter.id,
-                Meter.energy_type,
-                func.extract("year", MeterReading.timestamp).label("yr"),
-                func.extract("month", MeterReading.timestamp).label("mo"),
-                func.sum(MeterReading.consumption).label("consumption"),
-                func.sum(MeterReading.cost_net).label("cost_net"),
-            )
-            .join(MeterReading, MeterReading.meter_id == Meter.id)
-            .where(
-                Meter.id.in_(meter_id_list),
-                MeterReading.consumption.isnot(None),
-                MeterReading.timestamp >= period_start_ts,
-                MeterReading.timestamp < period_end_ts,
-            )
-            .group_by(Meter.id, Meter.energy_type, text("yr"), text("mo"))
-        )).all()
+        agg_rows = await self._monthly_rows(start_date, end_date, meter_id_list)
 
         # In Lookup umwandeln: (energy_type, year, month) → (consumption, cost) –
         # je Monat auf die maßgeblichen (Zähler, Monat)-Paare gefiltert.
         agg_lookup: dict[tuple, tuple[Decimal, Decimal]] = {}
-        for agg_row in agg_rows:
-            yr = int(agg_row.yr)
-            mo = int(agg_row.mo)
-            if month_pairs is not None and (agg_row.id, (yr, mo)) not in month_pairs:
+        for (mid, et_row, _unit, yr, mo, cons, cost) in agg_rows:
+            if month_pairs is not None and (mid, (yr, mo)) not in month_pairs:
                 continue
-            key = (agg_row.energy_type, yr, mo)
+            key = (et_row, yr, mo)
             cur = agg_lookup.get(key, (Decimal("0"), Decimal("0")))
             agg_lookup[key] = (
-                cur[0] + (agg_row.consumption or Decimal("0")),
-                cur[1] + (agg_row.cost_net or Decimal("0")),
+                cur[0] + (cons or Decimal("0")),
+                cur[1] + (cost or Decimal("0")),
             )
 
         for year, month_num in months:
@@ -2326,16 +2363,6 @@ class AnalyticsService:
 
         conv_root = CONVERSION_FACTORS.get(root_meter.unit or "kWh", Decimal("1"))
 
-        # Verbrauch Hauptzähler
-        root_q = select(func.sum(MeterReading.consumption)).where(
-            MeterReading.meter_id == root_meter_id,
-            MeterReading.timestamp >= start_dt,
-            MeterReading.timestamp < end_dt,
-            MeterReading.consumption.isnot(None),
-        )
-        root_sum_raw = (await self.db.execute(root_q)).scalar() or Decimal("0")
-        root_kwh = float(root_sum_raw * conv_root)
-
         # Direkte Unterzähler
         children_q = select(Meter).where(
             Meter.parent_meter_id == root_meter_id,
@@ -2343,18 +2370,30 @@ class AnalyticsService:
         )
         children = list((await self.db.execute(children_q)).scalars().all())
 
+        # EINE Query für Haupt- und alle Unterzähler statt N+1.
+        all_ids = [root_meter_id] + [c.id for c in children]
+        sums = {
+            row.meter_id: (row.total or Decimal("0"))
+            for row in (await self.db.execute(
+                select(
+                    MeterReading.meter_id,
+                    func.sum(MeterReading.consumption).label("total"),
+                ).where(
+                    MeterReading.meter_id.in_(all_ids),
+                    MeterReading.timestamp >= start_dt,
+                    MeterReading.timestamp < end_dt,
+                    MeterReading.consumption.isnot(None),
+                ).group_by(MeterReading.meter_id)
+            )).all()
+        }
+
+        root_kwh = float(sums.get(root_meter_id, Decimal("0")) * conv_root)
+
         child_results = []
         child_total_kwh = 0.0
         for child in children:
             conv = CONVERSION_FACTORS.get(child.unit or "kWh", Decimal("1"))
-            cq = select(func.sum(MeterReading.consumption)).where(
-                MeterReading.meter_id == child.id,
-                MeterReading.timestamp >= start_dt,
-                MeterReading.timestamp < end_dt,
-                MeterReading.consumption.isnot(None),
-            )
-            c_raw = (await self.db.execute(cq)).scalar() or Decimal("0")
-            c_kwh = float(c_raw * conv)
+            c_kwh = float(sums.get(child.id, Decimal("0")) * conv)
             child_total_kwh += c_kwh
             child_results.append({
                 "id": str(child.id),
