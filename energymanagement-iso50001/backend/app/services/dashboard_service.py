@@ -11,7 +11,9 @@ from decimal import Decimal
 
 import structlog
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, bindparam, func, select, text
+from sqlalchemy.dialects.postgresql import ARRAY, TIMESTAMP
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.district_heating_provider import DistrictHeatingProvider
@@ -22,12 +24,32 @@ from app.models.settings import AppSetting
 from app.models.snapshot import DashboardSnapshot, DataQualitySnapshot
 from app.services.meter_hierarchy import (
     AUTO_DATA_SOURCES,
+    authoritative_pairs_by_month,
     meter_ids_with_data,
     select_authoritative_ids,
 )
 from app.services.snapshot_periods import match_period_key, resolve_period
 
 logger = structlog.get_logger()
+
+
+def _auth_join(query, *, month_expr):
+    """Schränkt eine Aggregat-Query auf die je Monat maßgeblichen (Zähler, Monat)-
+    Paare ein – via unnest-Join auf zwei parallele Arrays (Bind-Parameter
+    ``auth_mids`` / ``auth_months``). ``month_expr`` ist der date_trunc('month')-
+    Ausdruck auf den Reading-Timestamp der jeweiligen Query.
+
+    So wird pro Monat die tiefste Ebene mit Daten genutzt: ein Hauptzähler ohne
+    Ablesung in einem Monat verdrängt seine Unterzähler dort nicht mehr.
+    """
+    auth = func.unnest(
+        bindparam("auth_mids", type_=ARRAY(PGUUID(as_uuid=True))),
+        bindparam("auth_months", type_=ARRAY(TIMESTAMP(timezone=True))),
+    ).table_valued("meter_id", "month")
+    return query.join(
+        auth,
+        and_(auth.c.meter_id == Meter.id, auth.c.month == month_expr),
+    )
 
 CONVERSION_FACTORS: dict[str, Decimal] = {
     "m³": Decimal("10.3"),
@@ -186,11 +208,19 @@ class DashboardService:
 
         # 3b. Doppelzählung vermeiden: je Strang nur die tiefste Ebene mit Daten.
         #     (Eltern- UND Kindzähler dürfen nicht gemeinsam summiert werden.)
+        #     PERIODENWEIT (physical_ids) für Abwärtskompatibilität, zusätzlich
+        #     PRO MONAT (auth_mids/auth_months) – damit ein Hauptzähler mit nur
+        #     teilweise vorhandenen Daten die Unterzähler nicht für leere Monate
+        #     verdrängt. Die Aggregationen nutzen die Monats-Paare.
         data_ids = await meter_ids_with_data(
             self.db, period_start, period_end, [m.id for m in candidates]
         )
         authoritative = select_authoritative_ids(candidates, data_ids)
         physical_ids = [m.id for m in candidates if m.id in authoritative]
+
+        auth_mids, auth_months = await authoritative_pairs_by_month(
+            self.db, period_start, period_end, candidates
+        )
 
         # 4. Allocation-Faktoren berechnen (nur bei Site-Filter)
         allocation_factors: dict[uuid.UUID, Decimal] = {}
@@ -230,7 +260,22 @@ class DashboardService:
             "physical_ids": physical_ids,
             "virtual_meters": virtual_meters,
             "allocation_factors": allocation_factors,
+            "candidates": candidates,
+            "auth_mids": auth_mids,
+            "auth_months": auth_months,
         }
+
+    async def _auth_pairs(self, start: date, end: date, candidates: list) -> tuple[list, list]:
+        """Maßgebliche (Zähler, Monat)-Paare für einen Zeitraum – memoisiert je
+        (start, end) innerhalb eines Dashboard-Aufbaus."""
+        key = (start.isoformat(), end.isoformat())
+        memo = getattr(self, "_pairs_memo", None)
+        if memo is None:
+            memo = {}
+            self._pairs_memo = memo
+        if key not in memo:
+            memo[key] = await authoritative_pairs_by_month(self.db, start, end, candidates)
+        return memo[key]
 
     async def _compute_virtual_consumption(
         self, virt: Meter, start: date, end: date
@@ -365,6 +410,10 @@ class DashboardService:
         physical_ids: list = meter_set["physical_ids"]
         virtual_meters: list = meter_set["virtual_meters"]
         allocation_factors: dict = meter_set["allocation_factors"]
+        candidates: list = meter_set["candidates"]
+        cur_mids: list = meter_set["auth_mids"]
+        cur_months: list = meter_set["auth_months"]
+        self._pairs_memo = {(period_start.isoformat(), period_end.isoformat()): (cur_mids, cur_months)}
 
         # Vorjahreszeitraum für Trends
         prev_start = date(period_start.year - 1, period_start.month, period_start.day)
@@ -373,7 +422,7 @@ class DashboardService:
         try:
             kpi_cards = await _timed("kpi_cards", self._build_kpi_cards(
                 period_start, period_end, prev_start, prev_end,
-                physical_ids, virtual_meters, allocation_factors,
+                candidates, cur_mids, cur_months, virtual_meters, allocation_factors,
             ))
         except Exception as e:
             logger.error("dashboard_kpi_error", error=str(e))
@@ -381,7 +430,7 @@ class DashboardService:
 
         try:
             breakdown = await _timed("energy_breakdown", self._get_energy_breakdown(
-                period_start, period_end, physical_ids, virtual_meters, allocation_factors,
+                period_start, period_end, cur_mids, cur_months, virtual_meters, allocation_factors,
             ))
         except Exception as e:
             logger.error("dashboard_breakdown_error", error=str(e))
@@ -389,7 +438,7 @@ class DashboardService:
 
         try:
             chart = await _timed("consumption_chart", self._get_consumption_chart(
-                period_start, period_end, granularity, physical_ids,
+                period_start, period_end, granularity, cur_mids, cur_months,
             ))
         except Exception as e:
             logger.error("dashboard_chart_error", error=str(e))
@@ -397,7 +446,7 @@ class DashboardService:
 
         try:
             top_consumers = await _timed("top_consumers", self._get_top_consumers(
-                period_start, period_end, physical_ids, virtual_meters, allocation_factors,
+                period_start, period_end, cur_mids, cur_months, virtual_meters, allocation_factors,
             ))
         except Exception as e:
             logger.error("dashboard_top_consumers_error", error=str(e))
@@ -589,13 +638,16 @@ class DashboardService:
 
     async def _consumption_by_energy_type(
         self, start: date, end: date,
-        meter_ids: list | None = None,
+        auth_mids: list | None = None,
+        auth_months: list | None = None,
         virtual_meters: list | None = None,
         allocation_factors: dict | None = None,
     ) -> list[dict]:
         """Verbrauch je Energietyp in nativer Einheit.
 
-        Berücksichtigt Cross-Site-Netto (virtual_meters) und Allocation-Faktoren.
+        Aggregiert über die je MONAT maßgeblichen (Zähler, Monat)-Paare
+        (auth_mids/auth_months). Berücksichtigt Cross-Site-Netto (virtual_meters)
+        und Allocation-Faktoren.
         """
         # Allocation-Faktoren erfordern Pro-Zähler-Aggregation
         needs_per_meter = bool(allocation_factors)
@@ -643,13 +695,17 @@ class DashboardService:
                 )
                 .group_by(Meter.energy_type, Meter.unit)
             )
-        if meter_ids is not None:
-            query = query.where(Meter.id.in_(meter_ids))
-        result = await self.db.execute(query)
+        if auth_mids:
+            query = _auth_join(query, month_expr=func.date_trunc("month", MeterReading.timestamp))
+            result_rows = (await self.db.execute(
+                query, {"auth_mids": auth_mids, "auth_months": auth_months}
+            )).all()
+        else:
+            result_rows = []
 
         # Pro Energietyp: native Einheit beibehalten
         groups: dict[str, dict] = {}
-        for row in result.all():
+        for row in result_rows:
             et = row.energy_type
             val = row.total or Decimal("0")
             # Allocation-Faktor anwenden, wenn Pro-Zähler-Aggregation
@@ -698,19 +754,26 @@ class DashboardService:
 
     async def _build_kpi_cards(
         self, start: date, end: date, prev_start: date, prev_end: date,
-        meter_ids: list | None = None,
+        candidates: list | None = None,
+        cur_mids: list | None = None,
+        cur_months: list | None = None,
         virtual_meters: list | None = None,
         allocation_factors: dict | None = None,
     ) -> list[dict]:
-        """KPI-Karten berechnen – pro Energietyp statt Gesamtverbrauch."""
+        """KPI-Karten berechnen – pro Energietyp statt Gesamtverbrauch.
+
+        Aktueller Zeitraum nutzt die übergebenen Monats-Paare (cur_mids/cur_months),
+        der Vorjahreszeitraum bekommt seine EIGENEN Monats-Paare (der maßgebliche
+        Zähler je Strang kann sich zwischen den Jahren unterscheiden)."""
         cards = []
+        prev_mids, prev_months = await self._auth_pairs(prev_start, prev_end, candidates or [])
 
         # 1. Verbrauch je Energietyp (statt einer Gesamtsumme)
         current_by_type = await self._consumption_by_energy_type(
-            start, end, meter_ids, virtual_meters, allocation_factors
+            start, end, cur_mids, cur_months, virtual_meters, allocation_factors
         )
         prev_by_type = await self._consumption_by_energy_type(
-            prev_start, prev_end, meter_ids, virtual_meters, allocation_factors
+            prev_start, prev_end, prev_mids, prev_months, virtual_meters, allocation_factors
         )
         prev_lookup = {item["energy_type"]: item["value"] for item in prev_by_type}
 
@@ -729,8 +792,8 @@ class DashboardService:
             })
 
         # 2. CO₂-Emissionen
-        co2 = await self._total_co2(start, end, meter_ids, virtual_meters, allocation_factors)
-        prev_co2 = await self._total_co2(prev_start, prev_end, meter_ids, virtual_meters, allocation_factors)
+        co2 = await self._total_co2(start, end, cur_mids, cur_months, virtual_meters, allocation_factors)
+        prev_co2 = await self._total_co2(prev_start, prev_end, prev_mids, prev_months, virtual_meters, allocation_factors)
         co2_trend = self._calc_trend(co2, prev_co2)
 
         cards.append({
@@ -744,8 +807,8 @@ class DashboardService:
         })
 
         # 3. Geschätzte Kosten
-        cost = await self._total_cost(start, end, meter_ids, virtual_meters, allocation_factors)
-        prev_cost = await self._total_cost(prev_start, prev_end, meter_ids, virtual_meters, allocation_factors)
+        cost = await self._total_cost(start, end, cur_mids, cur_months, virtual_meters, allocation_factors)
+        prev_cost = await self._total_cost(prev_start, prev_end, prev_mids, prev_months, virtual_meters, allocation_factors)
         cost_trend = self._calc_trend(cost, prev_cost)
 
         cards.append({
@@ -864,7 +927,8 @@ class DashboardService:
 
     async def _total_co2(
         self, start: date, end: date,
-        meter_ids: list | None = None,
+        auth_mids: list | None = None,
+        auth_months: list | None = None,
         virtual_meters: list | None = None,
         allocation_factors: dict | None = None,
     ) -> Decimal:
@@ -873,11 +937,13 @@ class DashboardService:
         Bei Site-Filter mit Allocation/Virtual wird immer der Schätzungs-Pfad
         genutzt, weil CO2Calculation keine Cross-Site/Allocation-Auflösung kennt.
         """
+        auth_meter_set = set(auth_mids or [])
         has_overrides = bool(virtual_meters) or bool(allocation_factors)
         if not has_overrides:
             co2_query = select(func.sum(CO2Calculation.co2_kg)).where(
                 CO2Calculation.period_start >= start,
                 CO2Calculation.period_end <= end,
+                CO2Calculation.meter_id.in_(auth_meter_set),
             )
             result = await self.db.execute(co2_query)
             co2_kg = result.scalar() or Decimal("0")
@@ -922,9 +988,13 @@ class DashboardService:
                     )
                     .group_by(Meter.energy_type, Meter.unit)
                 )
-            if meter_ids is not None:
-                cons_q = cons_q.where(Meter.id.in_(meter_ids))
-            cons_result = await self.db.execute(cons_q)
+            if auth_mids:
+                cons_q = _auth_join(cons_q, month_expr=func.date_trunc("month", MeterReading.timestamp))
+                cons_rows = (await self.db.execute(
+                    cons_q, {"auth_mids": auth_mids, "auth_months": auth_months}
+                )).all()
+            else:
+                cons_rows = []
 
             latest_year_sub = (
                 select(
@@ -952,7 +1022,7 @@ class DashboardService:
                     factors[_fr.energy_type] = _v
             factors = await self._apply_provider_overrides(factors)
             total = Decimal("0")
-            for row in cons_result.all():
+            for row in cons_rows:
                 consumption = row.consumption or Decimal("0")
                 conv = CONVERSION_FACTORS.get(row.unit, Decimal("1"))
                 kwh = consumption * conv
@@ -975,17 +1045,23 @@ class DashboardService:
 
     async def _total_cost(
         self, start: date, end: date,
-        meter_ids: list | None = None,
+        auth_mids: list | None = None,
+        auth_months: list | None = None,
         virtual_meters: list | None = None,
         allocation_factors: dict | None = None,
     ) -> Decimal:
         """Gesamtkosten aus Tarif-Informationen + direkte Reading-Kosten.
 
-        Allocation-Faktoren werden auf alle Beiträge angewendet. Virtual-Netto-
-        Meter werden über den Tarif ihres Source-Meters bewertet (Fallback: 0).
+        Auf die je Monat maßgeblichen Zähler beschränkt (periodenweite Zähler-
+        menge aus auth_mids – Kosten sind sekundär, daher ohne Monats-Join).
+        Allocation-Faktoren werden auf alle Beiträge angewendet.
         """
         start_ts = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
         end_ts = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+
+        auth_meter_set = set(auth_mids or [])
+        if not auth_meter_set:
+            return Decimal("0")
 
         total_cost = Decimal("0")
         tariff_meter_ids: set = set()
@@ -996,9 +1072,8 @@ class DashboardService:
             Meter.is_active == True,  # noqa: E712
             Meter.is_feed_in != True,
             Meter.tariff_info.isnot(None),
+            Meter.id.in_(auth_meter_set),
         )
-        if meter_ids is not None:
-            meters_q = meters_q.where(Meter.id.in_(meter_ids))
         meters_result = await self.db.execute(meters_q)
         meters = list(meters_result.scalars().all())
 
@@ -1054,8 +1129,7 @@ class DashboardService:
             )
             if tariff_meter_ids:
                 direct_q = direct_q.where(~MeterReading.meter_id.in_(tariff_meter_ids))
-            if meter_ids is not None:
-                direct_q = direct_q.where(Meter.id.in_(meter_ids))
+            direct_q = direct_q.where(Meter.id.in_(auth_meter_set))
             for r in (await self.db.execute(direct_q)).all():
                 total_cost += (r.cost or Decimal("0")) * af.get(r.meter_id, Decimal("1"))
         else:
@@ -1072,8 +1146,7 @@ class DashboardService:
             )
             if tariff_meter_ids:
                 direct_q = direct_q.where(~MeterReading.meter_id.in_(tariff_meter_ids))
-            if meter_ids is not None:
-                direct_q = direct_q.where(Meter.id.in_(meter_ids))
+            direct_q = direct_q.where(Meter.id.in_(auth_meter_set))
             direct_cost = (await self.db.execute(direct_q)).scalar() or Decimal("0")
             total_cost += direct_cost
 
@@ -1107,15 +1180,18 @@ class DashboardService:
 
     async def _get_energy_breakdown(
         self, start: date, end: date,
-        meter_ids: list | None = None,
+        auth_mids: list | None = None,
+        auth_months: list | None = None,
         virtual_meters: list | None = None,
         allocation_factors: dict | None = None,
     ) -> list[dict]:
         """Verbrauch nach Energietyp aufschlüsseln (mit Originaleinheiten, Kosten, CO₂).
 
+        Aggregiert über die je MONAT maßgeblichen (Zähler, Monat)-Paare.
         Berücksichtigt Cross-Site-Netto + Allocation-Faktoren.
         """
         af = allocation_factors or {}
+        _month_expr = func.date_trunc("month", MeterReading.timestamp)
         # Schritt 1: Verbrauch je Zähler aggregieren (kein JSON im GROUP BY)
         query = (
             select(
@@ -1138,18 +1214,21 @@ class DashboardService:
             )
             .group_by(Meter.id, Meter.energy_type, Meter.unit)
         )
-        if meter_ids is not None:
-            query = query.where(Meter.id.in_(meter_ids))
-        result = await self.db.execute(query)
-        rows = result.all()
+        if auth_mids:
+            query = _auth_join(query, month_expr=_month_expr)
+            rows = (await self.db.execute(
+                query, {"auth_mids": auth_mids, "auth_months": auth_months}
+            )).all()
+        else:
+            rows = []
 
         if not rows and not virtual_meters:
             return []
 
         # Schritt 2: tariff_info je Zähler laden
-        meter_ids = [row.id for row in rows]
+        present_meter_ids = [row.id for row in rows]
         tariff_result = await self.db.execute(
-            select(Meter.id, Meter.tariff_info).where(Meter.id.in_(meter_ids))
+            select(Meter.id, Meter.tariff_info).where(Meter.id.in_(present_meter_ids))
         )
         tariffs: dict = {row.id: (row.tariff_info or {}) for row in tariff_result.all()}
 
@@ -1206,10 +1285,14 @@ class DashboardService:
             )
             if tariffed_ids:
                 dcq = dcq.where(~Meter.id.in_(tariffed_ids))
-            if meter_ids is not None:
-                dcq = dcq.where(Meter.id.in_(meter_ids))
-            dc_result = await self.db.execute(dcq)
-            for dc_row in dc_result.all():
+            if auth_mids:
+                dcq = _auth_join(dcq, month_expr=_month_expr)
+                dc_rows = (await self.db.execute(
+                    dcq, {"auth_mids": auth_mids, "auth_months": auth_months}
+                )).all()
+            else:
+                dc_rows = []
+            for dc_row in dc_rows:
                 direct_costs_by_et[dc_row.energy_type] = dc_row.direct_cost or Decimal("0")
 
         # Schritt 5: Pro Energietyp aggregieren
@@ -1269,9 +1352,14 @@ class DashboardService:
             )
             if tariffed_ids:
                 dcq2 = dcq2.where(~Meter.id.in_(tariffed_ids))
-            if meter_ids is not None:
-                dcq2 = dcq2.where(Meter.id.in_(meter_ids))
-            for r in (await self.db.execute(dcq2)).all():
+            if auth_mids:
+                dcq2 = _auth_join(dcq2, month_expr=_month_expr)
+                dcq2_rows = (await self.db.execute(
+                    dcq2, {"auth_mids": auth_mids, "auth_months": auth_months}
+                )).all()
+            else:
+                dcq2_rows = []
+            for r in dcq2_rows:
                 if r.energy_type in groups:
                     groups[r.energy_type]["cost_eur"] += (r.cost or Decimal("0")) * af.get(r.meter_id, Decimal("1"))
         else:
@@ -1332,9 +1420,14 @@ class DashboardService:
         ]
 
     async def _get_consumption_chart(
-        self, start: date, end: date, granularity: str, meter_ids: list | None = None
+        self, start: date, end: date, granularity: str,
+        auth_mids: list | None = None, auth_months: list | None = None,
     ) -> list[dict]:
-        """Verbrauchszeitreihe nach Energieträger aggregiert (nicht je Zähler)."""
+        """Verbrauchszeitreihe nach Energieträger aggregiert (nicht je Zähler).
+
+        Filtert über die je MONAT maßgeblichen (Zähler, Monat)-Paare – unabhängig
+        von der Anzeige-Granularität (der Auth-Join läuft immer auf Monatsebene).
+        """
         trunc_map = {"hourly": "hour", "daily": "day", "weekly": "week", "monthly": "month", "yearly": "year"}
         trunc = trunc_map.get(granularity, "month")
 
@@ -1360,10 +1453,13 @@ class DashboardService:
             .group_by(Meter.energy_type, Meter.unit, text("period"))
             .order_by(Meter.energy_type, text("period"))
         )
-        if meter_ids is not None:
-            query = query.where(Meter.id.in_(meter_ids))
-        result = await self.db.execute(query)
-        rows = result.all()
+        if auth_mids:
+            query = _auth_join(query, month_expr=func.date_trunc("month", MeterReading.timestamp))
+            rows = (await self.db.execute(
+                query, {"auth_mids": auth_mids, "auth_months": auth_months}
+            )).all()
+        else:
+            rows = []
 
         # Bezeichnungen für Energieträger
         labels = {
@@ -1407,12 +1503,14 @@ class DashboardService:
 
     async def _get_top_consumers(
         self, start: date, end: date,
-        meter_ids: list | None = None,
+        auth_mids: list | None = None,
+        auth_months: list | None = None,
         virtual_meters: list | None = None,
         allocation_factors: dict | None = None,
     ) -> list[dict]:
         """Top-3 Verbraucher je Energietyp (native Einheiten).
 
+        Aggregiert über die je MONAT maßgeblichen (Zähler, Monat)-Paare.
         Berücksichtigt Cross-Site-Netto (Virtual-Meter ersetzen Physical-Source)
         und Allocation-Faktoren (anteiliger Beitrag des Zählers zur Site).
         """
@@ -1441,13 +1539,17 @@ class DashboardService:
             .group_by(Meter.id, Meter.name, Meter.display_name, Meter.energy_type, Meter.unit)
             .having(func.sum(MeterReading.consumption) > 0)
         )
-        if meter_ids is not None:
-            query = query.where(Meter.id.in_(meter_ids))
-        result = await self.db.execute(query)
+        if auth_mids:
+            query = _auth_join(query, month_expr=func.date_trunc("month", MeterReading.timestamp))
+            top_rows = (await self.db.execute(
+                query, {"auth_mids": auth_mids, "auth_months": auth_months}
+            )).all()
+        else:
+            top_rows = []
 
         # Sammeln aller Kandidaten pro Energietyp (mit Allocation-Faktor angewendet)
         candidates: dict[str, list[dict]] = {}
-        for row in result.all():
+        for row in top_rows:
             raw_native = row.consumption or Decimal("0")
             factor_share = af.get(row.id, Decimal("1"))
             eff_native = raw_native * factor_share

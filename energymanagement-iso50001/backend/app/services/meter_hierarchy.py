@@ -17,7 +17,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, Protocol
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.models.meter import Meter
 from app.models.reading import MeterReading
@@ -101,6 +101,77 @@ async def meter_ids_with_data(
         q = q.where(MeterReading.meter_id.in_(cand))
     rows = (await db.execute(q)).all()
     return {r[0] for r in rows}
+
+
+async def meter_ids_with_data_by_month(
+    db,
+    period_start: date,
+    period_end: date,
+    candidate_ids: Iterable[uuid.UUID],
+) -> dict[datetime, set[uuid.UUID]]:
+    """Pro Monat die Zähler-IDs mit Verbrauch > 0.
+
+    Rückgabe: {month_start_utc: {meter_id, ...}}. Grundlage für die
+    **pro Monat** maßgebliche Zählerauswahl (statt einmal über den ganzen
+    Zeitraum) – damit ein Hauptzähler mit nur teilweise vorhandenen Daten die
+    Unterzähler nicht für leere Monate verdrängt.
+    """
+    cand = list(candidate_ids)
+    if not cand:
+        return {}
+    ts_start = datetime.combine(period_start, time.min, tzinfo=timezone.utc)
+    ts_end = datetime.combine(period_end + timedelta(days=1), time.min, tzinfo=timezone.utc)
+    q = (
+        select(
+            MeterReading.meter_id,
+            func.date_trunc("month", MeterReading.timestamp).label("m"),
+        )
+        .where(
+            MeterReading.meter_id.in_(cand),
+            MeterReading.consumption.isnot(None),
+            MeterReading.timestamp >= ts_start,
+            MeterReading.timestamp < ts_end,
+        )
+        .group_by(MeterReading.meter_id, text("m"))
+        .having(func.sum(MeterReading.consumption) > 0)
+    )
+    rows = (await db.execute(q)).all()
+    by_month: dict[datetime, set[uuid.UUID]] = defaultdict(set)
+    for meter_id, month in rows:
+        by_month[month].add(meter_id)
+    return dict(by_month)
+
+
+async def authoritative_pairs_by_month(
+    db,
+    period_start: date,
+    period_end: date,
+    nodes: Iterable[_MeterNode],
+) -> tuple[list[uuid.UUID], list[datetime]]:
+    """Maßgebliche (Zähler, Monat)-Paare als parallele Arrays für einen unnest-Join.
+
+    Für jeden Monat im Zeitraum wird die je Strang tiefste Ebene mit Daten
+    bestimmt (``select_authoritative_ids``). So liefert ein Hauptzähler in
+    Monaten ohne eigene Ablesung automatisch über seine Unterzähler – ohne
+    Doppelzählung in Monaten, in denen der Hauptzähler Daten hat.
+
+    Rückgabe: (meter_ids, months) gleicher Länge; (meter_ids[i], months[i]) ist
+    je ein maßgebliches Paar. Leer, wenn keine Kandidaten/Daten.
+    """
+    node_list = list(nodes)
+    candidate_ids = [n.id for n in node_list]
+    if not candidate_ids:
+        return [], []
+    by_month = await meter_ids_with_data_by_month(
+        db, period_start, period_end, candidate_ids
+    )
+    meter_ids: list[uuid.UUID] = []
+    months: list[datetime] = []
+    for month, ids_with_data in by_month.items():
+        for mid in select_authoritative_ids(node_list, ids_with_data):
+            meter_ids.append(mid)
+            months.append(month)
+    return meter_ids, months
 
 
 async def resolve_authoritative_meter_ids(
