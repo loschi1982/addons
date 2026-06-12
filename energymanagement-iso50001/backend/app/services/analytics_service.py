@@ -36,6 +36,10 @@ CONVERSION_FACTORS: dict[str, Decimal] = {
     "kWh": Decimal("1"),
 }
 
+# Nicht-Energieträger: erscheinen als eigene Zeile (native Einheit), zählen aber
+# nicht in die kWh-Summen der Energiebilanz (Wasser ist kein Energieträger).
+NON_ENERGY_TYPES: set[str] = {"water"}
+
 MONTH_LABELS = [
     "Jan", "Feb", "Mär", "Apr", "Mai", "Jun",
     "Jul", "Aug", "Sep", "Okt", "Nov", "Dez",
@@ -1920,7 +1924,9 @@ class AnalyticsService:
                 totals[et]["native"] += native_val
                 totals[et]["kwh"] += kwh_val
                 totals[et]["cost_net"] += cost_val
-                row_total_kwh += kwh_val
+                # Nicht-Energieträger (Wasser) nicht in die kWh-Bilanzsumme aufnehmen
+                if et not in NON_ENERGY_TYPES:
+                    row_total_kwh += kwh_val
                 row_total_cost += cost_val
 
             grand_total_kwh += row_total_kwh

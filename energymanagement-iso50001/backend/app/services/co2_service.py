@@ -29,6 +29,27 @@ from app.services.meter_hierarchy import resolve_authoritative_meter_ids
 
 logger = structlog.get_logger()
 
+
+def normalize_scope(scope: str | None) -> str:
+    """GHG-Scope-Bezeichner vereinheitlichen.
+
+    In den Faktor-Daten kommen historisch gemischte Schreibweisen vor
+    ("scope2" ohne Unterstrich neben "scope_2"). Das führt sonst zu
+    doppelten Scope-Zeilen in der Auswertung. Hier wird auf die
+    kanonische Form scope_1 / scope_2 / scope_3 gemappt.
+    """
+    if not scope:
+        return "scope_2"
+    s = str(scope).strip().lower().replace(" ", "").replace("-", "_")
+    if s in ("scope1", "scope_1", "1"):
+        return "scope_1"
+    if s in ("scope2", "scope_2", "2"):
+        return "scope_2"
+    if s in ("scope3", "scope_3", "3"):
+        return "scope_3"
+    return s
+
+
 # Brennwert-Umrechnungsfaktoren nach kWh
 CONVERSION_FACTORS: dict[str, Decimal] = {
     "m³": Decimal("10.3"),     # Erdgas: ~10,3 kWh/m³
@@ -37,6 +58,10 @@ CONVERSION_FACTORS: dict[str, Decimal] = {
     "MWh": Decimal("1000"),    # MWh → kWh
     "kWh": Decimal("1"),
 }
+
+# Nicht-Energieträger: gehen nicht in den kWh-Gesamtverbrauch und die
+# durchschnittliche CO₂-Intensität ein (Wasser ist kein Energieträger).
+NON_ENERGY_TYPES: set[str] = {"water"}
 
 
 class CO2Service:
@@ -366,15 +391,19 @@ class CO2Service:
             await resolve_authoritative_meter_ids(self.db, start_date, end_date)
         )
 
-        # Gesamt-CO₂
+        # Gesamt-CO₂ und kWh – Wasser (Nicht-Energieträger) bleibt beim
+        # kWh-Gesamtverbrauch außen vor, damit die Ø-Intensität nicht verwässert.
         total_result = await self.db.execute(
             select(
                 func.sum(CO2Calculation.co2_kg),
                 func.sum(CO2Calculation.consumption_kwh),
-            ).where(
+            )
+            .join(Meter, Meter.id == CO2Calculation.meter_id)
+            .where(
                 CO2Calculation.period_start >= start_date,
                 CO2Calculation.period_end <= end_date,
                 CO2Calculation.meter_id.in_(auth_ids),
+                Meter.energy_type.notin_(NON_ENERGY_TYPES),
             )
         )
         total_co2, total_kwh = total_result.one()
@@ -423,9 +452,14 @@ class CO2Service:
             )
             .group_by(EmissionFactor.scope)
         )
+        # Scopes normalisieren und gleiche Scopes zusammenführen
+        scope_sums: dict[str, float] = {}
+        for scope, co2 in by_scope_result.all():
+            key = normalize_scope(scope)
+            scope_sums[key] = scope_sums.get(key, 0.0) + float(co2 or 0)
         by_scope = [
-            {"scope": scope, "co2_kg": float(co2 or 0)}
-            for scope, co2 in by_scope_result.all()
+            {"scope": scope, "co2_kg": co2}
+            for scope, co2 in sorted(scope_sums.items())
         ]
 
         # Trend vs. Vorjahreszeitraum
@@ -514,9 +548,10 @@ class CO2Service:
             )
             .group_by(EmissionFactor.scope)
         )
-        scope_breakdown = {
-            scope: float(co2 or 0) for scope, co2 in scope_result.all()
-        }
+        scope_breakdown: dict[str, float] = {}
+        for scope, co2 in scope_result.all():
+            key = normalize_scope(scope)
+            scope_breakdown[key] = scope_breakdown.get(key, 0.0) + float(co2 or 0)
 
         return {
             "current_year": current_year,

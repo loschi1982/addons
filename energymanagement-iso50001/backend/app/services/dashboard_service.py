@@ -37,6 +37,10 @@ CONVERSION_FACTORS: dict[str, Decimal] = {
     "kWh": Decimal("1"),
 }
 
+# Nicht-Energieträger: zählen nicht in den Energiemix-Anteil und nicht in die
+# kWh-basierte CO₂-Intensität ein (Wasser ist kein Energieträger).
+NON_ENERGY_TYPES: set[str] = {"water"}
+
 ENERGY_TYPE_LABELS: dict[str, str] = {
     "electricity": "Strom",
     "natural_gas": "Gas",
@@ -938,11 +942,14 @@ class DashboardService:
                     & ((EmissionFactor.year * 100 + func.coalesce(EmissionFactor.month, 0)) == latest_year_sub.c.max_period),
                 )
             )
-            factors: dict[str, Decimal] = {
-                row.energy_type: Decimal(str(row.co2_factor))
-                for row in factors_result.all()
-                if row.co2_factor
-            }
+            factors: dict[str, Decimal] = {}
+            for _fr in factors_result.all():
+                if not _fr.co2_factor:
+                    continue
+                _v = Decimal(str(_fr.co2_factor))
+                # Bei doppelten Faktoren je Energieart deterministisch den höchsten wählen
+                if _fr.energy_type not in factors or _v > factors[_fr.energy_type]:
+                    factors[_fr.energy_type] = _v
             factors = await self._apply_provider_overrides(factors)
             total = Decimal("0")
             for row in cons_result.all():
@@ -1163,11 +1170,14 @@ class DashboardService:
                 & ((EmissionFactor.year * 100 + func.coalesce(EmissionFactor.month, 0)) == latest_year_sub.c.max_period),
             )
         )
-        factors: dict[str, Decimal] = {
-            row.energy_type: Decimal(str(row.co2_factor))
-            for row in factors_result.all()
-            if row.co2_factor
-        }
+        factors: dict[str, Decimal] = {}
+        for _fr in factors_result.all():
+            if not _fr.co2_factor:
+                continue
+            _v = Decimal(str(_fr.co2_factor))
+            # Bei doppelten Faktoren je Energieart deterministisch den höchsten wählen
+            if _fr.energy_type not in factors or _v > factors[_fr.energy_type]:
+                factors[_fr.energy_type] = _v
         # Versorger-spezifische Faktoren anwenden
         factors = await self._apply_provider_overrides(factors)
 
@@ -1220,9 +1230,15 @@ class DashboardService:
                     "co2_kg": Decimal("0"),
                 }
             groups[row.energy_type]["kwh"] += kwh
-            # Originalwert nur akkumulieren wenn gleiche Einheit
+            # Originalwert in der Originaleinheit der Gruppe akkumulieren –
+            # bei abweichender Einheit (z.B. MWh neben kWh) umrechnen statt verwerfen.
             if groups[row.energy_type]["original_unit"] == row.unit:
                 groups[row.energy_type]["original_value"] += raw_eff
+            else:
+                conv_o = CONVERSION_FACTORS.get(groups[row.energy_type]["original_unit"], Decimal("1"))
+                groups[row.energy_type]["original_value"] += (
+                    raw_eff * conv / conv_o if conv_o > 0 else raw_eff
+                )
             # Kosten aus Tarif berechnen
             tariff = tariffs.get(row.id, {})
             price = tariff.get("price_per_kwh")
@@ -1298,7 +1314,10 @@ class DashboardService:
                 except ValueError:
                     pass
 
-        total = sum(g["kwh"] for g in groups.values())
+        # Nicht-Energieträger (Wasser) zählen nicht in den Energiemix-Anteil.
+        # Sie werden weiterhin als KPI in nativer Einheit (m³) gezeigt.
+        energy_groups = {et: info for et, info in groups.items() if et not in NON_ENERGY_TYPES}
+        total = sum(g["kwh"] for g in energy_groups.values())
         return [
             {
                 "energy_type": et,
@@ -1309,7 +1328,7 @@ class DashboardService:
                 "co2_kg": round(float(info["co2_kg"]), 1) if info["co2_kg"] > 0 else None,
                 "share_percent": round(float(info["kwh"] / total * 100), 1) if total > 0 else 0,
             }
-            for et, info in sorted(groups.items(), key=lambda x: -x[1]["kwh"])
+            for et, info in sorted(energy_groups.items(), key=lambda x: -x[1]["kwh"])
         ]
 
     async def _get_consumption_chart(

@@ -242,8 +242,9 @@ class BenchmarkService:
             for k, v in BUILDING_TYPE_LABELS.items()
         ]
         sources_available = sorted({
-            r.source
-            for r in (await self.db.execute(select(BenchmarkReference.source))).scalars().all()
+            s
+            for s in (await self.db.execute(select(BenchmarkReference.source).distinct())).scalars().all()
+            if s
         })
 
         return {

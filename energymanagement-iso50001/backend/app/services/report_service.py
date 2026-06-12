@@ -2656,9 +2656,14 @@ p {{ margin: 5pt 0; }}
                 .group_by(EmissionFactor.scope)
             )
         )
+        from app.services.co2_service import normalize_scope
+        _scope_sums: dict[str, float] = {}
+        for scope, co2 in by_scope_result.all():
+            _k = normalize_scope(scope)
+            _scope_sums[_k] = _scope_sums.get(_k, 0.0) + float(co2 or 0)
         by_scope = [
-            {"scope": scope, "co2_kg": float(co2 or 0)}
-            for scope, co2 in by_scope_result.all()
+            {"scope": scope, "co2_kg": co2}
+            for scope, co2 in sorted(_scope_sums.items())
         ]
 
         # Trend vs. Vorjahr

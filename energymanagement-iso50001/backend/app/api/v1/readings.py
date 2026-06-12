@@ -176,55 +176,59 @@ async def detect_outliers(
     Erkennt Ausreißer via IQR-ähnlicher Methode:
     Werte > factor_threshold × Median des jeweiligen Zählers gelten als Ausreißer.
     """
-    # Alle aktiven Zähler laden
-    meter_q = select(Meter).where(Meter.is_active == True, Meter.is_feed_in != True)  # noqa: E712
+    # Set-basierte Ausreißererkennung in EINER Query (statt N+1 je Zähler):
+    #   1. CTE meter_median: Median je Zähler (percentile_cont, ein Tabellen-Scan)
+    #   2. Join der Readings gegen den Median, Filter consumption > max(median×Faktor, min_value)
+    #   3. Sortierung nach Faktor (consumption/median), Limit 500
+    sql = """
+        WITH meter_median AS (
+            SELECT mr.meter_id,
+                   percentile_cont(0.5) WITHIN GROUP (ORDER BY mr.consumption) AS median
+            FROM meter_readings mr
+            JOIN meters m ON m.id = mr.meter_id
+            WHERE mr.consumption > 0
+              AND mr.quality <> 'outlier'
+              AND m.is_active = true
+              AND m.is_feed_in IS NOT TRUE
+              {energy_filter}
+            GROUP BY mr.meter_id
+            HAVING percentile_cont(0.5) WITHIN GROUP (ORDER BY mr.consumption) >= 1
+        )
+        SELECT mr.id, mr.meter_id, m.name AS meter_name, m.energy_type,
+               mr.timestamp, mr.value, mr.consumption, mr.quality, mm.median
+        FROM meter_readings mr
+        JOIN meter_median mm ON mm.meter_id = mr.meter_id
+        JOIN meters m ON m.id = mr.meter_id
+        WHERE mr.quality <> 'outlier'
+          AND mr.consumption > GREATEST(mm.median * :factor, :min_value)
+        ORDER BY (mr.consumption / mm.median) DESC
+        LIMIT 500
+    """.format(energy_filter="AND m.energy_type = :energy_type" if energy_type else "")
+
+    params: dict = {"factor": factor_threshold, "min_value": min_value}
     if energy_type:
-        meter_q = meter_q.where(Meter.energy_type == energy_type)
-    meters = list((await db.execute(meter_q)).scalars().all())
+        params["energy_type"] = energy_type
+
+    rows = (await db.execute(text(sql), params)).all()
 
     outliers = []
-    for meter in meters:
-        # Median per Zähler (alle Readings mit positivem Verbrauch)
-        median_q = select(
-            func.percentile_cont(0.5).within_group(MeterReading.consumption).label("median")
-        ).where(
-            MeterReading.meter_id == meter.id,
-            MeterReading.consumption > 0,
-            MeterReading.quality != "outlier",
-        )
-        median_row = (await db.execute(median_q)).one()
-        median = float(median_row.median or 0)
-        if median < 1:
-            continue
+    for r in rows:
+        median = float(r.median or 0)
+        cons = float(r.consumption or 0)
+        outliers.append(OutlierItem(
+            reading_id=str(r.id),
+            meter_id=str(r.meter_id),
+            meter_name=r.meter_name,
+            energy_type=r.energy_type,
+            timestamp=r.timestamp.isoformat(),
+            value=float(r.value or 0),
+            consumption=cons,
+            median_consumption=round(median, 2),
+            factor=round(cons / median, 1) if median > 0 else 0,
+            quality=r.quality or "measured",
+        ))
 
-        threshold_val = median * factor_threshold
-        if threshold_val < min_value:
-            threshold_val = min_value
-
-        # Ausreißer finden
-        out_q = select(MeterReading).where(
-            MeterReading.meter_id == meter.id,
-            MeterReading.consumption > Decimal(str(threshold_val)),
-            MeterReading.quality != "outlier",
-        ).order_by(MeterReading.consumption.desc()).limit(50)
-        readings = list((await db.execute(out_q)).scalars().all())
-
-        for r in readings:
-            outliers.append(OutlierItem(
-                reading_id=str(r.id),
-                meter_id=str(meter.id),
-                meter_name=meter.name,
-                energy_type=meter.energy_type,
-                timestamp=r.timestamp.isoformat(),
-                value=float(r.value or 0),
-                consumption=float(r.consumption or 0),
-                median_consumption=round(median, 2),
-                factor=round(float(r.consumption or 0) / median, 1),
-                quality=r.quality or "measured",
-            ))
-
-    outliers.sort(key=lambda x: -x.factor)
-    return outliers[:500]
+    return outliers
 
 
 @router.post("/outliers/bulk-action")
