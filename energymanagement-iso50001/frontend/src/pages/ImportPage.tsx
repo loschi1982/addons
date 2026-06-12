@@ -823,7 +823,12 @@ function SpiePanel() {
   const [spieMeters, setSpieMeters] = useState<SpieMeter[]>([]);
   const [metersExpanded, setMetersExpanded] = useState(false);
   const [metersLoading, setMetersLoading] = useState(false);
+  // Fallback: ab Wunschdatum neu einlesen (optional mit Ersetzen)
+  const [fbOpen, setFbOpen] = useState(false);
+  const [fbDate, setFbDate] = useState('');
+  const [fbReplace, setFbReplace] = useState(true);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const todayStr = new Date().toISOString().slice(0, 10);
 
   const loadConfig = async () => {
     try {
@@ -930,7 +935,25 @@ function SpiePanel() {
   const handleSync = async () => {
     setSyncProgress({ status: 'running', phase: 'login' });
     try {
-      const res = await apiClient.post('/api/v1/spie/sync');
+      const res = await apiClient.post('/api/v1/spie/sync', {});
+      const { job_id } = res.data;
+      localStorage.setItem(LS_SPIE_JOB, job_id);
+      resumePoll(job_id);
+    } catch {
+      setSyncProgress({ status: 'error', error: 'Import konnte nicht gestartet werden.' });
+    }
+  };
+
+  const handleResync = async () => {
+    if (!fbDate) return;
+    const dateStr = new Date(fbDate).toLocaleDateString('de-DE');
+    const msg = fbReplace
+      ? `Achtung: Vorhandene Messwerte ALLER aktiven SPIE-Zähler ab ${dateStr} werden gelöscht und durch die SPIE-Werte ersetzt.\n\nFortfahren?`
+      : `SPIE-Werte ab ${dateStr} importieren? Vorhandene Werte bleiben erhalten, Duplikate werden übersprungen.`;
+    if (!window.confirm(msg)) return;
+    setSyncProgress({ status: 'running', phase: 'login' });
+    try {
+      const res = await apiClient.post('/api/v1/spie/sync', { from_date: fbDate, replace: fbReplace });
       const { job_id } = res.data;
       localStorage.setItem(LS_SPIE_JOB, job_id);
       resumePoll(job_id);
@@ -1025,6 +1048,66 @@ function SpiePanel() {
         <button className="btn-primary" onClick={handleSync} disabled={isRunning || !username}>
           {isRunning ? <RefreshCw size={14} /> : <Upload size={14} />} {isRunning ? 'Läuft…' : 'Jetzt importieren'}
         </button>
+      </div>
+
+      {/* Fallback: ab Wunschdatum neu einlesen */}
+      <div className="manage" style={{ marginTop: 10 }}>
+        <button className="manage-head" onClick={() => setFbOpen((v) => !v)}>
+          <ChevronRight size={14} className={'chev' + (fbOpen ? ' open' : '')} />
+          Fallback: ab Wunschdatum neu einlesen
+        </button>
+        {fbOpen && (
+          <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
+              Liest die SPIE-Messwerte aller aktiven SPIE-Zähler ab dem gewählten Datum neu ein –
+              z.&nbsp;B. wenn der reguläre Import Lücken hat oder ein Zeitraum korrigiert werden soll.
+            </div>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <div className="ifield" style={{ maxWidth: 200 }}>
+                <label>Startdatum</label>
+                <input
+                  type="date"
+                  className="inp mono"
+                  value={fbDate}
+                  max={todayStr}
+                  onChange={(e) => setFbDate(e.target.value)}
+                  disabled={isRunning}
+                />
+              </div>
+              <label
+                className={'check' + (fbReplace ? ' on' : '')}
+                onClick={() => !isRunning && setFbReplace((v) => !v)}
+                style={{ marginBottom: 7 }}
+              >
+                <span className="box"><Check size={12} /></span> Vorhandene Werte ab diesem Datum löschen &amp; ersetzen
+              </label>
+            </div>
+            {fbReplace && (
+              <div
+                style={{
+                  fontSize: 12, color: '#92400E', background: '#FEF3C7',
+                  border: '1px solid #FCD34D', borderRadius: 6, padding: '8px 10px',
+                  display: 'flex', gap: 7, alignItems: 'flex-start',
+                }}
+              >
+                <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>
+                  Vorhandene Messwerte der SPIE-Zähler ab dem Startdatum werden <strong>unwiderruflich gelöscht</strong> und
+                  durch die SPIE-Werte ersetzt. Liefert SPIE für einen Zähler keine Daten, bleibt dessen Bestand unverändert.
+                </span>
+              </div>
+            )}
+            <div>
+              <button
+                className="btn-primary"
+                onClick={handleResync}
+                disabled={isRunning || !username || !fbDate}
+              >
+                <Upload size={14} /> {fbReplace ? 'Ab Datum ersetzen' : 'Ab Datum importieren'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Auto-Run Bar (wenn aktiviert und kein laufender Import) */}

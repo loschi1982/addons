@@ -15,9 +15,10 @@ import tempfile
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import structlog
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -192,15 +193,25 @@ class SpieService:
 
     # ── Import ────────────────────────────────────────────────────────────────
 
-    async def run_import(self, job_id: str | None = None) -> dict:
+    async def run_import(
+        self,
+        job_id: str | None = None,
+        override_from: date | None = None,
+        replace: bool = False,
+    ) -> dict:
         """
-        Importiert Messwerte für alle SPIE-Zähler ab dem letzten bekannten Wert.
+        Importiert Messwerte für alle SPIE-Zähler.
 
-        Pro Zähler:
-          - MAX(timestamp) aus meter_readings ermitteln
+        Standard (inkrementell):
           - date_from = MAX(timestamp) + 1s (oder heute - DEFAULT_LOOKBACK_DAYS)
           - date_to   = jetzt (UTC)
-          - SPIE-API aufrufen und Werte speichern (ON CONFLICT DO NOTHING)
+          - Werte speichern (ON CONFLICT DO NOTHING)
+
+        Fallback (override_from gesetzt):
+          - date_from = override_from für ALLE Zähler
+          - replace=True: vorhandene Readings ab date_from werden je Zähler
+            gelöscht und durch die SPIE-Werte ersetzt (nur wenn SPIE Werte
+            liefert – sonst bleibt der Bestand unangetastet, kein Datenverlust).
 
         Fortschritt wird in /tmp/spie_sync_{job_id}.json geschrieben.
         """
@@ -268,12 +279,15 @@ class SpieService:
                     logger.debug("spie_import_no_nav_id", meter_id=str(meter.id), name=meter_name)
                     continue
 
-                # Startdatum: ab letztem Messwert (oder Fallback)
-                latest_ts = await self._get_latest_reading_timestamp(meter.id)
-                if latest_ts:
-                    date_from = (latest_ts + timedelta(seconds=1)).date()
+                # Startdatum: Fallback-Wunschdatum hat Vorrang, sonst ab letztem Messwert
+                if override_from is not None:
+                    date_from = override_from
                 else:
-                    date_from = (now - timedelta(days=DEFAULT_LOOKBACK_DAYS)).date()
+                    latest_ts = await self._get_latest_reading_timestamp(meter.id)
+                    if latest_ts:
+                        date_from = (latest_ts + timedelta(seconds=1)).date()
+                    else:
+                        date_from = (now - timedelta(days=DEFAULT_LOOKBACK_DAYS)).date()
 
                 date_to = now.date()
 
@@ -301,6 +315,14 @@ class SpieService:
                                  date_from=str(date_from), date_to=str(date_to))
                     continue
 
+                # Replace-Modus: vorhandene Readings ab date_from ersetzen.
+                # Nur löschen wenn SPIE auch Werte liefert (oben bereits geprüft),
+                # damit kein Bestand ohne Ersatz verloren geht.
+                if replace and override_from is not None:
+                    deleted = await self._delete_readings_from(meter.id, date_from)
+                    logger.info("spie_replace_deleted", meter=meter_name,
+                                deleted=deleted, date_from=str(date_from))
+
                 # Werte in DB schreiben (ON CONFLICT DO NOTHING)
                 meter_imported = await self._insert_readings(meter.id, readings)
                 imported_total += meter_imported
@@ -323,6 +345,25 @@ class SpieService:
         await self._save_last_sync(result)
         logger.info("spie_import_done", **{k: v for k, v in result.items() if k != "status"})
         return result
+
+    async def _delete_readings_from(self, meter_id: uuid.UUID, from_date: date) -> int:
+        """Alle Readings eines Zählers ab `from_date` (Berlin-Mitternacht) löschen.
+
+        Verwendet exakt dieselbe Zeitgrenze wie der SPIE-Abruf (Berlin-Mitternacht
+        in UTC), damit kein Versatz entsteht und der gelöschte Bereich deckungs-
+        gleich mit dem neu importierten Zeitraum ist.
+        """
+        from_ts = datetime.combine(
+            from_date, datetime.min.time(), tzinfo=ZoneInfo("Europe/Berlin")
+        ).astimezone(timezone.utc)
+        result = await self.db.execute(
+            delete(MeterReading).where(
+                MeterReading.meter_id == meter_id,
+                MeterReading.timestamp >= from_ts,
+            )
+        )
+        await self.db.commit()
+        return result.rowcount or 0
 
     async def _insert_readings(
         self, meter_id: uuid.UUID, readings: list[dict]

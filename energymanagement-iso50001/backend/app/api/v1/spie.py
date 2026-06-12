@@ -13,6 +13,7 @@ POST /spie/probe          → Diagnose: Rohantwort der SPIE-API für einen Zähl
 import asyncio
 import re
 import uuid
+from datetime import date as date_cls
 
 import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -76,11 +77,18 @@ async def test_spie_connection(
 
 @router.post("/sync")
 async def start_spie_sync(
+    from_date: str | None = Body(default=None),
+    replace: bool = Body(default=False),
     current_user: User = Depends(require_permission("settings", "update")),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Manuellen SPIE-Import starten.
+
+    Standard (ohne Body): inkrementeller Import ab letztem Messwert.
+    Fallback: `from_date` (YYYY-MM-DD) setzt das Startdatum für alle Zähler.
+    `replace=True` löscht vorhandene Messwerte ab `from_date` und ersetzt sie
+    durch die SPIE-Werte (nur wenn SPIE Werte liefert).
 
     Läuft als asyncio.Task im FastAPI-Prozess.
     Fortschritt: GET /spie/progress/{job_id}
@@ -93,22 +101,34 @@ async def start_spie_sync(
             detail="SPIE nicht konfiguriert. Bitte zuerst Zugangsdaten speichern.",
         )
 
+    override_from: date_cls | None = None
+    if from_date:
+        try:
+            override_from = date_cls.fromisoformat(from_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Ungültiges Datum (erwartet YYYY-MM-DD).")
+        if override_from > date_cls.today():
+            raise HTTPException(status_code=400, detail="Das Startdatum darf nicht in der Zukunft liegen.")
+
+    # replace nur sinnvoll mit explizitem Startdatum
+    do_replace = bool(replace and override_from is not None)
+
     job_id = str(uuid.uuid4())
 
     async def _run():
-        from app.core.database import get_db as _get_db
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
         from app.config import get_settings
         settings = get_settings()
         engine = create_async_engine(
             settings.database_url, echo=False, pool_size=2, max_overflow=2
         )
-        from sqlalchemy.ext.asyncio import async_sessionmaker
         session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         try:
             async with session_factory() as session:
                 service = SpieService(session)
-                await service.run_import(job_id=job_id)
+                await service.run_import(
+                    job_id=job_id, override_from=override_from, replace=do_replace,
+                )
         except Exception as e:
             from app.services.spie_service import _write_progress
             _write_progress(job_id, {"status": "error", "error": str(e)})
