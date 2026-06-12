@@ -311,6 +311,40 @@ class AnalyticsService:
 
         return [row.id for row in rows if row.id not in virtual_source_ids]
 
+    async def _resolve_total_meter_ids(
+        self,
+        period_start: date | None,
+        period_end: date | None,
+        site_id: uuid.UUID | None = None,
+        energy_type: str | None = None,
+    ) -> list[uuid.UUID]:
+        """Maßgebliche Zähler-IDs für eine Gesamt-/Aggregat-Auswertung.
+
+        Verhindert Eltern-/Kind-Doppelzählung: je Strang die tiefste Ebene mit
+        Daten im Zeitraum. Ohne Zeitraum Fallback auf Wurzelzähler.
+        """
+        from app.services.meter_hierarchy import resolve_authoritative_meter_ids
+
+        if period_start and period_end:
+            ids = await resolve_authoritative_meter_ids(
+                self.db, period_start, period_end,
+                site_id=site_id, energy_type=energy_type,
+            )
+            return list(ids)
+
+        # Fallback ohne Zeitraum: Wurzelzähler (kein Doppelzählungsrisiko)
+        q = select(Meter.id).where(
+            Meter.is_active == True,  # noqa: E712
+            Meter.is_feed_in != True,
+            Meter.is_virtual == False,  # noqa: E712
+            Meter.parent_meter_id.is_(None),
+        )
+        if site_id is not None:
+            q = q.where(Meter.site_id == site_id)
+        if energy_type is not None:
+            q = q.where(Meter.energy_type == energy_type)
+        return [row[0] for row in (await self.db.execute(q)).all()]
+
     async def _get_difference_series(
         self,
         meter: "Meter",  # type: ignore[name-defined]
@@ -536,28 +570,21 @@ class AnalyticsService:
                 if snap is not None:
                     return snap
 
-        # Standortfilter → Zähler-IDs auflösen
-        if site_id and not meter_ids:
-            meter_ids = await self._meter_ids_for_site(site_id)
-        # Zähler nach energy_type filtern (unabhängig ob aus site_id oder direkt übergeben)
-        if energy_type:
+        # Zähler-Menge auflösen — maßgebliche Zähler je Strang (keine Eltern+Kind-
+        # Doppelzählung). Vergleichsbasis = Zeitraum 1.
+        if not meter_ids:
+            meter_ids = await self._resolve_total_meter_ids(
+                period1_start, period1_end, site_id=site_id, energy_type=energy_type,
+            )
+        elif energy_type:
+            # Explizite Auswahl zusätzlich nach Energieart filtern
             et_query = select(Meter.id).where(
                 Meter.is_active == True,  # noqa: E712
                 Meter.is_feed_in != True,
                 Meter.energy_type == energy_type,
+                Meter.id.in_(meter_ids),
             )
-            if meter_ids:
-                et_query = et_query.where(Meter.id.in_(meter_ids))
-            result = await self.db.execute(et_query)
-            meter_ids = [row[0] for row in result.all()]
-        elif not meter_ids:
-            # Weder site_id noch energy_type → alle aktiven Zähler
-            all_query = select(Meter.id).where(
-                Meter.is_active == True,  # noqa: E712
-                Meter.is_feed_in != True,
-            )
-            result = await self.db.execute(all_query)
-            meter_ids = [row[0] for row in result.all()]
+            meter_ids = [row[0] for row in (await self.db.execute(et_query)).all()]
         if not meter_ids:
             return {"period1": {"start": "", "end": "", "data": {}}, "period2": {"start": "", "end": "", "data": {}}}
 
@@ -1652,31 +1679,40 @@ class AnalyticsService:
             "steam": "#EF4444", "other": "#9CA3AF",
         }
 
-        # Zähler laden
-        if site_id and not meter_ids:
-            meter_ids = await self._meter_ids_for_site(site_id)
-        meter_query = select(Meter).where(Meter.is_active == True)  # noqa: E712
-        if meter_ids:
-            meter_query = meter_query.where(Meter.id.in_(meter_ids))
+        # Zähler-Mengen je Jahr auflösen — maßgebliche Zähler je Strang (keine
+        # Eltern+Kind-Doppelzählung); explizite Auswahl hat Vorrang.
+        user_meter_ids = list(meter_ids) if meter_ids else None
+
+        async def _ids_for_year(year: int) -> list[uuid.UUID]:
+            if user_meter_ids is not None:
+                return user_meter_ids
+            return await self._resolve_total_meter_ids(
+                date(year, 1, 1), date(year, 12, 31), site_id=site_id,
+            )
+
+        ids_a = await _ids_for_year(year_a)
+        ids_b = await _ids_for_year(year_b)
+        label_ids = list({*ids_a, *ids_b})
+        if not label_ids:
+            return {"year_a": year_a, "year_b": year_b, "energy_types": [], "months": [], "rows": []}
+
+        # Energiearten/Einheiten für Labels bestimmen
+        meter_query = select(Meter).where(Meter.id.in_(label_ids))
         if energy_types:
             meter_query = meter_query.where(Meter.energy_type.in_(energy_types))
-        meters_result = await self.db.execute(meter_query)
-        meters = list(meters_result.scalars().all())
-
+        meters = list((await self.db.execute(meter_query)).scalars().all())
         if not meters:
             return {"year_a": year_a, "year_b": year_b, "energy_types": [], "months": [], "rows": []}
 
-        # Alle vorhandenen Energiearten bestimmen
         et_set: dict[str, str] = {}  # energy_type → primary_unit
         for m in meters:
             if m.energy_type not in et_set:
                 et_set[m.energy_type] = m.unit or "kWh"
 
-        # Monatliche Verbräuche für beide Jahre je Energieart – EINE Query pro Jahr
-        meter_id_list = [m.id for m in meters]
-
-        async def _monthly_by_et(year: int) -> dict[str, dict[int, float]]:
+        async def _monthly_by_et(year: int, ids: list[uuid.UUID]) -> dict[str, dict[int, float]]:
             """Ergibt {energy_type: {month: native_consumption}}"""
+            if not ids:
+                return {et: {} for et in et_set}
             year_start = datetime(year, 1, 1, tzinfo=timezone.utc)
             year_end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
 
@@ -1688,7 +1724,7 @@ class AnalyticsService:
                 )
                 .join(MeterReading, MeterReading.meter_id == Meter.id)
                 .where(
-                    Meter.id.in_(meter_id_list),
+                    Meter.id.in_(ids),
                     MeterReading.consumption.isnot(None),
                     MeterReading.timestamp >= year_start,
                     MeterReading.timestamp < year_end,
@@ -1703,8 +1739,8 @@ class AnalyticsService:
                     result[et][int(row.month_num)] = float(row.total or 0)
             return result
 
-        data_a = await _monthly_by_et(year_a)
-        data_b = await _monthly_by_et(year_b)
+        data_a = await _monthly_by_et(year_a, ids_a)
+        data_b = await _monthly_by_et(year_b, ids_b)
 
         months_meta = [{"month": m, "label": MONTH_LABELS[m - 1]} for m in range(1, 13)]
 
@@ -1791,9 +1827,12 @@ class AnalyticsService:
             "steam": "#EF4444", "other": "#9CA3AF",
         }
 
-        # Zähler laden
-        if site_id and not meter_ids:
-            meter_ids = await self._meter_ids_for_site(site_id)
+        # Zähler laden — maßgebliche Zähler je Strang (keine Eltern+Kind-
+        # Doppelzählung); explizite Auswahl hat Vorrang.
+        if not meter_ids:
+            meter_ids = await self._resolve_total_meter_ids(
+                start_date, end_date, site_id=site_id,
+            )
         meter_query = select(Meter).where(Meter.is_active == True)  # noqa: E712
         if meter_ids:
             meter_query = meter_query.where(Meter.id.in_(meter_ids))

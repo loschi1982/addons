@@ -20,6 +20,11 @@ from app.models.meter import Meter
 from app.models.reading import MeterReading
 from app.models.settings import AppSetting
 from app.models.snapshot import DashboardSnapshot, DataQualitySnapshot
+from app.services.meter_hierarchy import (
+    AUTO_DATA_SOURCES,
+    meter_ids_with_data,
+    select_authoritative_ids,
+)
 from app.services.snapshot_periods import match_period_key, resolve_period
 
 logger = structlog.get_logger()
@@ -107,7 +112,12 @@ class DashboardService:
         )
         return [row[0] for row in result.all()]
 
-    async def _resolve_meter_set(self, site_id: uuid.UUID | None = None) -> dict:
+    async def _resolve_meter_set(
+        self,
+        period_start: date,
+        period_end: date,
+        site_id: uuid.UUID | None = None,
+    ) -> dict:
         """Auflösen einer Zähler-Menge für Dashboard-Aggregationen.
 
         Cross-Site-Netto: Ist für einen Physical-Root ein Virtual-Netto-Zähler
@@ -164,10 +174,19 @@ class DashboardService:
                         pass
 
         # 3. Physical-IDs: nicht virtuell UND nicht source eines Virtual-Meters
-        physical_ids = [
-            m.id for m in all_meters
-            if not m.is_virtual and m.id not in virtual_source_ids
+        #    UND keine Einspeisung (Verbrauchszähler).
+        candidates = [
+            m for m in all_meters
+            if not m.is_virtual and m.id not in virtual_source_ids and not m.is_feed_in
         ]
+
+        # 3b. Doppelzählung vermeiden: je Strang nur die tiefste Ebene mit Daten.
+        #     (Eltern- UND Kindzähler dürfen nicht gemeinsam summiert werden.)
+        data_ids = await meter_ids_with_data(
+            self.db, period_start, period_end, [m.id for m in candidates]
+        )
+        authoritative = select_authoritative_ids(candidates, data_ids)
+        physical_ids = [m.id for m in candidates if m.id in authoritative]
 
         # 4. Allocation-Faktoren berechnen (nur bei Site-Filter)
         allocation_factors: dict[uuid.UUID, Decimal] = {}
@@ -333,9 +352,13 @@ class DashboardService:
             finally:
                 timings[name] = round((_time.time() - t0) * 1000)
 
-        # Zähler-Menge auflösen: Cross-Site-Netto + Allocation-Faktoren
-        meter_set = await _timed("resolve_meter_set", self._resolve_meter_set(site_id))
-        physical_ids: list | None = meter_set["physical_ids"] if site_id else None
+        # Zähler-Menge auflösen: maßgebliche Zähler je Strang (keine Eltern+Kind-
+        # Doppelzählung) + Cross-Site-Netto + Allocation-Faktoren.
+        meter_set = await _timed(
+            "resolve_meter_set",
+            self._resolve_meter_set(period_start, period_end, site_id),
+        )
+        physical_ids: list = meter_set["physical_ids"]
         virtual_meters: list = meter_set["virtual_meters"]
         allocation_factors: dict = meter_set["allocation_factors"]
 
@@ -503,9 +526,6 @@ class DashboardService:
         if not period_end:
             period_end = today
 
-        meter_set = await self._resolve_meter_set(site_id)
-        physical_ids: list | None = meter_set["physical_ids"] if site_id else None
-
         try:
             alerts = await self._get_alerts()
         except Exception as e:
@@ -514,7 +534,7 @@ class DashboardService:
 
         try:
             plausibility = await self._get_plausibility_warnings(
-                period_start, period_end, physical_ids,
+                period_start, period_end, site_id,
             )
         except Exception as e:
             logger.error("data_quality_plausibility_error", error=str(e))
@@ -1535,11 +1555,26 @@ class DashboardService:
         return await self._get_enpi_overview(start, end)
 
     async def _get_plausibility_warnings(
-        self, start: date, end: date, meter_ids: list | None = None
+        self, start: date, end: date, site_id: uuid.UUID | None = None
     ) -> list[dict]:
-        """Plausibilitätsprüfungen kombiniert (Sub-Meter-Mismatch + eingefrorene Zähler)."""
-        warnings = await self._get_submeter_warnings(start, end, meter_ids)
-        warnings.extend(await self._get_frozen_meter_warnings(meter_ids))
+        """Plausibilitätsprüfungen kombiniert (Eltern-/Kind-Abweichung + eingefrorene Zähler).
+
+        Scope optional über `site_id`. Die Eltern-Kind-Prüfung wird NICHT auf die
+        (doppelzählungsbereinigte) maßgebliche Zählermenge eingeschränkt, sondern
+        betrachtet alle Eltern-Ebenen im Scope.
+        """
+        site_meter_ids: set | None = None
+        if site_id is not None:
+            rows = await self.db.execute(
+                select(Meter.id).where(
+                    Meter.is_active == True,  # noqa: E712
+                    Meter.site_id == site_id,
+                )
+            )
+            site_meter_ids = {r[0] for r in rows.all()}
+
+        warnings = await self._get_submeter_warnings(start, end, site_meter_ids)
+        warnings.extend(await self._get_frozen_meter_warnings(site_meter_ids))
         return warnings
 
     async def _get_frozen_meter_warnings(
@@ -1632,89 +1667,98 @@ class DashboardService:
         return warnings
 
     async def _get_submeter_warnings(
-        self, start: date, end: date, meter_ids: list | None = None
+        self, start: date, end: date, meter_ids: set | None = None
     ) -> list[dict]:
-        """Plausibilitätsprüfung: Hauptzähler vs. Summe Unterzähler.
+        """Eltern-Kind-Plausibilität über ALLE Hierarchie-Ebenen.
 
-        Warnt wenn die Differenz > 15 % beträgt.
+        Warnt, wenn die Summe der **direkten** Kinder den Elternzähler über die
+        Toleranz hinaus übersteigt (physikalisch unmöglich). Untererfassung
+        (Kinder < Eltern) ist normal (Verluste / nicht zugeordnet) und löst keine
+        Warnung aus — sie erscheint als ``unaccounted`` im Energieschema.
+
+        Toleranz: automatische Quellen **15 %**, manuelle **30 %** (variable
+        Ableseintervalle); manuell, sobald Eltern ODER ein direktes Kind manuell ist.
+        Einheiten werden vor dem Vergleich auf kWh normiert (MWh/m³/…).
+        Scope optional über ``meter_ids`` (z. B. Site).
         """
         ts_start = datetime.combine(start, time.min, tzinfo=timezone.utc)
         ts_end = datetime.combine(end + timedelta(days=1), time.min, tzinfo=timezone.utc)
 
-        # Hauptzähler laden, die Unterzähler haben
-        parent_q = (
-            select(Meter.id, Meter.name, Meter.display_name, Meter.energy_type, Meter.unit)
-            .where(
-                Meter.is_active == True,  # noqa: E712
-                Meter.parent_meter_id.is_(None),
-                Meter.id.in_(
-                    select(Meter.parent_meter_id).where(
-                        Meter.parent_meter_id.isnot(None),
-                        Meter.is_active == True,  # noqa: E712
-                    ).distinct()
-                ),
-            )
-        )
+        AUTO_TOL = Decimal("0.15")
+        MANUAL_TOL = Decimal("0.30")
+
+        # Alle aktiven Zähler (optional gescoped) als Hierarchie laden
+        meter_q = select(
+            Meter.id, Meter.name, Meter.display_name, Meter.energy_type,
+            Meter.unit, Meter.parent_meter_id, Meter.data_source,
+        ).where(Meter.is_active == True)  # noqa: E712
         if meter_ids is not None:
-            parent_q = parent_q.where(Meter.id.in_(meter_ids))
-        parents = (await self.db.execute(parent_q)).all()
-        if not parents:
+            if not meter_ids:
+                return []
+            meter_q = meter_q.where(Meter.id.in_(list(meter_ids)))
+        rows = (await self.db.execute(meter_q)).all()
+        if not rows:
             return []
 
-        parent_ids = [p.id for p in parents]
+        by_id = {r.id: r for r in rows}
+        children_by_parent: dict = {}
+        for r in rows:
+            if r.parent_meter_id is not None and r.parent_meter_id in by_id:
+                children_by_parent.setdefault(r.parent_meter_id, []).append(r)
+        if not children_by_parent:
+            return []
 
-        # Verbrauch der Hauptzähler
-        main_q = (
-            select(
-                MeterReading.meter_id,
-                func.sum(MeterReading.consumption).label("total"),
-            )
+        # Verbrauch je Zähler im Zeitraum
+        cons_q = (
+            select(MeterReading.meter_id, func.sum(MeterReading.consumption).label("total"))
             .where(
-                MeterReading.meter_id.in_(parent_ids),
+                MeterReading.meter_id.in_(list(by_id.keys())),
                 MeterReading.timestamp >= ts_start,
                 MeterReading.timestamp < ts_end,
+                MeterReading.consumption.isnot(None),
             )
             .group_by(MeterReading.meter_id)
         )
-        main_result = {r.meter_id: float(r.total or 0) for r in (await self.db.execute(main_q)).all()}
+        cons = {
+            r.meter_id: (r.total or Decimal("0"))
+            for r in (await self.db.execute(cons_q)).all()
+        }
 
-        # Alle Unterzähler + deren Verbrauch
-        sub_q = (
-            select(
-                Meter.parent_meter_id,
-                func.sum(MeterReading.consumption).label("total"),
-            )
-            .join(MeterReading, MeterReading.meter_id == Meter.id)
-            .where(
-                Meter.parent_meter_id.in_(parent_ids),
-                Meter.is_active == True,  # noqa: E712
-                MeterReading.timestamp >= ts_start,
-                MeterReading.timestamp < ts_end,
-            )
-            .group_by(Meter.parent_meter_id)
-        )
-        sub_result = {r.parent_meter_id: float(r.total or 0) for r in (await self.db.execute(sub_q)).all()}
+        def to_kwh(meter_row) -> Decimal:
+            raw = cons.get(meter_row.id, Decimal("0"))
+            return raw * CONVERSION_FACTORS.get(meter_row.unit, Decimal("1"))
 
-        warnings = []
-        for p in parents:
-            main_val = main_result.get(p.id, 0)
-            sub_sum = sub_result.get(p.id, 0)
-            if main_val <= 0 or sub_sum <= 0:
+        def is_manual(meter_row) -> bool:
+            return (meter_row.data_source or "").lower() not in AUTO_DATA_SOURCES
+
+        warnings: list[dict] = []
+        for parent_id, kids in children_by_parent.items():
+            parent = by_id[parent_id]
+            parent_kwh = to_kwh(parent)
+            if parent_kwh <= 0:
+                continue  # Eltern ohne eigene Daten → kein Vergleich
+            sub_kwh = sum((to_kwh(c) for c in kids), Decimal("0"))
+            if sub_kwh <= 0:
                 continue
-            diff_pct = abs(1 - sub_sum / main_val) * 100
-            if diff_pct > 15:
+            manual = is_manual(parent) or any(is_manual(c) for c in kids)
+            tol = MANUAL_TOL if manual else AUTO_TOL
+            if sub_kwh > parent_kwh * (Decimal("1") + tol):
+                diff_pct = float((sub_kwh / parent_kwh - Decimal("1")) * 100)
                 warnings.append({
                     "warning_type": "sub_meter_mismatch",
-                    "meter_name": p.name,
-                    "meter_display_name": p.display_name,
-                    "meter_id": str(p.id),
-                    "energy_type": p.energy_type,
-                    "main_value": round(main_val, 1),
-                    "main_unit": p.unit,
-                    "sub_sum": round(sub_sum, 1),
+                    "meter_name": parent.name,
+                    "meter_display_name": parent.display_name,
+                    "meter_id": str(parent.id),
+                    "energy_type": parent.energy_type,
+                    "main_value": round(float(parent_kwh), 1),
+                    "main_unit": "kWh",
+                    "sub_sum": round(float(sub_kwh), 1),
                     "diff_percent": round(diff_pct, 1),
+                    "tolerance_percent": int(tol * 100),
+                    "is_manual": manual,
                 })
 
+        warnings.sort(key=lambda w: w["diff_percent"], reverse=True)
         return warnings
 
     async def _get_enpi_overview(self, start: date, end: date) -> list[dict]:

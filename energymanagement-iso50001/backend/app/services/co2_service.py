@@ -25,6 +25,7 @@ from app.models.meter import Meter
 from app.models.reading import MeterReading
 from app.models.settings import AppSetting
 from app.models.site import Building, Site, UsageUnit
+from app.services.meter_hierarchy import resolve_authoritative_meter_ids
 
 logger = structlog.get_logger()
 
@@ -356,7 +357,15 @@ class CO2Service:
     # ── Dashboard & Zusammenfassung ──
 
     async def get_summary(self, start_date: date, end_date: date) -> dict:
-        """CO₂-Zusammenfassung für einen Zeitraum."""
+        """CO₂-Zusammenfassung für einen Zeitraum.
+
+        Aggregiert nur über die je Strang maßgeblichen Zähler (tiefste Ebene mit
+        Daten), damit Eltern- und Kindzähler nicht doppelt gezählt werden.
+        """
+        auth_ids = list(
+            await resolve_authoritative_meter_ids(self.db, start_date, end_date)
+        )
+
         # Gesamt-CO₂
         total_result = await self.db.execute(
             select(
@@ -365,6 +374,7 @@ class CO2Service:
             ).where(
                 CO2Calculation.period_start >= start_date,
                 CO2Calculation.period_end <= end_date,
+                CO2Calculation.meter_id.in_(auth_ids),
             )
         )
         total_co2, total_kwh = total_result.one()
@@ -386,6 +396,7 @@ class CO2Service:
             .where(
                 CO2Calculation.period_start >= start_date,
                 CO2Calculation.period_end <= end_date,
+                CO2Calculation.meter_id.in_(auth_ids),
             )
             .group_by(Meter.energy_type)
         )
@@ -408,6 +419,7 @@ class CO2Service:
             .where(
                 CO2Calculation.period_start >= start_date,
                 CO2Calculation.period_end <= end_date,
+                CO2Calculation.meter_id.in_(auth_ids),
             )
             .group_by(EmissionFactor.scope)
         )
@@ -420,10 +432,14 @@ class CO2Service:
         days_delta = (end_date - start_date).days
         prev_start = date(start_date.year - 1, start_date.month, start_date.day)
         prev_end = date(end_date.year - 1, end_date.month, end_date.day)
+        prev_auth = list(
+            await resolve_authoritative_meter_ids(self.db, prev_start, prev_end)
+        )
         prev_result = await self.db.execute(
             select(func.sum(CO2Calculation.co2_kg)).where(
                 CO2Calculation.period_start >= prev_start,
                 CO2Calculation.period_end <= prev_end,
+                CO2Calculation.meter_id.in_(prev_auth),
             )
         )
         prev_co2 = prev_result.scalar() or Decimal("0")
@@ -456,6 +472,11 @@ class CO2Service:
         current_year = await self.get_summary(current_start, current_end)
         previous_year = await self.get_summary(prev_start, prev_end)
 
+        # Maßgebliche Zähler des Jahres (für Monatstrend + Scope, ohne Doppelzählung)
+        year_auth = list(
+            await resolve_authoritative_meter_ids(self.db, current_start, current_end)
+        )
+
         # Monatlicher Trend
         monthly_trend = []
         for month in range(1, 13):
@@ -469,6 +490,7 @@ class CO2Service:
                 select(func.sum(CO2Calculation.co2_kg)).where(
                     CO2Calculation.period_start >= m_start,
                     CO2Calculation.period_end < m_end,
+                    CO2Calculation.meter_id.in_(year_auth),
                 )
             )
             co2 = result.scalar() or Decimal("0")
@@ -488,6 +510,7 @@ class CO2Service:
             .where(
                 CO2Calculation.period_start >= current_start,
                 CO2Calculation.period_end <= current_end,
+                CO2Calculation.meter_id.in_(year_auth),
             )
             .group_by(EmissionFactor.scope)
         )

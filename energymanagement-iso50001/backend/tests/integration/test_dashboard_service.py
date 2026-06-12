@@ -206,7 +206,7 @@ async def test_virtual_net_meter_in_top_consumers(db_session: AsyncSession):
     await db_session.commit()
 
     service = DashboardService(db_session)
-    ms = await service._resolve_meter_set(site_konzert.id)
+    ms = await service._resolve_meter_set(date(2024, 1, 1), date(2024, 12, 31), site_konzert.id)
     assert brutto.id not in ms["physical_ids"]  # Source ausgeschlossen
     assert len(ms["virtual_meters"]) == 1
 
@@ -283,7 +283,7 @@ async def test_allocation_factor_in_top_consumers(db_session: AsyncSession):
     service = DashboardService(db_session)
 
     # Site A: Allocation-Faktor = 0.6
-    ms_a = await service._resolve_meter_set(site_a.id)
+    ms_a = await service._resolve_meter_set(date(2024, 1, 1), date(2024, 12, 31), site_a.id)
     assert ms_a["allocation_factors"].get(m.id) == pytest.approx(Decimal("0.6"), abs=Decimal("0.01"))
     total_a = await service._total_consumption(
         date(2024, 1, 1), date(2024, 12, 31),
@@ -292,7 +292,7 @@ async def test_allocation_factor_in_top_consumers(db_session: AsyncSession):
     assert float(total_a) == pytest.approx(600.0, abs=1)
 
     # Site B: Allocation-Faktor = 0.4 (Zähler wird via Allocation einbezogen)
-    ms_b = await service._resolve_meter_set(site_b.id)
+    ms_b = await service._resolve_meter_set(date(2024, 1, 1), date(2024, 12, 31), site_b.id)
     assert m.id in ms_b["physical_ids"]
     assert ms_b["allocation_factors"].get(m.id) == pytest.approx(Decimal("0.4"), abs=Decimal("0.01"))
     total_b = await service._total_consumption(
