@@ -42,16 +42,22 @@ def _auth_join(query, *, month_expr):
     So wird pro Monat die tiefste Ebene mit Daten genutzt: ein Hauptzähler ohne
     Ablesung in einem Monat verdrängt seine Unterzähler dort nicht mehr.
     """
-    auth = func.unnest(
-        cast(bindparam("auth_mids"), ARRAY(PGUUID(as_uuid=True))),
-        cast(bindparam("auth_months"), ARRAY(TIMESTAMP(timezone=True))),
+    # PostgreSQL erlaubt bei unnest(a, b) (mehrere Argumente) KEINE Spaltenliste.
+    # Daher zwei einzelne unnest(...) WITH ORDINALITY und über den Index zippen.
+    am = func.unnest(
+        cast(bindparam("auth_mids"), ARRAY(PGUUID(as_uuid=True)))
     ).table_valued(
-        column("meter_id", PGUUID(as_uuid=True)),
-        column("month", TIMESTAMP(timezone=True)),
-    ).render_derived(with_types=True)
-    return query.join(
-        auth,
-        and_(auth.c.meter_id == Meter.id, auth.c.month == month_expr),
+        column("meter_id", PGUUID(as_uuid=True)), with_ordinality="ord1"
+    ).render_derived()
+    amo = func.unnest(
+        cast(bindparam("auth_months"), ARRAY(TIMESTAMP(timezone=True)))
+    ).table_valued(
+        column("month", TIMESTAMP(timezone=True)), with_ordinality="ord2"
+    ).render_derived()
+    return (
+        query
+        .join(am, am.c.meter_id == Meter.id)
+        .join(amo, and_(amo.c.ord2 == am.c.ord1, amo.c.month == month_expr))
     )
 
 CONVERSION_FACTORS: dict[str, Decimal] = {
