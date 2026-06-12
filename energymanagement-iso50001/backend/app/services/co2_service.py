@@ -25,7 +25,10 @@ from app.models.meter import Meter
 from app.models.reading import MeterReading
 from app.models.settings import AppSetting
 from app.models.site import Building, Site, UsageUnit
-from app.services.meter_hierarchy import resolve_authoritative_meter_ids
+from app.services.meter_hierarchy import (
+    resolve_authoritative_meter_ids,
+    resolve_authoritative_pairs_by_month,
+)
 
 logger = structlog.get_logger()
 
@@ -387,96 +390,73 @@ class CO2Service:
         Aggregiert nur über die je Strang maßgeblichen Zähler (tiefste Ebene mit
         Daten), damit Eltern- und Kindzähler nicht doppelt gezählt werden.
         """
-        auth_ids = list(
-            await resolve_authoritative_meter_ids(self.db, start_date, end_date)
-        )
+        # Je MONAT maßgebliche (Zähler, Monat)-Paare – damit ein Hauptzähler mit
+        # nur teilweise vorhandenen Daten seine Unterzähler nicht für leere Monate
+        # verdrängt (analog Dashboard). CO2Calculation ist je (Zähler, Monat); wir
+        # filtern die Zeilen in Python gegen die Paare.
+        pairs = await resolve_authoritative_pairs_by_month(self.db, start_date, end_date)
 
-        # Gesamt-CO₂ und kWh – Wasser (Nicht-Energieträger) bleibt beim
-        # kWh-Gesamtverbrauch außen vor, damit die Ø-Intensität nicht verwässert.
-        total_result = await self.db.execute(
+        rows = (await self.db.execute(
             select(
-                func.sum(CO2Calculation.co2_kg),
-                func.sum(CO2Calculation.consumption_kwh),
+                CO2Calculation.meter_id,
+                CO2Calculation.period_start,
+                CO2Calculation.co2_kg,
+                CO2Calculation.consumption_kwh,
+                Meter.energy_type,
+                EmissionFactor.scope,
             )
             .join(Meter, Meter.id == CO2Calculation.meter_id)
+            .join(EmissionFactor, EmissionFactor.id == CO2Calculation.emission_factor_id, isouter=True)
             .where(
                 CO2Calculation.period_start >= start_date,
                 CO2Calculation.period_end <= end_date,
-                CO2Calculation.meter_id.in_(auth_ids),
-                Meter.energy_type.notin_(NON_ENERGY_TYPES),
             )
-        )
-        total_co2, total_kwh = total_result.one()
-        total_co2 = total_co2 or Decimal("0")
-        total_kwh = total_kwh or Decimal("0")
+        )).all()
+
+        total_co2 = Decimal("0")
+        total_kwh = Decimal("0")
+        by_type_acc: dict[str, dict] = {}
+        scope_sums: dict[str, float] = {}
+        for r in rows:
+            if (r.meter_id, (r.period_start.year, r.period_start.month)) not in pairs:
+                continue
+            co2 = r.co2_kg or Decimal("0")
+            kwh = r.consumption_kwh or Decimal("0")
+            total_co2 += co2
+            if r.energy_type not in NON_ENERGY_TYPES:
+                total_kwh += kwh
+            acc = by_type_acc.setdefault(r.energy_type, {"co2": Decimal("0"), "kwh": Decimal("0")})
+            acc["co2"] += co2
+            acc["kwh"] += kwh
+            sk = normalize_scope(r.scope)
+            scope_sums[sk] = scope_sums.get(sk, 0.0) + float(co2)
 
         avg_factor = (
             total_co2 * Decimal("1000") / total_kwh if total_kwh > 0 else Decimal("0")
         )
-
-        # Nach Energietyp aufschlüsseln
-        by_type_result = await self.db.execute(
-            select(
-                Meter.energy_type,
-                func.sum(CO2Calculation.co2_kg),
-                func.sum(CO2Calculation.consumption_kwh),
-            )
-            .join(Meter, Meter.id == CO2Calculation.meter_id)
-            .where(
-                CO2Calculation.period_start >= start_date,
-                CO2Calculation.period_end <= end_date,
-                CO2Calculation.meter_id.in_(auth_ids),
-            )
-            .group_by(Meter.energy_type)
-        )
         by_energy_type = [
-            {
-                "energy_type": et,
-                "co2_kg": float(co2 or 0),
-                "consumption_kwh": float(kwh or 0),
-            }
-            for et, co2, kwh in by_type_result.all()
+            {"energy_type": et, "co2_kg": float(v["co2"]), "consumption_kwh": float(v["kwh"])}
+            for et, v in by_type_acc.items()
         ]
-
-        # Nach Scope aufschlüsseln
-        by_scope_result = await self.db.execute(
-            select(
-                EmissionFactor.scope,
-                func.sum(CO2Calculation.co2_kg),
-            )
-            .join(EmissionFactor, EmissionFactor.id == CO2Calculation.emission_factor_id)
-            .where(
-                CO2Calculation.period_start >= start_date,
-                CO2Calculation.period_end <= end_date,
-                CO2Calculation.meter_id.in_(auth_ids),
-            )
-            .group_by(EmissionFactor.scope)
-        )
-        # Scopes normalisieren und gleiche Scopes zusammenführen
-        scope_sums: dict[str, float] = {}
-        for scope, co2 in by_scope_result.all():
-            key = normalize_scope(scope)
-            scope_sums[key] = scope_sums.get(key, 0.0) + float(co2 or 0)
         by_scope = [
-            {"scope": scope, "co2_kg": co2}
-            for scope, co2 in sorted(scope_sums.items())
+            {"scope": s, "co2_kg": c} for s, c in sorted(scope_sums.items())
         ]
 
-        # Trend vs. Vorjahreszeitraum
-        days_delta = (end_date - start_date).days
+        # Trend vs. Vorjahreszeitraum (ebenfalls pro Monat maßgeblich)
         prev_start = date(start_date.year - 1, start_date.month, start_date.day)
         prev_end = date(end_date.year - 1, end_date.month, end_date.day)
-        prev_auth = list(
-            await resolve_authoritative_meter_ids(self.db, prev_start, prev_end)
-        )
-        prev_result = await self.db.execute(
-            select(func.sum(CO2Calculation.co2_kg)).where(
+        prev_pairs = await resolve_authoritative_pairs_by_month(self.db, prev_start, prev_end)
+        prev_rows = (await self.db.execute(
+            select(CO2Calculation.meter_id, CO2Calculation.period_start, CO2Calculation.co2_kg)
+            .where(
                 CO2Calculation.period_start >= prev_start,
                 CO2Calculation.period_end <= prev_end,
-                CO2Calculation.meter_id.in_(prev_auth),
             )
-        )
-        prev_co2 = prev_result.scalar() or Decimal("0")
+        )).all()
+        prev_co2 = Decimal("0")
+        for r in prev_rows:
+            if (r.meter_id, (r.period_start.year, r.period_start.month)) in prev_pairs:
+                prev_co2 += r.co2_kg or Decimal("0")
         trend = None
         if prev_co2 > 0:
             trend = Decimal(str(round(float((total_co2 - prev_co2) / prev_co2 * 100), 1)))
@@ -506,52 +486,38 @@ class CO2Service:
         current_year = await self.get_summary(current_start, current_end)
         previous_year = await self.get_summary(prev_start, prev_end)
 
-        # Maßgebliche Zähler des Jahres (für Monatstrend + Scope, ohne Doppelzählung)
-        year_auth = list(
-            await resolve_authoritative_meter_ids(self.db, current_start, current_end)
-        )
-
-        # Monatlicher Trend
-        monthly_trend = []
-        for month in range(1, 13):
-            m_start = date(year, month, 1)
-            if month == 12:
-                m_end = date(year + 1, 1, 1)
-            else:
-                m_end = date(year, month + 1, 1)
-
-            result = await self.db.execute(
-                select(func.sum(CO2Calculation.co2_kg)).where(
-                    CO2Calculation.period_start >= m_start,
-                    CO2Calculation.period_end < m_end,
-                    CO2Calculation.meter_id.in_(year_auth),
-                )
-            )
-            co2 = result.scalar() or Decimal("0")
-            monthly_trend.append({
-                "month": month,
-                "year": year,
-                "co2_kg": float(co2),
-            })
-
-        # Scope-Aufschlüsselung
-        scope_result = await self.db.execute(
+        # Je Monat maßgebliche (Zähler, Monat)-Paare (Monatstrend + Scope, ohne
+        # Doppelzählung – Hauptzähler verdrängt Unterzähler nur in eigenen Monaten).
+        year_pairs = await resolve_authoritative_pairs_by_month(self.db, current_start, current_end)
+        year_rows = (await self.db.execute(
             select(
+                CO2Calculation.meter_id,
+                CO2Calculation.period_start,
+                CO2Calculation.co2_kg,
                 EmissionFactor.scope,
-                func.sum(CO2Calculation.co2_kg),
             )
-            .join(EmissionFactor, EmissionFactor.id == CO2Calculation.emission_factor_id)
+            .join(EmissionFactor, EmissionFactor.id == CO2Calculation.emission_factor_id, isouter=True)
             .where(
                 CO2Calculation.period_start >= current_start,
                 CO2Calculation.period_end <= current_end,
-                CO2Calculation.meter_id.in_(year_auth),
             )
-            .group_by(EmissionFactor.scope)
-        )
+        )).all()
+
+        monthly_co2: dict[int, Decimal] = {m: Decimal("0") for m in range(1, 13)}
         scope_breakdown: dict[str, float] = {}
-        for scope, co2 in scope_result.all():
-            key = normalize_scope(scope)
-            scope_breakdown[key] = scope_breakdown.get(key, 0.0) + float(co2 or 0)
+        for r in year_rows:
+            if (r.meter_id, (r.period_start.year, r.period_start.month)) not in year_pairs:
+                continue
+            co2 = r.co2_kg or Decimal("0")
+            if r.period_start.year == year and 1 <= r.period_start.month <= 12:
+                monthly_co2[r.period_start.month] += co2
+            sk = normalize_scope(r.scope)
+            scope_breakdown[sk] = scope_breakdown.get(sk, 0.0) + float(co2)
+
+        monthly_trend = [
+            {"month": m, "year": year, "co2_kg": float(monthly_co2[m])}
+            for m in range(1, 13)
+        ]
 
         return {
             "current_year": current_year,

@@ -221,3 +221,52 @@ async def resolve_authoritative_meter_ids(
     all_ids = {n.id for n in nodes}
     has_data = await meter_ids_with_data(db, period_start, period_end, all_ids)
     return select_authoritative_ids(nodes, has_data)
+
+
+async def resolve_authoritative_pairs_by_month(
+    db,
+    period_start: date,
+    period_end: date,
+    *,
+    site_id: uuid.UUID | None = None,
+    energy_type: str | None = None,
+    exclude_feed_in: bool = True,
+    candidate_ids: Iterable[uuid.UUID] | None = None,
+) -> set[tuple[uuid.UUID, tuple[int, int]]]:
+    """Wie ``resolve_authoritative_meter_ids``, aber PRO MONAT.
+
+    Rückgabe: Menge von ``(meter_id, (jahr, monat))`` – jedes Paar ist in dem
+    Monat maßgeblich. Damit kann eine Auswertung je Monat die tiefste Ebene mit
+    Daten nutzen (Hauptzähler ohne Ablesung verdrängt seine Unterzähler nur in
+    den Monaten, in denen er selbst Daten hat). Die Monate sind UTC-Monatsanfänge.
+    """
+    q = select(Meter.id, Meter.parent_meter_id).where(
+        Meter.is_active == True,  # noqa: E712
+        Meter.is_virtual == False,  # noqa: E712
+    )
+    if exclude_feed_in:
+        q = q.where(Meter.is_feed_in != True)  # noqa: E712
+    if site_id is not None:
+        q = q.where(Meter.site_id == site_id)
+    if energy_type is not None:
+        q = q.where(Meter.energy_type == energy_type)
+    if candidate_ids is not None:
+        cand = list(candidate_ids)
+        if not cand:
+            return set()
+        q = q.where(Meter.id.in_(cand))
+
+    rows = (await db.execute(q)).all()
+    if not rows:
+        return set()
+
+    class _N:
+        __slots__ = ("id", "parent_meter_id")
+
+        def __init__(self, mid, pid):
+            self.id = mid
+            self.parent_meter_id = pid
+
+    nodes = [_N(r.id, r.parent_meter_id) for r in rows]
+    mids, months = await authoritative_pairs_by_month(db, period_start, period_end, nodes)
+    return {(mid, (m.year, m.month)) for mid, m in zip(mids, months)}
