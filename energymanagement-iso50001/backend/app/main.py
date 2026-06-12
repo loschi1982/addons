@@ -90,6 +90,24 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"⚠ Schema-Aktualisierung fehlgeschlagen: {e}")
 
+    # Performance-Index für die Ausreißererkennung (Median je Zähler über
+    # consumption). Idempotent via IF NOT EXISTS, in eigener Transaktion mit
+    # eigenem try/except, damit ein fehlschlagender Index-Build den Start nicht
+    # bricht. Der Build läuft real nur beim ersten Mal; danach No-op.
+    if db_available:
+        try:
+            from sqlalchemy import text
+            from app.core.database import _engine as engine
+
+            async with engine.begin() as conn:
+                await conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS idx_meter_readings_meter_consumption "
+                    "ON meter_readings (meter_id, consumption)"
+                ))
+            print("✓ Performance-Index meter_readings(meter_id, consumption) sichergestellt")
+        except Exception as e:
+            print(f"⚠ Performance-Index konnte nicht angelegt werden: {e}")
+
     # Seed-Daten laden (nur wenn DB verfügbar)
     if db_available:
         try:
