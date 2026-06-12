@@ -24,6 +24,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_permission
 from app.models.meter import Meter
 from app.models.reading import MeterReading
+from app.models.settings import AppSetting
 from app.models.user import User
 from app.schemas.common import DeleteResponse, PaginatedResponse
 from app.schemas.reading import (
@@ -33,7 +34,12 @@ from app.schemas.reading import (
     ReadingResponse,
     ReadingUpdate,
 )
-from app.services.reading_service import ReadingService
+from app.services.reading_service import (
+    OUTLIER_DEFAULT_FACTOR,
+    OUTLIER_DEFAULT_MIN_VALUE,
+    OUTLIER_SNAPSHOT_KEY,
+    ReadingService,
+)
 
 router = APIRouter()
 
@@ -176,6 +182,19 @@ async def detect_outliers(
     Erkennt Ausreißer via IQR-ähnlicher Methode:
     Werte > factor_threshold × Median des jeweiligen Zählers gelten als Ausreißer.
     """
+    # Schnellster Pfad: Bei Default-Parametern aus der vorberechneten Liste
+    # liefern (Celery-Task precompute_consumption_stats). Vermeidet jeden
+    # Live-Scan über die Timescale-Chunks. Energieart wird im Speicher gefiltert.
+    if factor_threshold == OUTLIER_DEFAULT_FACTOR and min_value == OUTLIER_DEFAULT_MIN_VALUE:
+        snap = (await db.execute(
+            select(AppSetting.value).where(AppSetting.key == OUTLIER_SNAPSHOT_KEY)
+        )).scalar_one_or_none()
+        if snap and snap.get("items") is not None:
+            items = snap["items"]
+            if energy_type:
+                items = [it for it in items if it.get("energy_type") == energy_type]
+            return [OutlierItem(**it) for it in items[:500]]
+
     params: dict = {"factor": factor_threshold, "min_value": min_value}
     if energy_type:
         params["energy_type"] = energy_type
@@ -278,6 +297,7 @@ async def bulk_handle_outliers(
     if action == "delete":
         await db.execute(delete(MeterReading).where(MeterReading.id.in_(ids)))
         await db.commit()
+        await ReadingService(db).prune_outlier_snapshot(set(reading_ids))
         return {"status": "deleted", "count": len(ids)}
     if action == "flag":
         result = await db.execute(select(MeterReading).where(MeterReading.id.in_(ids)))
@@ -287,6 +307,7 @@ async def bulk_handle_outliers(
             r.consumption = None
             r.notes = f"Als Ausreißer markiert (Batch) am {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC"
         await db.commit()
+        await ReadingService(db).prune_outlier_snapshot(set(reading_ids))
         return {"status": "flagged", "count": len(ids)}
 
 
@@ -396,6 +417,7 @@ async def handle_outlier(
     if body.action == "delete":
         await db.delete(reading)
         await db.commit()
+        await ReadingService(db).prune_outlier_snapshot({str(reading_id)})
         return {"status": "deleted", "reading_id": str(reading_id)}
 
     if body.action == "flag":
@@ -403,6 +425,7 @@ async def handle_outlier(
         reading.consumption = None
         reading.notes = f"Als Ausreißer markiert am {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC"
         await db.commit()
+        await ReadingService(db).prune_outlier_snapshot({str(reading_id)})
         return {"status": "flagged", "reading_id": str(reading_id)}
 
     if body.action == "interpolate":
@@ -438,4 +461,5 @@ async def handle_outlier(
             f"(original: {float(reading.value):.1f})"
         )
         await db.commit()
+        await ReadingService(db).prune_outlier_snapshot({str(reading_id)})
         return {"status": "interpolated", "new_consumption": float(interpolated), "reading_id": str(reading_id)}

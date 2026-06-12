@@ -22,7 +22,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import EnergyManagementError
 from app.models.meter import Meter
 from app.models.reading import MeterReading
+from app.models.settings import AppSetting
 from app.models.snapshot import MeterConsumptionStat
+
+# Schlüssel + Default-Parameter der vorberechneten Ausreißerliste.
+OUTLIER_SNAPSHOT_KEY = "outlier_snapshot_default"
+OUTLIER_DEFAULT_FACTOR = 10.0
+OUTLIER_DEFAULT_MIN_VALUE = 100.0
+OUTLIER_SNAPSHOT_LIMIT = 2000
 
 logger = structlog.get_logger()
 
@@ -66,6 +73,102 @@ class ReadingService:
         await self.db.commit()
         logger.info("consumption_stats_recomputed", meters=len(rows))
         return len(rows)
+
+    async def recompute_outlier_snapshot(
+        self,
+        factor: float = OUTLIER_DEFAULT_FACTOR,
+        min_value: float = OUTLIER_DEFAULT_MIN_VALUE,
+        limit: int = OUTLIER_SNAPSHOT_LIMIT,
+    ) -> int:
+        """Default-Ausreißerliste vorberechnen und in AppSetting ablegen.
+
+        Findet die Ausreißer-Readings (consumption > max(median×Faktor, min_value))
+        über die vorberechnete Median-Tabelle und legt das Ergebnis als JSON ab.
+        Der /readings/outliers-Endpunkt liefert für die Default-Parameter dann
+        direkt aus diesem Snapshot (Sub-Sekunde), statt über alle Timescale-
+        Chunks zu scannen. Muss NACH recompute_consumption_stats laufen.
+        """
+        rows = (await self.db.execute(text(
+            """
+            SELECT mr.id, s.meter_id, m.name AS meter_name, m.energy_type,
+                   mr.timestamp, mr.value, mr.consumption, mr.quality,
+                   s.median_consumption AS median
+            FROM meter_consumption_stats s
+            JOIN meters m ON m.id = s.meter_id
+            JOIN LATERAL (
+                SELECT r.id, r.timestamp, r.value, r.consumption, r.quality
+                FROM meter_readings r
+                WHERE r.meter_id = s.meter_id
+                  AND r.quality <> 'outlier'
+                  AND r.consumption > GREATEST(s.median_consumption * :factor, :min_value)
+                ORDER BY r.consumption DESC
+                LIMIT :limit
+            ) mr ON true
+            WHERE s.median_consumption >= 1
+              AND m.is_active = true
+              AND m.is_feed_in IS NOT TRUE
+            ORDER BY (mr.consumption / s.median_consumption) DESC
+            LIMIT :limit
+            """
+        ), {"factor": factor, "min_value": min_value, "limit": limit})).all()
+
+        items = []
+        for r in rows:
+            median = float(r.median or 0)
+            cons = float(r.consumption or 0)
+            items.append({
+                "reading_id": str(r.id),
+                "meter_id": str(r.meter_id),
+                "meter_name": r.meter_name,
+                "energy_type": r.energy_type,
+                "timestamp": r.timestamp.isoformat(),
+                "value": float(r.value or 0),
+                "consumption": cons,
+                "median_consumption": round(median, 2),
+                "factor": round(cons / median, 1) if median > 0 else 0,
+                "quality": r.quality or "measured",
+            })
+
+        payload = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "factor": factor,
+            "min_value": min_value,
+            "items": items,
+        }
+        setting = (await self.db.execute(
+            select(AppSetting).where(AppSetting.key == OUTLIER_SNAPSHOT_KEY)
+        )).scalar_one_or_none()
+        if setting:
+            setting.value = payload
+        else:
+            self.db.add(AppSetting(
+                key=OUTLIER_SNAPSHOT_KEY,
+                value=payload,
+                category="internal",
+                description="Vorberechnete Ausreißerliste (Default-Parameter) für /readings/outliers",
+            ))
+        await self.db.commit()
+        logger.info("outlier_snapshot_recomputed", outliers=len(items))
+        return len(items)
+
+    async def prune_outlier_snapshot(self, reading_ids: set[str]) -> None:
+        """Aktionierte Readings (Flag/Delete) aus dem vorberechneten Ausreißer-
+        Snapshot entfernen, damit sie nach der Aktion nicht beim nächsten Laden
+        wieder auftauchen (bis zur nächsten vollständigen Vorberechnung)."""
+        if not reading_ids:
+            return
+        setting = (await self.db.execute(
+            select(AppSetting).where(AppSetting.key == OUTLIER_SNAPSHOT_KEY)
+        )).scalar_one_or_none()
+        if not setting or not setting.value:
+            return
+        payload = dict(setting.value)
+        items = payload.get("items") or []
+        filtered = [it for it in items if it.get("reading_id") not in reading_ids]
+        if len(filtered) != len(items):
+            payload["items"] = filtered
+            setting.value = payload  # Neuzuweisung → ORM erkennt die Änderung
+            await self.db.commit()
 
     async def list_readings(
         self,

@@ -619,15 +619,16 @@ def precompute_analytics_snapshots():
 
 @celery_app.task(name="app.tasks.precompute_consumption_stats")
 def precompute_consumption_stats():
-    """Median des Verbrauchs je Zähler vorberechnen (für Ausreißererkennung).
-    Läuft alle 6 Stunden – der teure percentile_cont-Median läuft so offline."""
+    """Median je Zähler UND Default-Ausreißerliste vorberechnen.
+    Läuft alle 6 Stunden – die teuren Scans laufen so offline statt im Request."""
     async def _run():
         from app.services.reading_service import ReadingService
 
         async with _task_db_session() as db:
             service = ReadingService(db)
-            count = await service.recompute_consumption_stats()
-            return {"meters_updated": count}
+            meters = await service.recompute_consumption_stats()
+            outliers = await service.recompute_outlier_snapshot()
+            return {"meters_updated": meters, "outliers_snapshotted": outliers}
 
     return _run_async(_run())
 
