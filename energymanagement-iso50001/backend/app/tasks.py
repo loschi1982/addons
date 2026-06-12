@@ -89,6 +89,10 @@ celery_app.conf.update(
             "task": "app.tasks.precompute_tariff_aggregates",
             "schedule": 86400.0,  # täglich
         },
+        "precompute-consumption-stats": {
+            "task": "app.tasks.precompute_consumption_stats",
+            "schedule": 21600.0,  # alle 6 Stunden (Median je Zähler für Ausreißer)
+        },
     },
 )
 
@@ -609,6 +613,21 @@ def precompute_analytics_snapshots():
                                 error=str(exc),
                             )
             return {"snapshots_written": count, "errors": errors}
+
+    return _run_async(_run())
+
+
+@celery_app.task(name="app.tasks.precompute_consumption_stats")
+def precompute_consumption_stats():
+    """Median des Verbrauchs je Zähler vorberechnen (für Ausreißererkennung).
+    Läuft alle 6 Stunden – der teure percentile_cont-Median läuft so offline."""
+    async def _run():
+        from app.services.reading_service import ReadingService
+
+        async with _task_db_session() as db:
+            service = ReadingService(db)
+            count = await service.recompute_consumption_stats()
+            return {"meters_updated": count}
 
     return _run_async(_run())
 

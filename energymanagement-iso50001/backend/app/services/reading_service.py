@@ -16,12 +16,13 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import structlog
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import EnergyManagementError
 from app.models.meter import Meter
 from app.models.reading import MeterReading
+from app.models.snapshot import MeterConsumptionStat
 
 logger = structlog.get_logger()
 
@@ -31,6 +32,40 @@ class ReadingService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def recompute_consumption_stats(self) -> int:
+        """Median des Verbrauchs je Zähler vorberechnen (für Ausreißererkennung).
+
+        Berechnet den percentile_cont-Median über alle gültigen Readings je
+        Zähler in EINER Query und ersetzt die `meter_consumption_stats`-Tabelle
+        atomar (DELETE + INSERT in einer Transaktion). Der teure Median-Sort
+        läuft damit offline (Celery) statt bei jedem Seitenaufruf live.
+        """
+        rows = (await self.db.execute(text(
+            """
+            SELECT meter_id,
+                   percentile_cont(0.5) WITHIN GROUP (ORDER BY consumption) AS median,
+                   count(*) AS cnt
+            FROM meter_readings
+            WHERE consumption > 0 AND quality <> 'outlier'
+            GROUP BY meter_id
+            """
+        ))).all()
+
+        # Atomarer Tausch: DELETE + INSERT in einer Transaktion → Leser sehen
+        # via MVCC bis zum Commit den alten Stand, nie eine leere Tabelle.
+        await self.db.execute(text("DELETE FROM meter_consumption_stats"))
+        now = datetime.now(timezone.utc)
+        for r in rows:
+            self.db.add(MeterConsumptionStat(
+                meter_id=r.meter_id,
+                median_consumption=r.median,
+                reading_count=int(r.cnt or 0),
+                computed_at=now,
+            ))
+        await self.db.commit()
+        logger.info("consumption_stats_recomputed", meters=len(rows))
+        return len(rows)
 
     async def list_readings(
         self,

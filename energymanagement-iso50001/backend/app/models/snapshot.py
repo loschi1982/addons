@@ -13,8 +13,9 @@ Pattern angelehnt an `co2_calculations` (UPSERT, monatliche Vorberechnung).
 
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import TypeEngine
@@ -112,5 +113,28 @@ class TariffAggregateSnapshot(Base, UUIDMixin):
     period_key: Mapped[str] = mapped_column(String(32), index=True)
     payload: Mapped[dict] = mapped_column(_json_payload())
     generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
+
+
+class MeterConsumptionStat(Base, UUIDMixin):
+    """Vorberechnete Verbrauchsstatistik je Zähler (Median des Verbrauchs).
+
+    Dient der schnellen Ausreißererkennung: Der teure percentile_cont-Median
+    über die gesamte Reading-Historie wird periodisch per Celery berechnet,
+    damit der /readings/outliers-Endpunkt nur noch gegen diese kleine Tabelle
+    joinen muss statt live über Millionen Readings zu sortieren.
+    """
+    __tablename__ = "meter_consumption_stats"
+    __table_args__ = (
+        UniqueConstraint("meter_id", name="uq_meter_consumption_stat"),
+    )
+
+    meter_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("meters.id", ondelete="CASCADE"), index=True
+    )
+    median_consumption: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
+    reading_count: Mapped[int] = mapped_column(Integer, default=0)
+    computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )

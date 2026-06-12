@@ -176,38 +176,63 @@ async def detect_outliers(
     Erkennt Ausreißer via IQR-ähnlicher Methode:
     Werte > factor_threshold × Median des jeweiligen Zählers gelten als Ausreißer.
     """
-    # Set-basierte Ausreißererkennung in EINER Query (statt N+1 je Zähler):
-    #   1. CTE meter_median: Median je Zähler (percentile_cont, ein Tabellen-Scan)
-    #   2. Join der Readings gegen den Median, Filter consumption > max(median×Faktor, min_value)
-    #   3. Sortierung nach Faktor (consumption/median), Limit 500
-    sql = """
-        WITH meter_median AS (
-            SELECT mr.meter_id,
-                   percentile_cont(0.5) WITHIN GROUP (ORDER BY mr.consumption) AS median
-            FROM meter_readings mr
-            JOIN meters m ON m.id = mr.meter_id
-            WHERE mr.consumption > 0
-              AND mr.quality <> 'outlier'
-              AND m.is_active = true
-              AND m.is_feed_in IS NOT TRUE
-              {energy_filter}
-            GROUP BY mr.meter_id
-            HAVING percentile_cont(0.5) WITHIN GROUP (ORDER BY mr.consumption) >= 1
-        )
-        SELECT mr.id, mr.meter_id, m.name AS meter_name, m.energy_type,
-               mr.timestamp, mr.value, mr.consumption, mr.quality, mm.median
-        FROM meter_readings mr
-        JOIN meter_median mm ON mm.meter_id = mr.meter_id
-        JOIN meters m ON m.id = mr.meter_id
-        WHERE mr.quality <> 'outlier'
-          AND mr.consumption > GREATEST(mm.median * :factor, :min_value)
-        ORDER BY (mr.consumption / mm.median) DESC
-        LIMIT 500
-    """.format(energy_filter="AND m.energy_type = :energy_type" if energy_type else "")
-
     params: dict = {"factor": factor_threshold, "min_value": min_value}
     if energy_type:
         params["energy_type"] = energy_type
+    energy_filter = "AND m.energy_type = :energy_type" if energy_type else ""
+
+    # Schneller Pfad: gegen die vorberechnete Median-Tabelle joinen (Celery-
+    # Task precompute_consumption_stats). Der teure percentile_cont entfällt;
+    # der Index meter_readings(meter_id, consumption) macht den Range-Scan je
+    # Zähler effizient.
+    has_stats = (await db.execute(
+        text("SELECT 1 FROM meter_consumption_stats LIMIT 1")
+    )).scalar()
+
+    if has_stats:
+        sql = """
+            SELECT mr.id, mr.meter_id, m.name AS meter_name, m.energy_type,
+                   mr.timestamp, mr.value, mr.consumption, mr.quality,
+                   s.median_consumption AS median
+            FROM meter_consumption_stats s
+            JOIN meters m ON m.id = s.meter_id
+            JOIN meter_readings mr ON mr.meter_id = s.meter_id
+            WHERE s.median_consumption >= 1
+              AND m.is_active = true
+              AND m.is_feed_in IS NOT TRUE
+              AND mr.quality <> 'outlier'
+              AND mr.consumption > GREATEST(s.median_consumption * :factor, :min_value)
+              {energy_filter}
+            ORDER BY (mr.consumption / s.median_consumption) DESC
+            LIMIT 500
+        """.format(energy_filter=energy_filter)
+    else:
+        # Fallback (z.B. direkt nach Deploy, bevor der Celery-Task lief):
+        # Median live via percentile_cont berechnen. Langsamer, aber korrekt.
+        sql = """
+            WITH meter_median AS (
+                SELECT mr.meter_id,
+                       percentile_cont(0.5) WITHIN GROUP (ORDER BY mr.consumption) AS median
+                FROM meter_readings mr
+                JOIN meters m ON m.id = mr.meter_id
+                WHERE mr.consumption > 0
+                  AND mr.quality <> 'outlier'
+                  AND m.is_active = true
+                  AND m.is_feed_in IS NOT TRUE
+                  {energy_filter}
+                GROUP BY mr.meter_id
+                HAVING percentile_cont(0.5) WITHIN GROUP (ORDER BY mr.consumption) >= 1
+            )
+            SELECT mr.id, mr.meter_id, m.name AS meter_name, m.energy_type,
+                   mr.timestamp, mr.value, mr.consumption, mr.quality, mm.median
+            FROM meter_readings mr
+            JOIN meter_median mm ON mm.meter_id = mr.meter_id
+            JOIN meters m ON m.id = mr.meter_id
+            WHERE mr.quality <> 'outlier'
+              AND mr.consumption > GREATEST(mm.median * :factor, :min_value)
+            ORDER BY (mr.consumption / mm.median) DESC
+            LIMIT 500
+        """.format(energy_filter=energy_filter)
 
     rows = (await db.execute(text(sql), params)).all()
 

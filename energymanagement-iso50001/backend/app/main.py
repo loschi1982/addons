@@ -108,6 +108,17 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"⚠ Performance-Index konnte nicht angelegt werden: {e}")
 
+    # Verbrauchsstatistik (Median je Zähler) einmalig nach Start anstoßen,
+    # damit der Ausreißer-Endpunkt nicht bis zum ersten Beat-Lauf (6 h) warten
+    # muss. Läuft non-blocking im Celery-Worker.
+    if db_available:
+        try:
+            from app.tasks import precompute_consumption_stats
+            precompute_consumption_stats.delay()
+            print("✓ Verbrauchsstatistik-Vorberechnung angestoßen")
+        except Exception as e:
+            print(f"⚠ Verbrauchsstatistik-Task konnte nicht angestoßen werden: {e}")
+
     # Seed-Daten laden (nur wenn DB verfügbar)
     if db_available:
         try:
