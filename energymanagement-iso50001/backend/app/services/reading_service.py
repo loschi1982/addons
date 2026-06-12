@@ -23,7 +23,7 @@ from app.core.exceptions import EnergyManagementError
 from app.models.meter import Meter
 from app.models.reading import MeterReading
 from app.models.settings import AppSetting
-from app.models.snapshot import MeterConsumptionStat
+from app.models.snapshot import MeterConsumptionStat, MeterMonthlyConsumption
 
 # Schlüssel + Default-Parameter der vorberechneten Ausreißerliste.
 OUTLIER_SNAPSHOT_KEY = "outlier_snapshot_default"
@@ -75,6 +75,51 @@ class ReadingService:
             ))
         await self.db.commit()
         logger.info("consumption_stats_recomputed", meters=len(rows))
+        return len(rows)
+
+    async def recompute_monthly_consumption(self) -> int:
+        """Verbrauch + Kosten je (Zähler, Jahr, Monat) vorberechnen.
+
+        Eine GROUP-BY-Query über alle Readings (offline), atomarer Tausch der
+        Tabelle meter_monthly_consumption. Quelle für Monatsvergleich,
+        Energiebilanz und die Per-Monat-Auswahl (meter_ids_with_data_by_month).
+        Session-TZ ist UTC → EXTRACT(year/month) liefert UTC-Kalendermonate,
+        konsistent zu date_trunc('month', timestamp) in den Aggregationen.
+        """
+        rows = (await self.db.execute(text(
+            """
+            SELECT mr.meter_id,
+                   m.energy_type,
+                   m.unit,
+                   EXTRACT(YEAR FROM mr.timestamp)::int  AS yr,
+                   EXTRACT(MONTH FROM mr.timestamp)::int AS mo,
+                   SUM(mr.consumption) AS cons,
+                   SUM(mr.cost_net)    AS cost
+            FROM meter_readings mr
+            JOIN meters m ON m.id = mr.meter_id
+            WHERE mr.consumption IS NOT NULL
+            GROUP BY mr.meter_id, m.energy_type, m.unit,
+                     EXTRACT(YEAR FROM mr.timestamp), EXTRACT(MONTH FROM mr.timestamp)
+            """
+        ))).all()
+
+        # Atomarer Tausch (DELETE + INSERT in einer Transaktion → Leser sehen
+        # via MVCC bis zum Commit den alten Stand, nie eine leere Tabelle).
+        await self.db.execute(text("DELETE FROM meter_monthly_consumption"))
+        now = datetime.now(timezone.utc)
+        for r in rows:
+            self.db.add(MeterMonthlyConsumption(
+                meter_id=r.meter_id,
+                energy_type=r.energy_type,
+                unit=r.unit or "kWh",
+                year=int(r.yr),
+                month=int(r.mo),
+                consumption_native=r.cons or 0,
+                cost_net=r.cost,
+                computed_at=now,
+            ))
+        await self.db.commit()
+        logger.info("monthly_consumption_recomputed", rows=len(rows))
         return len(rows)
 
     async def recompute_outlier_snapshot(

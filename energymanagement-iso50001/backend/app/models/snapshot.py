@@ -138,3 +138,31 @@ class MeterConsumptionStat(Base, UUIDMixin):
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )
+
+
+class MeterMonthlyConsumption(Base, UUIDMixin):
+    """Vorberechneter Verbrauch + Kosten je (Zähler, Jahr, Monat).
+
+    Macht Monatsvergleich, Energiebilanz UND die Per-Monat-Auswahl der
+    maßgeblichen Zähler (meter_ids_with_data_by_month → Dashboard/CO₂/Analyse)
+    schnell: statt bei jedem Aufruf über die meter_readings-Hypertable zu
+    aggregieren, wird hier periodisch per Celery vorberechnet. native = Summe in
+    der Zähler-Einheit; Umrechnung in kWh erfolgt beim Lesen über CONVERSION_FACTORS.
+    """
+    __tablename__ = "meter_monthly_consumption"
+    __table_args__ = (
+        UniqueConstraint("meter_id", "year", "month", name="uq_meter_monthly_consumption"),
+    )
+
+    meter_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("meters.id", ondelete="CASCADE"), index=True
+    )
+    energy_type: Mapped[str] = mapped_column(String(50))
+    unit: Mapped[str] = mapped_column(String(20), default="kWh")
+    year: Mapped[int] = mapped_column(Integer, index=True)
+    month: Mapped[int] = mapped_column(Integer)
+    consumption_native: Mapped[Decimal] = mapped_column(Numeric(20, 4), default=0)
+    cost_net: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )

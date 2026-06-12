@@ -21,6 +21,7 @@ from sqlalchemy import func, select, text
 
 from app.models.meter import Meter
 from app.models.reading import MeterReading
+from app.models.snapshot import MeterMonthlyConsumption
 
 # Quellen, die automatisch (häufig) ablesen – relevant für Toleranzen.
 AUTO_DATA_SOURCES: set[str] = {
@@ -119,6 +120,35 @@ async def meter_ids_with_data_by_month(
     cand = list(candidate_ids)
     if not cand:
         return {}
+
+    # Schneller Pfad: aus der Vorberechnung meter_monthly_consumption lesen
+    # (per Celery aktuell gehalten). Session-TZ = UTC → der Monatsanfang
+    # datetime(year, month, 1, UTC) entspricht date_trunc('month', timestamp).
+    has_precompute = (await db.execute(
+        select(MeterMonthlyConsumption.id).limit(1)
+    )).first() is not None
+    if has_precompute:
+        start_key = period_start.year * 12 + period_start.month
+        end_key = period_end.year * 12 + period_end.month
+        ym = MeterMonthlyConsumption.year * 12 + MeterMonthlyConsumption.month
+        rows = (await db.execute(
+            select(
+                MeterMonthlyConsumption.meter_id,
+                MeterMonthlyConsumption.year,
+                MeterMonthlyConsumption.month,
+            ).where(
+                MeterMonthlyConsumption.meter_id.in_(cand),
+                MeterMonthlyConsumption.consumption_native > 0,
+                ym >= start_key,
+                ym <= end_key,
+            )
+        )).all()
+        by_month: dict[datetime, set[uuid.UUID]] = defaultdict(set)
+        for meter_id, year, month in rows:
+            by_month[datetime(year, month, 1, tzinfo=timezone.utc)].add(meter_id)
+        return dict(by_month)
+
+    # Fallback: Live über meter_readings (vor dem ersten Vorberechnungs-Lauf).
     ts_start = datetime.combine(period_start, time.min, tzinfo=timezone.utc)
     ts_end = datetime.combine(period_end + timedelta(days=1), time.min, tzinfo=timezone.utc)
     q = (
@@ -136,7 +166,7 @@ async def meter_ids_with_data_by_month(
         .having(func.sum(MeterReading.consumption) > 0)
     )
     rows = (await db.execute(q)).all()
-    by_month: dict[datetime, set[uuid.UUID]] = defaultdict(set)
+    by_month = defaultdict(set)
     for meter_id, month in rows:
         by_month[month].add(meter_id)
     return dict(by_month)
