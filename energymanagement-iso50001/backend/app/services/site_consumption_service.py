@@ -252,7 +252,7 @@ class SiteConsumptionService:
         rows = (await self.db.execute(
             select(
                 MeterReading.meter_id,
-                func.sum(MeterReading.consumption).label("t"),
+                func.sum(MeterReading.consumption),
             ).where(
                 MeterReading.meter_id.in_(meter_ids),
                 MeterReading.timestamp >= start_dt,
@@ -260,10 +260,17 @@ class SiteConsumptionService:
                 MeterReading.consumption.is_not(None),
             ).group_by(MeterReading.meter_id)
         )).all()
-        return {
-            r.meter_id: (Decimal(str(r.t)) if r.t is not None else Decimal("0"))
-            for r in rows
-        }
+        out: dict[uuid.UUID, Decimal] = {}
+        for r in rows:
+            mid = r[0]
+            val = r[1]
+            if val is None:
+                out[mid] = Decimal("0")
+            elif isinstance(val, Decimal):
+                out[mid] = val
+            else:
+                out[mid] = Decimal(str(val))
+        return out
 
     # ──────────────────────────────────────────────────────────────────────────
     # Annotierter Zählerbaum
