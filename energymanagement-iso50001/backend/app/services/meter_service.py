@@ -184,11 +184,27 @@ class MeterService:
             "display_name", "serial_number", "installation_date", "removal_date", "calibration_date",
         ]
 
+        # Umstellung von is_delivery_based muss bestehende Verbräuche neu
+        # berechnen (Wert IST Verbrauch ⇄ Differenzbildung). Wechsel vorher merken.
+        delivery_changed = (
+            "is_delivery_based" in data
+            and bool(data["is_delivery_based"]) != bool(meter.is_delivery_based)
+        )
+
         for field in updatable_fields:
             if field in data:
                 setattr(meter, field, data[field])
 
         await self.db.commit()
+
+        if delivery_changed:
+            from app.core.cache import cache_delete
+            from app.services.reading_service import ReadingService
+
+            await ReadingService(self.db).recompute_meter_consumption(meter_id)
+            # Analyse-Caches verwerfen, damit die korrigierten Werte sofort greifen.
+            await cache_delete("analytics_*")
+
         logger.info("meter_updated", meter_id=str(meter_id))
         return meter
 

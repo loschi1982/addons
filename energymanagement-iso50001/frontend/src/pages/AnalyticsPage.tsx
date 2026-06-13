@@ -339,7 +339,7 @@ export default function AnalyticsPage() {
             {tab === 'distribution' && <DistributionTab siteId={siteId} />}
             {tab === 'self_consumption' && <SelfConsumptionTab />}
             {tab === 'heatmap' && <HeatmapTab meters={filteredMeters} />}
-            {tab === 'sankey' && <SankeyTab meters={filteredMeters} />}
+            {tab === 'sankey' && <SankeyTab meters={filteredMeters} siteId={siteId} />}
             {tab === 'schema' && <EnergySchemaPanel />}
             {tab === 'duration_curve' && <DurationCurveTab meters={filteredMeters} />}
             {tab === 'cumulative' && <CumulativeTab meters={filteredMeters} siteId={siteId} />}
@@ -584,12 +584,15 @@ function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
         granularity,
       };
       if (selectedMeter) params.meter_ids = selectedMeter;
+      // Standort-Gesamtansicht (kein Einzelzähler): Summe des gewählten
+      // Energieträgers anzeigen (Backend aggregiert pro Monat maßgeblich).
+      else if (siteId && selectedEnergyType) params.energy_type = selectedEnergyType;
       if (siteId) params.site_id = siteId;
       const res = await apiClient.get('/api/v1/analytics/timeseries', { params });
       setData(res.data);
     } catch { /* leer */ }
     setLoading(false);
-  }, [selectedMeter, startDate, endDate, granularity, siteId]);
+  }, [selectedMeter, selectedEnergyType, startDate, endDate, granularity, siteId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -736,7 +739,7 @@ function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
           </ResponsiveContainer>
         ) : (
           <div className="flex h-80 items-center justify-center text-gray-400">
-            {selectedMeter ? 'Keine Daten für den gewählten Zeitraum' : 'Bitte Zähler auswählen'}
+            {selectedMeter || siteId ? 'Keine Daten für den gewählten Zeitraum' : 'Bitte Zähler oder Standort auswählen'}
           </div>
         )}
       </div>
@@ -1109,7 +1112,7 @@ function HeatmapTab({ meters }: { meters: Meter[] }) {
 
 /* ── Tab: Sankey ── */
 
-function SankeyTab({ meters }: { meters: Meter[] }) {
+function SankeyTab({ meters, siteId }: { meters: Meter[]; siteId?: string }) {
   const [data, setData] = useState<SankeyData | null>(null);
   const [startDate, setStartDate] = useState(yearStart());
   const [endDate, setEndDate] = useState(today());
@@ -1134,11 +1137,12 @@ function SankeyTab({ meters }: { meters: Meter[] }) {
         end_date: endDate,
       };
       if (energyType) params.energy_type = energyType;
+      if (siteId) params.site_id = siteId;
       const res = await apiClient.get('/api/v1/analytics/sankey', { params });
       setData(res.data);
     } catch { /* leer */ }
     setLoading(false);
-  }, [startDate, endDate, energyType]);
+  }, [startDate, endDate, energyType, siteId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

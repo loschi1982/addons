@@ -122,6 +122,101 @@ class ReadingService:
         logger.info("monthly_consumption_recomputed", rows=len(rows))
         return len(rows)
 
+    async def recompute_meter_consumption(self, meter_id: uuid.UUID) -> int:
+        """Verbrauch ALLER Readings eines Zählers gemäß aktueller Konfiguration
+        neu berechnen.
+
+        - Lieferungsbasiert (``is_delivery_based``): consumption = value
+          (der Wert IST der Verbrauch, keine Differenzbildung).
+        - Sonst: consumption = value − Vorgängerwert (chronologisch verkettet),
+          None beim ersten Wert oder bei negativem Delta (Zählerwechsel).
+
+        Nötig, wenn das ``is_delivery_based``-Flag nachträglich umgestellt wird:
+        bestehende Readings tragen sonst weiter den nach altem Modus berechneten
+        Verbrauch (z. B. fälschlich gebildete Differenzen bei Zählern, die
+        direkt Monatsverbräuche erfassen). Aktualisiert anschließend die
+        Monats-Vorberechnung dieses Zählers, damit Dashboard/Analyse sofort
+        konsistent sind. Gibt die Anzahl geänderter Readings zurück.
+        """
+        meter = await self.db.get(Meter, meter_id)
+        if not meter:
+            return 0
+
+        readings = list((await self.db.execute(
+            select(MeterReading)
+            .where(MeterReading.meter_id == meter_id)
+            .order_by(MeterReading.timestamp.asc())
+        )).scalars().all())
+
+        changed = 0
+        prev_value: Decimal | None = None
+        for r in readings:
+            if r.value is None:
+                # Reiner Direkt-Verbrauchswert ohne Zählerstand → unverändert lassen.
+                new_cons = r.consumption
+            elif meter.is_delivery_based:
+                new_cons = r.value
+            elif prev_value is None:
+                new_cons = None
+            else:
+                diff = r.value - prev_value
+                new_cons = diff if diff >= 0 else None
+
+            if new_cons != r.consumption:
+                r.consumption = new_cons
+                changed += 1
+            if r.value is not None:
+                prev_value = r.value
+
+        await self.db.commit()
+
+        # Monats-Vorberechnung dieses Zählers gezielt erneuern (übrige Zähler
+        # bleiben unberührt) – sonst zeigt die Analyse bis zum nächsten
+        # vollständigen Vorberechnungslauf weiter die alten Monatswerte.
+        await self._refresh_monthly_consumption_for_meter(meter)
+
+        logger.info(
+            "meter_consumption_recomputed",
+            meter_id=str(meter_id),
+            changed=changed,
+            delivery_based=meter.is_delivery_based,
+        )
+        return changed
+
+    async def _refresh_monthly_consumption_for_meter(self, meter: Meter) -> None:
+        """Zeilen eines einzelnen Zählers in meter_monthly_consumption ersetzen."""
+        rows = (await self.db.execute(
+            text(
+                """
+                SELECT EXTRACT(YEAR FROM timestamp)::int  AS yr,
+                       EXTRACT(MONTH FROM timestamp)::int AS mo,
+                       SUM(consumption) AS cons,
+                       SUM(cost_net)    AS cost
+                FROM meter_readings
+                WHERE meter_id = :mid AND consumption IS NOT NULL
+                GROUP BY EXTRACT(YEAR FROM timestamp), EXTRACT(MONTH FROM timestamp)
+                """
+            ),
+            {"mid": str(meter.id)},
+        )).all()
+        await self.db.execute(
+            text("DELETE FROM meter_monthly_consumption WHERE meter_id = :mid"),
+            {"mid": str(meter.id)},
+        )
+        now = datetime.now(timezone.utc)
+        for r in rows:
+            self.db.add(MeterMonthlyConsumption(
+                meter_id=meter.id,
+                energy_type=meter.energy_type,
+                unit=meter.unit or "kWh",
+                year=int(r.yr),
+                month=int(r.mo),
+                consumption_native=r.cons or 0,
+                cost_net=r.cost,
+                computed_at=now,
+            ))
+        await self.db.commit()
+
     async def recompute_outlier_snapshot(
         self,
         factor: float = OUTLIER_DEFAULT_FACTOR,

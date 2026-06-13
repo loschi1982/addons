@@ -485,6 +485,109 @@ class AnalyticsService:
 
     # ── Zeitreihen ──
 
+    async def _site_total_timeseries(
+        self,
+        site_id: uuid.UUID,
+        start_date: date,
+        end_date: date,
+        granularity: str,
+        energy_type: str | None = None,
+    ) -> list[dict]:
+        """Aggregierte Standort-Summen je Energieart als Zeitreihe.
+
+        Nutzt die **pro Monat** maßgebliche (Zähler, Monat)-Auswahl (keine
+        Eltern-/Kind-Doppelzählung; ein Hauptzähler ohne Ablesung verdrängt seine
+        Unterzähler nur in seinen eigenen Datenmonaten) und liefert je Energieart
+        genau EINE Summenreihe. Konsistent zu Dashboard/Energiebilanz.
+        """
+        from app.services.meter_hierarchy import resolve_authoritative_pairs_by_month
+
+        ET_LABELS: dict[str, str] = {
+            "electricity": "Strom", "natural_gas": "Erdgas", "heating_oil": "Heizöl",
+            "district_heating": "Fernwärme", "district_cooling": "Kälte",
+            "water": "Wasser", "solar": "Solar", "lpg": "Flüssiggas",
+            "wood_pellets": "Holzpellets", "compressed_air": "Druckluft",
+            "steam": "Dampf", "other": "Sonstige",
+        }
+        trunc_map = {
+            "hourly": "hour", "daily": "day", "weekly": "week",
+            "monthly": "month", "yearly": "year",
+        }
+        trunc = trunc_map.get(granularity, "day")
+
+        # Maßgebliche (Zähler, Monat)-Paare des Standorts im Zeitraum
+        pairs = await resolve_authoritative_pairs_by_month(
+            self.db, start_date, end_date, site_id=site_id,
+        )
+        if not pairs:
+            return []
+
+        # Kandidaten des Standorts (für Energieart/Einheit + als Query-Filter)
+        cand_q = select(Meter.id, Meter.energy_type, Meter.unit).where(
+            Meter.is_active == True,  # noqa: E712
+            Meter.is_feed_in != True,
+            Meter.is_virtual == False,  # noqa: E712
+            Meter.site_id == site_id,
+        )
+        if energy_type:
+            cand_q = cand_q.where(Meter.energy_type == energy_type)
+        cand_rows = (await self.db.execute(cand_q)).all()
+        if not cand_rows:
+            return []
+        meta = {r.id: (r.energy_type, r.unit) for r in cand_rows}
+        cand_ids = list(meta.keys())
+
+        ts_start = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+        ts_end = datetime.combine(
+            end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+        )
+        rows = (await self.db.execute(
+            select(
+                MeterReading.meter_id,
+                func.date_trunc(trunc, MeterReading.timestamp).label("period"),
+                func.extract("year", MeterReading.timestamp).label("yr"),
+                func.extract("month", MeterReading.timestamp).label("mo"),
+                func.sum(MeterReading.consumption).label("cons"),
+            )
+            .where(
+                MeterReading.meter_id.in_(cand_ids),
+                MeterReading.consumption.isnot(None),
+                MeterReading.timestamp >= ts_start,
+                MeterReading.timestamp < ts_end,
+            )
+            .group_by(MeterReading.meter_id, text("period"), text("yr"), text("mo"))
+        )).all()
+
+        # Je Energieart {period_iso: kwh} – nur maßgebliche (Zähler, Monat)-Paare.
+        by_et: dict[str, dict[str, float]] = {}
+        for r in rows:
+            if (r.meter_id, (int(r.yr), int(r.mo))) not in pairs:
+                continue
+            et, unit = meta.get(r.meter_id, (None, "kWh"))
+            if et is None or r.period is None:
+                continue
+            conv = CONVERSION_FACTORS.get(unit or "kWh", Decimal("1"))
+            kwh = float((r.cons or Decimal("0")) * conv)
+            bucket = by_et.setdefault(et, {})
+            period_iso = r.period.isoformat()
+            bucket[period_iso] = bucket.get(period_iso, 0.0) + kwh
+
+        series = []
+        for et, buckets in sorted(by_et.items()):
+            data_points = [
+                {"timestamp": p, "value": round(v, 4), "count": 1, "is_interpolated": False}
+                for p, v in sorted(buckets.items())
+            ]
+            series.append({
+                "meter_id": f"__total_{et}",
+                "meter_name": f"{ET_LABELS.get(et, et)} (Summe)",
+                "energy_type": et,
+                "unit": "kWh",
+                "is_virtual": False,
+                "data": data_points,
+            })
+        return series
+
     async def get_timeseries(
         self,
         meter_ids: list[uuid.UUID] | None = None,
@@ -499,6 +602,16 @@ class AnalyticsService:
 
         Granularity: hourly, daily, weekly, monthly, yearly
         """
+        # Standort-Gesamtansicht: EINE aggregierte Summenreihe je Energieart
+        # (pro Monat maßgebliche Zählerauswahl → keine Eltern-/Kind-
+        # Doppelzählung, leere Hauptzähler verdrängen ihre Unterzähler nicht)
+        # statt vieler überlagerter Einzelzähler-Linien. Greift nur ohne
+        # explizite Zähler-Auswahl.
+        if site_id and not meter_ids and start_date is not None and end_date is not None:
+            return await self._site_total_timeseries(
+                site_id, start_date, end_date, granularity, energy_type,
+            )
+
         # Snapshot-Lookup für Standardperioden ohne zusätzliche Filter
         if (
             not meter_ids
@@ -861,6 +974,14 @@ class AnalyticsService:
                 snap = await self.load_snapshot(site_id, period_key, "sankey")
                 if snap is not None:
                     return snap
+
+        # Standortfilter → Zähler-IDs auflösen. Ohne dies würde der Sankey alle
+        # Zähler systemweit zeigen statt nur die des gewählten Standorts.
+        if site_id and not meter_ids:
+            meter_ids = await self._meter_ids_for_site(site_id)
+            if not meter_ids:
+                return {"nodes": [], "links": []}
+
         # Alle aktiven Zähler mit Hierarchie laden
         query = (
             select(Meter)
@@ -2072,8 +2193,17 @@ class AnalyticsService:
                 "data_available": False,
             }
 
-        # Verbrauch + Kosten je Zähler im Zeitraum
+        # Verbrauch + Kosten je Zähler im Zeitraum. Die Kostenumlage beruht auf
+        # EXPLIZITEN Zähler-Zuordnungen (MeterUnitAllocation, add/subtract +
+        # Faktor) – die maßgebliche Per-Monat-Auswahl greift hier nicht, da jede
+        # Nutzungseinheit gezielt aus bestimmten Zählern gespeist wird.
+        # Zeitgrenzen als UTC-Zeitstempel mit exklusivem Folgetag, damit der
+        # gesamte Endtag enthalten ist (vorher: date-Vergleich → letzter Tag fiel weg).
         meter_ids_in_allocs = list({a.meter_id for a in allocations})
+        start_ts = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+        end_ts = datetime.combine(
+            end_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+        )
         reading_q = (
             select(
                 MeterReading.meter_id,
@@ -2083,8 +2213,8 @@ class AnalyticsService:
             )
             .where(
                 MeterReading.meter_id.in_(meter_ids_in_allocs),
-                MeterReading.timestamp >= start_date,
-                MeterReading.timestamp < end_date,
+                MeterReading.timestamp >= start_ts,
+                MeterReading.timestamp < end_ts,
             )
             .group_by(MeterReading.meter_id)
         )
