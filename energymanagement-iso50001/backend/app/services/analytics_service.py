@@ -1209,10 +1209,11 @@ class AnalyticsService:
                     "direction": "feed_in",
                 })
 
-        # Hauptzähler ohne Eltern: "Energiequelle" als Wurzel (Spalte 0).
-        # Quelle-Knoten = Summe der (Nicht-Erzeuger-)Wurzeln je Energieart →
-        # Bezugsmenge + Gesamtkosten (für die Kopfzeile je Energieart).
-        root_meters = [m for m in meters if not m.parent_meter_id]
+        # Hauptzähler der obersten Ebene (Spalte 0): Parent fehlt ODER liegt
+        # außerhalb der geladenen Menge (z. B. weil der Energieart-Filter den
+        # Elternzähler ausschließt). Konsistent zur Tiefen-/Strang-Preis-Logik,
+        # damit auch solche Top-Zähler einen "Bezug"-Quellknoten + Fluss erhalten.
+        root_meters = [m for m in meters if depth_map[m.id] == 0]
         for rm in root_meters:
             source_label = f"Bezug {rm.energy_type}"
             source_id = f"source_{rm.energy_type}"
