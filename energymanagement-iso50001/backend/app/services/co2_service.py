@@ -200,6 +200,16 @@ class CO2Service:
         if not meter:
             raise ValueError("Zähler nicht gefunden")
 
+        # Periode auf den vollen Kalendermonat von start_date normalisieren.
+        # So entsteht je (Zähler, Monat) genau EINE kanonische Zeile → idempotenter
+        # UPSERT, keine mehrmonatigen Sammelzeilen und keine Duplikate mit täglich
+        # wechselndem Enddatum (die sonst die Monatsaggregation im Dashboard
+        # massiv verfälschen).
+        from calendar import monthrange as _monthrange
+        _y, _m = start_date.year, start_date.month
+        start_date = date(_y, _m, 1)
+        end_date = date(_y, _m, _monthrange(_y, _m)[1])
+
         # Verbrauch im Zeitraum berechnen
         consumption_result = await self.db.execute(
             select(func.sum(MeterReading.consumption)).where(
@@ -285,15 +295,18 @@ class CO2Service:
         start_date: date,
         end_date: date,
         energy_types: list[str] | None = None,
+        meter_ids: list[uuid.UUID] | None = None,
     ) -> dict:
         """CO₂-Emissionen für alle aktiven Zähler berechnen.
 
-        Optional auf bestimmte Energiearten begrenzen. Nur IDs werden vorab
-        geladen, um Expired-Attribute-Probleme nach commit() zu vermeiden.
+        Optional auf bestimmte Energiearten oder Zähler begrenzen. Nur IDs werden
+        vorab geladen, um Expired-Attribute-Probleme nach commit() zu vermeiden.
         """
         q = select(Meter.id).where(Meter.is_active == True)  # noqa: E712
         if energy_types:
             q = q.where(Meter.energy_type.in_(energy_types))
+        if meter_ids:
+            q = q.where(Meter.id.in_(meter_ids))
         result = await self.db.execute(q)
         meter_ids = [row[0] for row in result.all()]
 
@@ -327,19 +340,45 @@ class CO2Service:
         ts = (await self.db.execute(q)).scalar()
         return ts.date() if ts else None
 
+    async def _purge_noncanonical_co2(self) -> int:
+        """CO₂-Zeilen mit nicht-kanonischem Zeitraum löschen.
+
+        „Kanonisch" = period_start ist Monatserster UND period_end ist
+        Monatsletzter desselben Monats. Nicht-kanonische Zeilen entstanden durch
+        Aufrufe über mehrere Monate (z.B. Jahresanfang..heute) oder mit täglich
+        wechselndem Enddatum; sie verfälschen die Monatsaggregation (z.B. ein
+        Jahreswert, der komplett im Januar gebucht wird). Einmaliges Aufräumen.
+        """
+        from sqlalchemy import text as _text
+        res = await self.db.execute(_text(
+            """
+            DELETE FROM co2_calculations
+            WHERE period_start <> date_trunc('month', period_start)::date
+               OR period_end <> (date_trunc('month', period_start)
+                                 + interval '1 month' - interval '1 day')::date
+            """
+        ))
+        await self.db.commit()
+        return res.rowcount or 0
+
     async def backfill_all(
         self,
         period_start: date,
         period_end: date,
         energy_types: list[str] | None = None,
+        meter_ids: list[uuid.UUID] | None = None,
     ) -> dict:
         """CO₂-Berechnungen monatsweise für den gesamten Zeitraum nachholen.
 
         Iteriert pro Kalendermonat von period_start bis period_end. Nutzt
         die idempotente `calculate_emissions` (UPSERT) — sicher mehrfach
-        ausführbar.
+        ausführbar. Räumt vorab nicht-kanonische Alt-Zeilen auf.
         """
         from calendar import monthrange
+
+        purged = await self._purge_noncanonical_co2()
+        if purged:
+            logger.info("co2_purged_noncanonical", deleted=purged)
 
         months: list[tuple[int, int]] = []
         y, m = period_start.year, period_start.month
@@ -363,7 +402,7 @@ class CO2Service:
                 month_start = period_start
             if month_end > period_end:
                 month_end = period_end
-            r = await self.calculate_all_meters(month_start, month_end, energy_types)
+            r = await self.calculate_all_meters(month_start, month_end, energy_types, meter_ids)
             per_month.append({"year": y, "month": m, **r})
             total_calculated += r.get("calculated", 0)
             total_skipped += r.get("skipped", 0)
@@ -379,6 +418,7 @@ class CO2Service:
             "calculated": total_calculated,
             "skipped": total_skipped,
             "errors": total_errors,
+            "purged_noncanonical": purged,
             "per_month": per_month,
         }
 
@@ -410,6 +450,11 @@ class CO2Service:
             .where(
                 CO2Calculation.period_start >= start_date,
                 CO2Calculation.period_end <= end_date,
+                # Nur kanonische Monatszeilen (Start/Ende im selben Monat) –
+                # schützt vor mehrmonatigen Alt-Sammelzeilen, die sonst doppelt
+                # bzw. überhöht zählen würden.
+                func.date_trunc("month", CO2Calculation.period_start)
+                == func.date_trunc("month", CO2Calculation.period_end),
             )
         )).all()
 
@@ -451,6 +496,8 @@ class CO2Service:
             .where(
                 CO2Calculation.period_start >= prev_start,
                 CO2Calculation.period_end <= prev_end,
+                func.date_trunc("month", CO2Calculation.period_start)
+                == func.date_trunc("month", CO2Calculation.period_end),
             )
         )).all()
         prev_co2 = Decimal("0")
@@ -500,6 +547,10 @@ class CO2Service:
             .where(
                 CO2Calculation.period_start >= current_start,
                 CO2Calculation.period_end <= current_end,
+                # Nur kanonische Monatszeilen → mehrmonatige Alt-Sammelzeilen
+                # (deren Wert sonst komplett im Startmonat landet) ausschließen.
+                func.date_trunc("month", CO2Calculation.period_start)
+                == func.date_trunc("month", CO2Calculation.period_end),
             )
         )).all()
 

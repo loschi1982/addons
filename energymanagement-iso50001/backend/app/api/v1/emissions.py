@@ -159,24 +159,21 @@ async def trigger_calculation(
     current_user: User = Depends(require_permission("emissions", "calculate")),
     db: AsyncSession = Depends(get_db),
 ):
-    """CO₂-Neuberechnung für einen Zeitraum anstoßen."""
-    service = CO2Service(db)
+    """CO₂-Neuberechnung für einen Zeitraum anstoßen.
 
-    if meter_ids:
-        # Einzelne Zähler berechnen
-        results = []
-        for mid in meter_ids.split(","):
-            meter_id = uuid.UUID(mid.strip())
-            calc = await service.calculate_emissions(meter_id, start_date, end_date)
-            if calc:
-                results.append(str(calc.id))
-        return {"message": f"{len(results)} Berechnungen durchgeführt", "calculation_ids": results}
-    else:
-        result = await service.calculate_all_meters(start_date, end_date)
-        return {
-            "message": f"{result['calculated']} Berechnungen, {result['errors']} Fehler",
-            **result,
-        }
+    Iteriert intern monatsweise (Backfill) und legt je (Zähler, Kalendermonat)
+    genau EINE kanonische Zeile an. So entstehen keine mehrmonatigen Sammel-
+    zeilen, deren Wert sonst im Startmonat fälschlich aufaddiert würde.
+    """
+    service = CO2Service(db)
+    ids = [uuid.UUID(m.strip()) for m in meter_ids.split(",")] if meter_ids else None
+
+    result = await service.backfill_all(start_date, end_date, meter_ids=ids)
+    return {
+        "message": f"{result['calculated']} Berechnungen über {result['months']} Monate "
+                   f"({result['errors']} Fehler, {result.get('purged_noncanonical', 0)} Alt-Zeilen bereinigt)",
+        **result,
+    }
 
 
 @router.post("/recalculate")
