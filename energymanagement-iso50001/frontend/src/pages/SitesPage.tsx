@@ -5,6 +5,7 @@ import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type PaginatedResponse } from '@/types';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import Sankey from '@/components/charts/Sankey';
+import EnergyFlowPanel from '@/components/charts/EnergyFlowPanel';
 
 // ── Typen ──
 
@@ -766,18 +767,6 @@ export default function SitesPage() {
     ? panelMeters.filter(m => m.energy_type === meterEnergyFilter)
     : panelMeters;
 
-  // Sankey: Energieart → Gebäude
-  const sankeyFlowMap = new Map<string, number>();
-  flatMeters.forEach(m => {
-    if (!m.building_id) return;
-    const k = `${m.energy_type}::${m.building_id}`;
-    sankeyFlowMap.set(k, (sankeyFlowMap.get(k) ?? 0) + 1);
-  });
-  const siteFlows: Array<{ source: string; target: string; value: number }> = [];
-  sankeyFlowMap.forEach((cnt, k) => { const [s, t] = k.split('::'); siteFlows.push({ source: s, target: t, value: cnt }); });
-  const sankeyBuildingIds = new Set(flatMeters.map(m => m.building_id).filter(Boolean) as string[]);
-  const sankeyBuildingTargets = siteBuildings.filter(b => sankeyBuildingIds.has(b.id)).map(b => ({ id: b.id, label: b.name }));
-
   // Sankey: Energieart → NE (nur wenn Gebäude gewählt + units geladen)
   const bldgFlowMap = new Map<string, number>();
   if (selectedNode.type === 'building' && selectedBuilding?.id === selectedNode.id && selectedBuilding.usage_units?.length) {
@@ -1021,30 +1010,20 @@ export default function SitesPage() {
                 </div>
               </div>
 
-              {/* Sankey Energieart → Gebäude */}
-              {siteFlows.length > 0 && sankeyBuildingTargets.length > 0 && (
-                <div className="panel-card">
-                  <div className="panel-card-head">
-                    <div>
-                      <h3>Energiefluss · Standort-Übersicht</h3>
-                      <div className="panel-card-sub">Zähler nach Energieart und Gebäude</div>
-                    </div>
-                  </div>
-                  <div className="sankey-wrap">
-                    <Sankey
-                      sources={activeDefs.map(d => ({ id: d.key, label: d.label, color: d.color }))}
-                      targets={sankeyBuildingTargets}
-                      flows={siteFlows}
-                      height={Math.max(160, sankeyBuildingTargets.length * 42 + 60)}
-                      width={560} labelLeft={100} labelRight={120}
-                    />
-                    <div className="sankey-foot">
-                      <span className="lhs">Energieart</span>
-                      <span className="rhs">Gebäude</span>
-                    </div>
+              {/* Energiefluss je Energieart – echter Verbrauch + Kosten bis zu den Verbrauchern */}
+              <div className="panel-card">
+                <div className="panel-card-head">
+                  <div>
+                    <h3>Energiefluss · {consumptionYear}</h3>
+                    <div className="panel-card-sub">Je Energieart · Bezug → Unterzähler → Verbraucher · Verbrauch + Kosten (brutto)</div>
                   </div>
                 </div>
-              )}
+                <EnergyFlowPanel
+                  siteId={selectedSite.id}
+                  startDate={`${consumptionYear}-01-01`}
+                  endDate={`${consumptionYear}-12-31`}
+                />
+              </div>
 
               {/* Gebäude-Karten */}
               {siteBuildings.length > 0 && (

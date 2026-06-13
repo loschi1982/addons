@@ -12,7 +12,7 @@ import {
   AlertTriangle, Cloud, TrendingUp, Database, ArrowRight, FileText,
 } from 'lucide-react';
 import InfoTip from '@/components/ui/InfoTip';
-import SankeyDiagram from '@/components/charts/SankeyDiagram';
+import EnergyFlowPanel from '@/components/charts/EnergyFlowPanel';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
@@ -58,24 +58,6 @@ interface HeatmapPoint {
   weekday_label: string;
   hour: number;
   value: number;
-}
-
-interface SankeyNode {
-  id: string;
-  label: string;
-  type: string;
-}
-
-interface SankeyLink {
-  source: number;
-  target: number;
-  value: number;
-  direction?: 'consumption' | 'feed_in';
-}
-
-interface SankeyData {
-  nodes: SankeyNode[];
-  links: SankeyLink[];
 }
 
 interface Anomaly {
@@ -339,7 +321,7 @@ export default function AnalyticsPage() {
             {tab === 'distribution' && <DistributionTab siteId={siteId} />}
             {tab === 'self_consumption' && <SelfConsumptionTab />}
             {tab === 'heatmap' && <HeatmapTab meters={filteredMeters} />}
-            {tab === 'sankey' && <SankeyTab meters={filteredMeters} siteId={siteId} />}
+            {tab === 'sankey' && <SankeyTab siteId={siteId} />}
             {tab === 'schema' && <EnergySchemaPanel />}
             {tab === 'duration_curve' && <DurationCurveTab meters={filteredMeters} />}
             {tab === 'cumulative' && <CumulativeTab meters={filteredMeters} siteId={siteId} />}
@@ -1112,58 +1094,13 @@ function HeatmapTab({ meters }: { meters: Meter[] }) {
 
 /* ── Tab: Sankey ── */
 
-function SankeyTab({ meters, siteId }: { meters: Meter[]; siteId?: string }) {
-  const [data, setData] = useState<SankeyData | null>(null);
+function SankeyTab({ siteId }: { siteId?: string }) {
   const [startDate, setStartDate] = useState(yearStart());
   const [endDate, setEndDate] = useState(today());
-  const [energyType, setEnergyType] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  // Verfügbare Energiearten aus übergebenen Zählern ableiten
-  const availableTypes = [...new Set(meters.map((m) => m.energy_type))].sort();
-
-  // Erste Energieart vorauswählen sobald Zähler verfügbar
-  useEffect(() => {
-    if (availableTypes.length > 0 && !energyType) {
-      setEnergyType(availableTypes[0]);
-    }
-  }, [availableTypes.length]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params: Record<string, string> = {
-        start_date: startDate,
-        end_date: endDate,
-      };
-      if (energyType) params.energy_type = energyType;
-      if (siteId) params.site_id = siteId;
-      const res = await apiClient.get('/api/v1/analytics/sankey', { params });
-      setData(res.data);
-    } catch { /* leer */ }
-    setLoading(false);
-  }, [startDate, endDate, energyType, siteId]);
-
-  useEffect(() => { fetchData(); }, [fetchData]);
 
   return (
     <div>
       <div className="flex flex-wrap gap-3 items-end mb-6">
-        <div>
-          <label className="label">Energieart</label>
-          <select
-            className="input w-48"
-            value={energyType}
-            onChange={(e) => setEnergyType(e.target.value)}
-          >
-            <option value="">Alle Energiearten</option>
-            {availableTypes.map((t) => (
-              <option key={t} value={t}>
-                {ENERGY_TYPE_LABELS[t as EnergyType] || t}
-              </option>
-            ))}
-          </select>
-        </div>
         <div>
           <label className="label">Von</label>
           <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
@@ -1172,31 +1109,11 @@ function SankeyTab({ meters, siteId }: { meters: Meter[]; siteId?: string }) {
           <label className="label">Bis</label>
           <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
         </div>
+        <div className="text-xs text-gray-400 self-end pb-1">
+          Je Energieart ein Diagramm · Fluss bis zu den Verbrauchern · Verbrauch + Kosten (brutto)
+        </div>
       </div>
-
-      <div className="card">
-        <h2 className="mb-4 text-lg font-semibold">
-          Energieflussdiagramm
-          {energyType && (
-            <span className="ml-2 text-base font-normal text-gray-500">
-              – {ENERGY_TYPE_LABELS[energyType as EnergyType] || energyType}
-            </span>
-          )}
-        </h2>
-        {loading ? (
-          <div className="flex h-80 items-center justify-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
-          </div>
-        ) : data && data.nodes.length > 0 ? (
-          <div className="overflow-x-auto">
-            <SankeyDiagram nodes={data.nodes} links={data.links} width={800} height={450} />
-          </div>
-        ) : (
-          <div className="flex h-80 items-center justify-center text-gray-400">
-            Keine Energieflussdaten vorhanden
-          </div>
-        )}
-      </div>
+      <EnergyFlowPanel siteId={siteId} startDate={startDate} endDate={endDate} />
     </div>
   );
 }

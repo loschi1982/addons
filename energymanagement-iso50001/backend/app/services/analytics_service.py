@@ -1003,6 +1003,7 @@ class AnalyticsService:
             select(
                 MeterReading.meter_id,
                 func.sum(MeterReading.consumption).label("total"),
+                func.sum(MeterReading.cost_gross).label("cost"),
             )
             .where(
                 MeterReading.meter_id.in_(meter_ids_list),
@@ -1012,9 +1013,15 @@ class AnalyticsService:
             .group_by(MeterReading.meter_id)
         )).all()
         raw_by_meter = {row.meter_id: row.total or Decimal("0") for row in rows}
+        # Bruttokosten je Zähler – i. d. R. nur an den Wurzeln (EVU) erfasst.
+        cost_by_meter = {row.meter_id: float(row.cost or 0) for row in rows}
         consumption_map: dict[uuid.UUID, float] = {
             m.id: float((raw_by_meter.get(m.id) or Decimal("0")) * CONVERSION_FACTORS.get(m.unit, Decimal("1")))
             for m in meters
+        }
+        # Nativer Verbrauch (in Zähler-Einheit) je Zähler – für Anzeige.
+        native_by_meter: dict[uuid.UUID, float] = {
+            m.id: float(raw_by_meter.get(m.id) or Decimal("0")) for m in meters
         }
 
         # Hierarchie-Tiefe berechnen (für korrekte Spaltenplatzierung)
@@ -1030,6 +1037,33 @@ class AnalyticsService:
             return depth
 
         depth_map = {m.id: calc_depth(m) for m in meters}
+
+        # ── Verbrauchsanteilige Kostenverteilung ──
+        # Kosten sind nur an den Wurzelzählern (EVU) erfasst. Je Strang den
+        # Wurzelzähler bestimmen, einen Preis je nativer Einheit ableiten
+        # (p = cost_root / raw_root) und die Kosten verbrauchsanteilig auf alle
+        # Knoten verteilen: cost(node) = raw(node) × p.
+        def find_root(m: Meter) -> Meter:
+            current = m
+            while current.parent_meter_id and current.parent_meter_id in meter_by_id:
+                current = meter_by_id[current.parent_meter_id]
+            return current
+
+        strang_price: dict[uuid.UUID, float] = {}
+        for m in meters:
+            if m.parent_meter_id is None or m.parent_meter_id not in meter_by_id:
+                rr = native_by_meter.get(m.id, 0.0)
+                cc = cost_by_meter.get(m.id, 0.0)
+                strang_price[m.id] = (cc / rr) if rr > 0 else 0.0
+        cost_dist_by_meter: dict[uuid.UUID, float] = {}
+        for m in meters:
+            root = find_root(m)
+            cost_dist_by_meter[m.id] = native_by_meter.get(m.id, 0.0) * strang_price.get(root.id, 0.0)
+
+        # Anzeige-Werte je Knoten-ID (native Einheit + verteilte Kosten €).
+        node_native: dict[str, float] = {}
+        node_cost: dict[str, float] = {}
+        node_unit: dict[str, str] = {}
 
         # Knoten und Links aufbauen
         nodes: list[dict] = []
@@ -1083,6 +1117,9 @@ class AnalyticsService:
 
             # Alle Zähler (inkl. Erzeuger) nach Hierarchie-Tiefe platzieren
             get_node_idx(mid, label, node_type, depth + 1)
+            node_native[mid] = native_by_meter.get(meter.id, 0.0)
+            node_unit[mid] = meter.unit or ""
+            node_cost[mid] = cost_dist_by_meter.get(meter.id, 0.0)
 
             # Vorwärts-Links (Verbrauch): Eltern → Kind – nur für Nicht-Erzeuger
             if meter.parent_meter_id and not is_producer:
@@ -1103,13 +1140,18 @@ class AnalyticsService:
                         "source": node_ids[parent_id],
                         "target": node_ids[mid],
                         "value": max(value, 0),
+                        "value_native": max(native_by_meter.get(meter.id, 0.0), 0.0),
+                        "cost_eur": max(cost_dist_by_meter.get(meter.id, 0.0), 0.0),
                         "direction": "consumption",
                     })
 
             # Verbindung: Zähler → Verbraucher (Anlagen)
             if meter.consumers:
                 meter_value = max(consumption_map.get(meter.id, 0), 0)
-                per_consumer = meter_value / max(len(meter.consumers), 1)
+                n_cons = max(len(meter.consumers), 1)
+                per_consumer = meter_value / n_cons
+                per_consumer_native = max(native_by_meter.get(meter.id, 0.0), 0.0) / n_cons
+                per_consumer_cost = max(cost_dist_by_meter.get(meter.id, 0.0), 0.0) / n_cons
                 for consumer in meter.consumers:
                     cid = f"consumer_{consumer.id}"
                     consumer_depth = depth + 2
@@ -1117,10 +1159,15 @@ class AnalyticsService:
                     if c_label in ambiguous_names:
                         c_label = f"{c_label} (Verbraucher)"
                     get_node_idx(cid, c_label, "verbraucher", consumer_depth)
+                    node_native[cid] = node_native.get(cid, 0.0) + per_consumer_native
+                    node_cost[cid] = node_cost.get(cid, 0.0) + per_consumer_cost
+                    node_unit[cid] = meter.unit or ""
                     links.append({
                         "source": node_ids[mid],
                         "target": node_ids[cid],
                         "value": per_consumer,
+                        "value_native": per_consumer_native,
+                        "cost_eur": per_consumer_cost,
                         "direction": "consumption",
                     })
 
@@ -1130,6 +1177,8 @@ class AnalyticsService:
                 continue
             feed_in_value = abs(consumption_map.get(meter.id, 0))
 
+            feed_in_native = abs(native_by_meter.get(meter.id, 0.0))
+
             # Pfad vom Erzeuger bis zum Root-Zähler nach oben verfolgen
             current = meter
             while current.parent_meter_id and current.parent_meter_id in meter_by_id:
@@ -1138,6 +1187,8 @@ class AnalyticsService:
                     "source": node_ids[str(current.id)],
                     "target": node_ids[str(parent.id)],
                     "value": feed_in_value,
+                    "value_native": feed_in_native,
+                    "cost_eur": 0.0,
                     "direction": "feed_in",
                 })
                 current = parent
@@ -1147,29 +1198,106 @@ class AnalyticsService:
                 export_id = f"export_{current.energy_type}"
                 export_label = f"Einspeisung {current.energy_type}"
                 get_node_idx(export_id, export_label, "einspeisung", 0)
+                node_native[export_id] = node_native.get(export_id, 0.0) + feed_in_native
+                node_unit[export_id] = current.unit or ""
                 links.append({
                     "source": node_ids[str(current.id)],
                     "target": node_ids[export_id],
                     "value": feed_in_value,
+                    "value_native": feed_in_native,
+                    "cost_eur": 0.0,
                     "direction": "feed_in",
                 })
 
-        # Hauptzähler ohne Eltern: "Energiequelle" als Wurzel (Spalte 0)
+        # Hauptzähler ohne Eltern: "Energiequelle" als Wurzel (Spalte 0).
+        # Quelle-Knoten = Summe der (Nicht-Erzeuger-)Wurzeln je Energieart →
+        # Bezugsmenge + Gesamtkosten (für die Kopfzeile je Energieart).
         root_meters = [m for m in meters if not m.parent_meter_id]
         for rm in root_meters:
             source_label = f"Bezug {rm.energy_type}"
             source_id = f"source_{rm.energy_type}"
             src_idx = get_node_idx(source_id, source_label, "quelle", 0)
+            if not getattr(rm, "is_feed_in", False):
+                node_native[source_id] = node_native.get(source_id, 0.0) + native_by_meter.get(rm.id, 0.0)
+                node_cost[source_id] = node_cost.get(source_id, 0.0) + cost_by_meter.get(rm.id, 0.0)
+                node_unit[source_id] = rm.unit or ""
             value = consumption_map.get(rm.id, 0)
             if value > 0:
                 links.append({
                     "source": src_idx,
                     "target": node_ids[str(rm.id)],
                     "value": value,
+                    "value_native": max(native_by_meter.get(rm.id, 0.0), 0.0),
+                    "cost_eur": max(cost_by_meter.get(rm.id, 0.0), 0.0),
                     "direction": "consumption",
                 })
 
+        # Post-Pass: native Einheit + verteilte Kosten an die Knoten schreiben.
+        for node in nodes:
+            nid = node["id"]
+            node["consumption_native"] = round(node_native.get(nid, 0.0), 2)
+            node["cost_eur"] = round(node_cost.get(nid, 0.0), 2)
+            node["unit"] = node_unit.get(nid, "")
+
         return {"nodes": nodes, "links": links}
+
+    async def get_sankey_by_energy(
+        self,
+        start_date: date,
+        end_date: date,
+        site_id: uuid.UUID | None = None,
+    ) -> dict:
+        """Ein Energiefluss-Diagramm JE ENERGIEART (Strom, Fernwärme, …).
+
+        Pro Energieart wird ``get_sankey`` aufgerufen (volle Hierarchie inkl.
+        Verbraucher, native Einheit + verbrauchsanteilig verteilte Bruttokosten).
+        Kopf-Summen (Verbrauch/Kosten) stammen vom Quelle-Knoten = Summe der
+        Wurzel-/Bezugszähler (kein Doppelzählen über Unterzähler).
+        """
+        ET_LABELS: dict[str, str] = {
+            "electricity": "Strom", "natural_gas": "Erdgas", "heating_oil": "Heizöl",
+            "district_heating": "Fernwärme", "district_cooling": "Kälte",
+            "water": "Wasser", "solar": "Solar", "lpg": "Flüssiggas",
+            "wood_pellets": "Holzpellets", "compressed_air": "Druckluft",
+            "steam": "Dampf", "other": "Sonstige",
+        }
+        order = list(ET_LABELS.keys())
+
+        # Vorhandene Energiearten bestimmen (optional auf Standort begrenzt).
+        et_q = select(Meter.energy_type).where(Meter.is_active == True).distinct()  # noqa: E712
+        if site_id is not None:
+            site_ids = await self._meter_ids_for_site(site_id)
+            if not site_ids:
+                return {"energy_types": []}
+            et_q = et_q.where(Meter.id.in_(site_ids))
+        ets = [r[0] for r in (await self.db.execute(et_q)).all() if r[0]]
+        ets.sort(key=lambda e: order.index(e) if e in order else 99)
+
+        result: list[dict] = []
+        for et in ets:
+            sankey = await self.get_sankey(
+                start_date, end_date, energy_type=et, site_id=site_id,
+            )
+            nodes = sankey.get("nodes", [])
+            links = sankey.get("links", [])
+            if not nodes:
+                continue
+            src = next((n for n in nodes if n.get("id") == f"source_{et}"), None)
+            total_native = float(src["consumption_native"]) if src else 0.0
+            total_cost = float(src["cost_eur"]) if src else 0.0
+            unit = (src.get("unit") if src else "") or next(
+                (n.get("unit") for n in nodes if n.get("unit")), "kWh"
+            )
+            result.append({
+                "key": et,
+                "label": ET_LABELS.get(et, et),
+                "unit": unit,
+                "total_consumption_native": round(total_native, 2),
+                "total_cost_eur": round(total_cost, 2),
+                "nodes": nodes,
+                "links": links,
+            })
+        return {"energy_types": result}
 
     # ── Witterungskorrektur-Vergleich ──
 

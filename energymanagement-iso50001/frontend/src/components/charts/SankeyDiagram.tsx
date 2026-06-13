@@ -13,12 +13,17 @@ interface SankeyNode {
   label: string;
   type: string;
   depth?: number;
+  consumption_native?: number;
+  unit?: string;
+  cost_eur?: number;
 }
 
 interface SankeyLink {
   source: number;
   target: number;
   value: number;
+  value_native?: number;
+  cost_eur?: number;
   direction?: 'consumption' | 'feed_in';
 }
 
@@ -71,6 +76,22 @@ interface LayoutLink extends SankeyLink {
 function formatValue(val: number): string {
   if (val >= 1000) return `${(val / 1000).toFixed(1)} MWh`;
   return `${val.toFixed(0)} kWh`;
+}
+
+/** Verbrauch in nativer Einheit (kWh→MWh ab 1.000; andere Einheiten direkt). */
+function formatNative(val: number, unit?: string): string {
+  const u = unit || 'kWh';
+  if (u === 'kWh') return formatValue(val);
+  return `${val.toLocaleString('de-DE', { maximumFractionDigits: 0 })} ${u}`;
+}
+
+/** Bruttokosten in € (ab 1.000 € als k €). */
+function formatCost(val: number): string {
+  if (!val) return '';
+  if (Math.abs(val) >= 1000) {
+    return `${(val / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })}k €`;
+  }
+  return `${val.toLocaleString('de-DE', { maximumFractionDigits: 0 })} €`;
 }
 
 /** Durchschnittliche Y-Mitte aller verbundenen Knoten (Barycenter-Heuristik). */
@@ -317,7 +338,9 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
                 setTooltip({
                   x: e.clientX,
                   y: e.clientY,
-                  text: `${sNode.label} → ${tNode.label}: ${formatValue(link.value)}${tooltipSuffix}`,
+                  text: `${sNode.label} → ${tNode.label}: `
+                    + `${formatNative(link.value_native ?? link.value, sNode.unit ?? tNode.unit)}`
+                    + `${link.cost_eur ? ' · ' + formatCost(link.cost_eur) : ''}${tooltipSuffix}`,
                 });
               }}
               onMouseLeave={() => { setHoveredLink(null); setTooltip(null); }}
@@ -387,7 +410,8 @@ export default function SankeyDiagram({ nodes, links, width = 800, height = 450 
                 className="fill-gray-400"
                 style={{ fontSize: 10 }}
               >
-                {formatValue(node.value)}
+                {formatNative(node.consumption_native ?? node.value, node.unit)}
+                {node.cost_eur ? ` · ${formatCost(node.cost_eur)}` : ''}
               </text>
             </g>
           );

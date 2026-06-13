@@ -114,6 +114,20 @@ async def get_sankey(
     )
 
 
+@router.get("/sankey-by-energy")
+async def get_sankey_by_energy(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    site_id: uuid.UUID | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Energiefluss JE ENERGIEART: ein Sankey pro Energieträger (Strom, Fernwärme, …),
+    mit Verbrauch in nativer Einheit und verbrauchsanteilig verteilten Bruttokosten."""
+    service = AnalyticsService(db)
+    return await service.get_sankey_by_energy(start_date, end_date, site_id=site_id)
+
+
 @router.get("/weather-corrected")
 async def get_weather_corrected(
     meter_id: uuid.UUID = Query(...),
