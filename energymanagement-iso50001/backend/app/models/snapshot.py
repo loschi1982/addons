@@ -140,6 +140,32 @@ class MeterConsumptionStat(Base, UUIDMixin):
     )
 
 
+class MeterLatestReading(Base, UUIDMixin):
+    """Vorberechneter letzter Messwert (Stand + Zeitpunkt) je Zähler.
+
+    Die Zählerliste (z. B. unter "Ablesungen") braucht je Zähler den letzten
+    Stand und das Datum für die Status-Anzeige (aktuell/fällig/überfällig).
+    Live über die meter_readings-Hypertable (ein LATERAL je Zähler) dauert das
+    für hunderte Zähler viele Sekunden; daher periodisch per Celery vorberechnet
+    und bei manuellen Korrekturen gezielt je Zähler aktualisiert.
+    """
+    __tablename__ = "meter_latest_readings"
+    __table_args__ = (
+        UniqueConstraint("meter_id", name="uq_meter_latest_reading"),
+    )
+
+    meter_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("meters.id", ondelete="CASCADE"), index=True
+    )
+    value: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
+    timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
+
+
 class MeterMonthlyConsumption(Base, UUIDMixin):
     """Vorberechneter Verbrauch + Kosten je (Zähler, Jahr, Monat).
 

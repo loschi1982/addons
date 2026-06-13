@@ -21,6 +21,7 @@ from app.models.consumer import Consumer
 from app.models.meter import Meter
 from app.models.reading import MeterReading
 from app.models.invoice import EnergyInvoice
+from app.models.snapshot import MeterLatestReading
 
 logger = structlog.get_logger()
 
@@ -84,30 +85,44 @@ class MeterService:
         result = await self.db.execute(query)
         meters = result.scalars().all()
 
-        # Letzten Messwert pro Zähler laden – per LATERAL über den Unique-Index
-        # (meter_id, timestamp). DISTINCT ON über die gesamte meter_readings-
-        # Hypertable würde sonst alle Chunks scannen (ohne Zeit-Filter) und je
-        # nach Datenmenge zig Sekunden dauern. Der LATERAL macht je Zähler einen
-        # Index-Scan ORDER BY timestamp DESC LIMIT 1.
+        # Letzten Messwert pro Zähler aus der Vorberechnung (meter_latest_readings)
+        # lesen – instantan. Der frühere Live-LATERAL über die meter_readings-
+        # Hypertable dauerte für hunderte Zähler zweistellige Sekunden (jeder
+        # Zähler scannt seine Timescale-Chunks). Fallback auf den LATERAL nur,
+        # solange die Vorberechnung leer ist (vor dem ersten Celery-Lauf).
         meter_ids = [m.id for m in meters]
         latest_by_meter: dict[uuid.UUID, tuple[Decimal, datetime]] = {}
         if meter_ids:
-            latest_stmt = text(
-                """
-                SELECT t.meter_id, lr.value, lr.timestamp
-                FROM unnest(:ids) AS t(meter_id)
-                JOIN LATERAL (
-                    SELECT value, timestamp
-                    FROM meter_readings r
-                    WHERE r.meter_id = t.meter_id
-                    ORDER BY r.timestamp DESC
-                    LIMIT 1
-                ) lr ON true
-                """
-            ).bindparams(bindparam("ids", type_=ARRAY(PGUUID(as_uuid=True))))
-            latest_result = await self.db.execute(latest_stmt, {"ids": meter_ids})
-            for row in latest_result.all():
-                latest_by_meter[row.meter_id] = (row.value, row.timestamp)
+            has_pc = (await self.db.execute(
+                select(MeterLatestReading.id).limit(1)
+            )).first() is not None
+            if has_pc:
+                rows = (await self.db.execute(
+                    select(
+                        MeterLatestReading.meter_id,
+                        MeterLatestReading.value,
+                        MeterLatestReading.timestamp,
+                    ).where(MeterLatestReading.meter_id.in_(meter_ids))
+                )).all()
+                for row in rows:
+                    latest_by_meter[row.meter_id] = (row.value, row.timestamp)
+            else:
+                latest_stmt = text(
+                    """
+                    SELECT t.meter_id, lr.value, lr.timestamp
+                    FROM unnest(:ids) AS t(meter_id)
+                    JOIN LATERAL (
+                        SELECT value, timestamp
+                        FROM meter_readings r
+                        WHERE r.meter_id = t.meter_id
+                        ORDER BY r.timestamp DESC
+                        LIMIT 1
+                    ) lr ON true
+                    """
+                ).bindparams(bindparam("ids", type_=ARRAY(PGUUID(as_uuid=True))))
+                latest_result = await self.db.execute(latest_stmt, {"ids": meter_ids})
+                for row in latest_result.all():
+                    latest_by_meter[row.meter_id] = (row.value, row.timestamp)
 
         return {
             "items": list(meters),

@@ -45,4 +45,5 @@ from app.models.snapshot import (  # noqa: F401
     TariffAggregateSnapshot,
     MeterConsumptionStat,
     MeterMonthlyConsumption,
+    MeterLatestReading,
 )

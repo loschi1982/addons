@@ -23,7 +23,11 @@ from app.core.exceptions import EnergyManagementError
 from app.models.meter import Meter
 from app.models.reading import MeterReading
 from app.models.settings import AppSetting
-from app.models.snapshot import MeterConsumptionStat, MeterMonthlyConsumption
+from app.models.snapshot import (
+    MeterConsumptionStat,
+    MeterLatestReading,
+    MeterMonthlyConsumption,
+)
 
 # Schlüssel + Default-Parameter der vorberechneten Ausreißerliste.
 OUTLIER_SNAPSHOT_KEY = "outlier_snapshot_default"
@@ -217,6 +221,92 @@ class ReadingService:
             ))
         await self.db.commit()
 
+    async def recompute_latest_readings(self) -> int:
+        """Letzten Messwert (Stand + Zeitpunkt) je Zähler vorberechnen.
+
+        Ein LATERAL je Zähler über den Unique-Index (meter_id, timestamp) liefert
+        den jeweils neuesten Wert. Das ist offline (Celery) vertretbar, war aber
+        live beim Laden der Zählerliste (hunderte Zähler) viel zu langsam. Atomarer
+        Tausch der Tabelle meter_latest_readings.
+        """
+        rows = (await self.db.execute(text(
+            """
+            SELECT m.id AS meter_id, lr.value, lr.timestamp
+            FROM meters m
+            JOIN LATERAL (
+                SELECT value, timestamp
+                FROM meter_readings r
+                WHERE r.meter_id = m.id
+                ORDER BY r.timestamp DESC
+                LIMIT 1
+            ) lr ON true
+            """
+        ))).all()
+        await self.db.execute(text("DELETE FROM meter_latest_readings"))
+        now = datetime.now(timezone.utc)
+        for r in rows:
+            self.db.add(MeterLatestReading(
+                meter_id=r.meter_id,
+                value=r.value,
+                timestamp=r.timestamp,
+                computed_at=now,
+            ))
+        await self.db.commit()
+        logger.info("latest_readings_recomputed", rows=len(rows))
+        return len(rows)
+
+    async def _refresh_latest_reading_for_meter(self, meter_id: uuid.UUID) -> None:
+        """Letzten Messwert eines einzelnen Zählers in meter_latest_readings neu setzen."""
+        row = (await self.db.execute(
+            select(MeterReading.value, MeterReading.timestamp)
+            .where(MeterReading.meter_id == meter_id)
+            .order_by(MeterReading.timestamp.desc())
+            .limit(1)
+        )).first()
+        await self.db.execute(
+            text("DELETE FROM meter_latest_readings WHERE meter_id = :mid"),
+            {"mid": str(meter_id)},
+        )
+        if row is not None:
+            self.db.add(MeterLatestReading(
+                meter_id=meter_id,
+                value=row.value,
+                timestamp=row.timestamp,
+                computed_at=datetime.now(timezone.utc),
+            ))
+        await self.db.commit()
+
+    async def _propagate_reading_change(self, meter: Meter) -> None:
+        """Nach einer Korrektur/Löschung die abgeleiteten Daten erneuern, damit die
+        Änderung sofort (nicht erst beim nächsten 6-h-Lauf) sichtbar ist:
+        Monats-Vorberechnung + letzter Messwert des Zählers, Analyse-Cache,
+        Dashboard-/Analyse-Snapshots des Standorts. Fehler hier dürfen die
+        eigentliche Änderung nie umwerfen → defensiv gekapselt.
+        """
+        try:
+            await self._refresh_monthly_consumption_for_meter(meter)
+            await self._refresh_latest_reading_for_meter(meter.id)
+            from sqlalchemy import delete as _delete
+            from sqlalchemy import or_ as _or
+
+            from app.core.cache import cache_delete
+            from app.models.snapshot import AnalyticsSnapshot, DashboardSnapshot
+
+            await cache_delete("analytics_*")
+            for model in (DashboardSnapshot, AnalyticsSnapshot):
+                await self.db.execute(
+                    _delete(model).where(
+                        _or(model.site_id == meter.site_id, model.site_id.is_(None))
+                    )
+                )
+            await self.db.commit()
+        except Exception as e:  # pragma: no cover - Propagation ist best effort
+            logger.warning("reading_change_propagation_failed", error=str(e))
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
+
     async def recompute_outlier_snapshot(
         self,
         factor: float = OUTLIER_DEFAULT_FACTOR,
@@ -372,7 +462,7 @@ class ReadingService:
             "page_size": page_size,
         }
 
-    async def create_reading(self, data: dict) -> MeterReading:
+    async def create_reading(self, data: dict, propagate: bool = True) -> MeterReading:
         """
         Zählerstand erfassen und Verbrauch berechnen.
 
@@ -380,6 +470,10 @@ class ReadingService:
         2. Plausibilitätsprüfung
         3. Verbrauch als Differenz zum Vorgänger berechnen
         4. Speichern
+
+        ``propagate``: nach dem Speichern abgeleitete Daten (Monats-Vorberechnung,
+        letzter Messwert, Analyse-Cache/-Snapshots) erneuern. Beim Bulk-Import auf
+        False setzen und einmalig je Zähler am Ende propagieren.
         """
         meter_id = data["meter_id"]
         value = Decimal(str(data["value"])) if data.get("value") is not None else None
@@ -449,8 +543,12 @@ class ReadingService:
         )
         self.db.add(reading)
 
-        # Nachfolger-Verbrauch aktualisieren (falls bereits ein späterer Wert existiert)
-        await self._update_successor_consumption(meter_id, timestamp, value)
+        # Nachfolger-Verbrauch aktualisieren (falls bereits ein späterer Wert
+        # existiert) – NUR bei differenzbasierten Zählern. Bei lieferungsbasierten
+        # ist der Wert jedes Readings selbst der Verbrauch; eine Differenzbildung
+        # über die Nachfolger wäre falsch.
+        if not meter.is_delivery_based:
+            await self._update_successor_consumption(meter_id, timestamp, value)
 
         await self.db.commit()
 
@@ -461,20 +559,31 @@ class ReadingService:
                 warnings=warnings,
             )
 
+        if propagate:
+            await self._propagate_reading_change(meter)
+
         return reading
 
     async def create_readings_bulk(self, readings_data: list[dict]) -> list[MeterReading]:
         """Mehrere Zählerstände auf einmal erfassen. Duplikate werden übersprungen."""
         results = []
+        affected: dict[uuid.UUID, Meter] = {}
         for data in readings_data:
             try:
-                reading = await self.create_reading(data)
+                reading = await self.create_reading(data, propagate=False)
                 results.append(reading)
+                if reading.meter_id not in affected:
+                    m = await self.db.get(Meter, reading.meter_id)
+                    if m:
+                        affected[reading.meter_id] = m
             except EnergyManagementError as e:
                 if e.error_code == "DUPLICATE_READING":
                     logger.info("duplicate_reading_skipped", timestamp=str(data.get("timestamp")))
                     continue
                 raise
+        # Abgeleitete Daten einmalig je betroffenem Zähler erneuern.
+        for m in affected.values():
+            await self._propagate_reading_change(m)
         return results
 
     async def get_reading(self, reading_id: uuid.UUID) -> MeterReading:
@@ -492,20 +601,27 @@ class ReadingService:
         """
         Zählerstand korrigieren und Verbrauch neu berechnen.
 
-        Aktualisiert auch den Verbrauch des Nachfolgers.
+        Bei differenzbasierten Zählern wird auch der Verbrauch des Nachfolgers
+        aktualisiert. Bei lieferungsbasierten Zählern ist der Wert selbst der
+        Verbrauch (keine Differenz, keine Nachfolger-Anpassung).
         """
         reading = await self.get_reading(reading_id)
+        meter = await self.db.get(Meter, reading.meter_id)
 
         if "value" in data and data["value"] is not None:
             reading.value = Decimal(str(data["value"]))
-            # Verbrauch neu berechnen
-            reading.consumption = await self._calculate_consumption(
-                reading.meter_id, reading.value, reading.timestamp
-            )
-            # Nachfolger aktualisieren
-            await self._update_successor_consumption(
-                reading.meter_id, reading.timestamp, reading.value
-            )
+            if meter is not None and meter.is_delivery_based:
+                # Lieferungsbasiert: Wert IST der Verbrauch.
+                reading.consumption = reading.value
+            else:
+                # Verbrauch neu berechnen (Differenz zum Vorgänger)
+                reading.consumption = await self._calculate_consumption(
+                    reading.meter_id, reading.value, reading.timestamp
+                )
+                # Nachfolger aktualisieren
+                await self._update_successor_consumption(
+                    reading.meter_id, reading.timestamp, reading.value
+                )
 
         if "timestamp" in data and data["timestamp"] is not None:
             reading.timestamp = data["timestamp"]
@@ -525,26 +641,36 @@ class ReadingService:
             reading.cost_net = None
 
         await self.db.commit()
+        if meter is not None:
+            await self._propagate_reading_change(meter)
         return reading
 
     async def delete_reading(self, reading_id: uuid.UUID) -> None:
-        """Zählerstand löschen und Nachfolger-Verbrauch neu berechnen."""
+        """Zählerstand löschen und – bei differenzbasierten Zählern – den
+        Nachfolger-Verbrauch neu berechnen."""
         reading = await self.get_reading(reading_id)
         meter_id = reading.meter_id
         timestamp = reading.timestamp
+        meter = await self.db.get(Meter, meter_id)
 
         await self.db.delete(reading)
 
-        # Nachfolger-Verbrauch aktualisieren
-        successor = await self._get_next_reading(meter_id, timestamp)
-        if successor:
-            predecessor = await self._get_previous_reading(meter_id, successor.timestamp)
-            if predecessor:
-                successor.consumption = successor.value - predecessor.value
-            else:
-                successor.consumption = None
+        # Nachfolger-Verbrauch nur bei differenzbasierten Zählern anpassen. Bei
+        # lieferungsbasierten bleibt consumption=value des Nachfolgers korrekt.
+        if meter is None or not meter.is_delivery_based:
+            successor = await self._get_next_reading(meter_id, timestamp)
+            if successor:
+                predecessor = await self._get_previous_reading(meter_id, successor.timestamp)
+                if predecessor and successor.value is not None:
+                    diff = successor.value - predecessor.value
+                    # Negativer Verbrauch (z. B. Zählerwechsel) → None statt Minuswert.
+                    successor.consumption = diff if diff >= 0 else None
+                else:
+                    successor.consumption = None
 
         await self.db.commit()
+        if meter is not None:
+            await self._propagate_reading_change(meter)
 
     async def get_consumption_summary(
         self,
