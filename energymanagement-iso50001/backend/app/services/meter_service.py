@@ -198,12 +198,26 @@ class MeterService:
         await self.db.commit()
 
         if delivery_changed:
+            from sqlalchemy import delete, or_
+
             from app.core.cache import cache_delete
+            from app.models.snapshot import AnalyticsSnapshot, DashboardSnapshot
             from app.services.reading_service import ReadingService
 
             await ReadingService(self.db).recompute_meter_consumption(meter_id)
             # Analyse-Caches verwerfen, damit die korrigierten Werte sofort greifen.
             await cache_delete("analytics_*")
+            # Vorberechnete Dashboard-/Analyse-Snapshots des Standorts (und die
+            # globalen, site_id IS NULL) verwerfen → nächster Aufruf rechnet live
+            # mit den korrigierten Verbräuchen statt einen veralteten Snapshot
+            # bis zum nächsten 6-h-Beat auszuliefern.
+            for model in (DashboardSnapshot, AnalyticsSnapshot):
+                await self.db.execute(
+                    delete(model).where(
+                        or_(model.site_id == meter.site_id, model.site_id.is_(None))
+                    )
+                )
+            await self.db.commit()
 
         logger.info("meter_updated", meter_id=str(meter_id))
         return meter

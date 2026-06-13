@@ -119,6 +119,20 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"⚠ Verbrauchsstatistik-Task konnte nicht angestoßen werden: {e}")
 
+        # Dashboard-/Analyse-Snapshots ebenfalls nach Start neu berechnen, damit
+        # sie nach einem Rebuild oder einer Datenkorrektur nicht bis zum nächsten
+        # 6-h-Beat veraltete Werte ausliefern. Non-blocking im Celery-Worker.
+        for task_name in (
+            "precompute_dashboard_snapshots",
+            "precompute_analytics_snapshots",
+        ):
+            try:
+                import app.tasks as _tasks
+                getattr(_tasks, task_name).delay()
+                print(f"✓ {task_name} angestoßen")
+            except Exception as e:
+                print(f"⚠ {task_name} konnte nicht angestoßen werden: {e}")
+
     # Seed-Daten laden (nur wenn DB verfügbar)
     if db_available:
         try:
