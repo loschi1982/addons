@@ -169,6 +169,8 @@ class SiteExitPointDetail(BaseModel):
     owner_site_id: uuid.UUID | None = None
     owner_site_name: str
     consumption_kwh: Decimal
+    # Wird wirksam abgezogen (übergeordneter Wurzelzähler ist gemessen)?
+    subtracted: bool = True
 
 
 class SiteConsumptionResponse(BaseModel):
@@ -178,7 +180,8 @@ class SiteConsumptionResponse(BaseModel):
     period_start: date
     period_end: date
     gross_consumption_kwh: Decimal
-    cross_site_exit_kwh: Decimal
+    cross_site_exit_kwh: Decimal           # wirksam abgezogen (pro Strang gedeckelt)
+    cross_site_exit_raw_kwh: Decimal = Decimal("0")  # roh, alle Fremd-Unterzähler
     net_consumption_kwh: Decimal
     exit_points: list[SiteExitPointDetail] = []
 

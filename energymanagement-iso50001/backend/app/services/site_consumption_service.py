@@ -11,6 +11,7 @@ ExitSet(S):       Zähler eines anderen Standorts, deren Parent zu S gehört (Su
 """
 
 import uuid
+from collections import defaultdict
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -46,10 +47,12 @@ class SiteConsumptionService:
         Nettoverbrauch eines Standorts berechnen.
 
         Gibt zurück:
-          gross_consumption_kwh  – Summe der PhysicalRoots-Zähler
-          cross_site_exit_kwh    – Summe der ExitSet-Zähler (abzuziehen)
-          net_consumption_kwh    – Nettoverbrauch = gross - exits
-          exit_points            – Liste der Subtraktionszähler mit Details
+          gross_consumption_kwh    – Summe der PhysicalRoots-Zähler
+          cross_site_exit_kwh      – WIRKSAM abgezogene Fremdzähler (pro Strang
+                                     auf den Wurzelverbrauch gedeckelt)
+          cross_site_exit_raw_kwh  – roher Verbrauch aller Fremd-Unterzähler
+          net_consumption_kwh      – Nettoverbrauch = gross − wirksamer Abzug (≥ 0)
+          exit_points              – Liste der Subtraktionszähler (mit subtracted-Flag)
         """
         start_dt = datetime.combine(period_start, datetime.min.time()).replace(
             tzinfo=timezone.utc
@@ -58,41 +61,50 @@ class SiteConsumptionService:
             tzinfo=timezone.utc
         )
 
-        # Alle Meter-IDs des Standorts
-        site_meter_ids_q = await self.db.execute(
-            select(Meter.id).where(Meter.site_id == site_id, Meter.is_active == True)  # noqa: E712
-        )
-        site_meter_ids = {row[0] for row in site_meter_ids_q.all()}
+        # Alle aktiven Zähler des Standorts inkl. Parent → für Wurzel-Zuordnung.
+        site_rows = (await self.db.execute(
+            select(Meter.id, Meter.parent_meter_id).where(
+                Meter.site_id == site_id, Meter.is_active == True,  # noqa: E712
+            )
+        )).all()
+        site_meter_ids = {r.id for r in site_rows}
 
         if not site_meter_ids:
             return {
                 "gross_consumption_kwh": Decimal("0"),
                 "cross_site_exit_kwh": Decimal("0"),
+                "cross_site_exit_raw_kwh": Decimal("0"),
                 "net_consumption_kwh": Decimal("0"),
                 "exit_points": [],
             }
 
-        # ── PhysicalRoots(S): Zähler von S, deren Parent fehlt oder fremd ist ──
-        ParentMeter = aliased(Meter)
-        physical_roots_q = await self.db.execute(
-            select(Meter.id)
-            .join(ParentMeter, Meter.parent_meter_id == ParentMeter.id, isouter=True)
-            .where(
-                Meter.site_id == site_id,
-                Meter.is_active == True,  # noqa: E712
-                (Meter.parent_meter_id.is_(None)) | (ParentMeter.site_id != site_id),
-            )
-        )
-        physical_root_ids = [row[0] for row in physical_roots_q.all()]
+        parent_map = {r.id: r.parent_meter_id for r in site_rows}
+
+        def root_of(meter_id: uuid.UUID) -> uuid.UUID:
+            """Aufstieg bis zum PhysicalRoot des Standorts (Parent fehlt/fremd)."""
+            cur = meter_id
+            seen: set[uuid.UUID] = set()
+            while True:
+                p = parent_map.get(cur)
+                if p is None or p not in site_meter_ids or p in seen:
+                    return cur
+                seen.add(cur)
+                cur = p
+
+        # PhysicalRoots(S): Parent fehlt ODER liegt außerhalb des Standorts.
+        physical_root_ids = [
+            r.id for r in site_rows
+            if r.parent_meter_id is None or r.parent_meter_id not in site_meter_ids
+        ]
 
         # ── ExitSet(S): Fremdzähler direkt unter einem S-Zähler ──
         ParentMeter2 = aliased(Meter)
-        exit_q = await self.db.execute(
+        exit_rows = (await self.db.execute(
             select(
                 Meter.id,
                 Meter.name,
+                Meter.parent_meter_id,
                 Meter.site_id,
-                Meter.unit,
                 Site.name.label("owner_site_name"),
             )
             .join(ParentMeter2, Meter.parent_meter_id == ParentMeter2.id)
@@ -103,43 +115,58 @@ class SiteConsumptionService:
                 Meter.is_active == True,  # noqa: E712
                 ParentMeter2.is_active == True,  # noqa: E712
             )
-        )
-        exit_rows = exit_q.all()
-        exit_meter_ids = [row.id for row in exit_rows]
+        )).all()
 
-        # ── Verbrauch: PhysicalRoots ──
-        gross_kwh = await self._sum_consumption(physical_root_ids, start_dt, end_dt)
+        # Verbrauch je Zähler (Batch): PhysicalRoots + Exit-Kinder.
+        root_cons = await self._sum_by_meter(physical_root_ids, start_dt, end_dt)
+        exit_cons = await self._sum_by_meter([r.id for r in exit_rows], start_dt, end_dt)
 
-        # ── Verbrauch: ExitSet ──
-        exit_kwh = await self._sum_consumption(exit_meter_ids, start_dt, end_dt)
+        gross_kwh = sum(root_cons.values(), Decimal("0"))
+        raw_exit_kwh = sum(exit_cons.values(), Decimal("0"))
 
-        # ── Verbrauch pro ExitPoint ──
+        # Exit-Verbrauch dem jeweiligen Wurzelstrang zuordnen.
+        exit_by_root: dict[uuid.UUID, Decimal] = defaultdict(lambda: Decimal("0"))
+        for er in exit_rows:
+            if er.parent_meter_id in site_meter_ids:
+                exit_by_root[root_of(er.parent_meter_id)] += exit_cons.get(er.id, Decimal("0"))
+
+        # Netto je Wurzel: max(0, Verbrauch_Wurzel − zugeordnete Exits). Damit wird
+        # NIE mehr abgezogen, als der (gemessene) Wurzelzähler hergibt → kein
+        # negativer Nettoverbrauch durch nicht gemessene Hauptzähler.
+        net_kwh = Decimal("0")
+        for rid in physical_root_ids:
+            diff = root_cons.get(rid, Decimal("0")) - exit_by_root.get(rid, Decimal("0"))
+            if diff > 0:
+                net_kwh += diff
+        effective_exit_kwh = gross_kwh - net_kwh
+
+        # Exit-Punkte mit Flag, ob sie wirksam abgezogen werden (Wurzel gemessen).
         exit_points = []
-        for row in exit_rows:
-            kwh = await self._sum_consumption([row.id], start_dt, end_dt)
-            exit_points.append(
-                {
-                    "meter_id": row.id,
-                    "meter_name": row.name,
-                    "owner_site_id": row.site_id,
-                    "owner_site_name": row.owner_site_name or "Unbekannter Standort",
-                    "consumption_kwh": kwh,
-                }
-            )
-
-        net_kwh = gross_kwh - exit_kwh
+        for er in exit_rows:
+            rid = root_of(er.parent_meter_id) if er.parent_meter_id in site_meter_ids else None
+            subtracted = bool(rid is not None and root_cons.get(rid, Decimal("0")) > 0)
+            exit_points.append({
+                "meter_id": er.id,
+                "meter_name": er.name,
+                "owner_site_id": er.site_id,
+                "owner_site_name": er.owner_site_name or "Unbekannter Standort",
+                "consumption_kwh": exit_cons.get(er.id, Decimal("0")),
+                "subtracted": subtracted,
+            })
 
         logger.info(
             "site_net_consumption",
             site_id=str(site_id),
             gross=float(gross_kwh),
-            exit=float(exit_kwh),
+            exit_effective=float(effective_exit_kwh),
+            exit_raw=float(raw_exit_kwh),
             net=float(net_kwh),
         )
 
         return {
             "gross_consumption_kwh": gross_kwh,
-            "cross_site_exit_kwh": exit_kwh,
+            "cross_site_exit_kwh": effective_exit_kwh,
+            "cross_site_exit_raw_kwh": raw_exit_kwh,
             "net_consumption_kwh": net_kwh,
             "exit_points": exit_points,
         }
@@ -212,6 +239,31 @@ class SiteConsumptionService:
         )
         total = result.scalar()
         return Decimal(str(total)) if total is not None else Decimal("0")
+
+    async def _sum_by_meter(
+        self,
+        meter_ids: list[uuid.UUID],
+        start_dt: datetime,
+        end_dt: datetime,
+    ) -> dict[uuid.UUID, Decimal]:
+        """Verbrauch je Zähler (Batch) im Zeitraum als {meter_id: Decimal}."""
+        if not meter_ids:
+            return {}
+        rows = (await self.db.execute(
+            select(
+                MeterReading.meter_id,
+                func.sum(MeterReading.consumption).label("t"),
+            ).where(
+                MeterReading.meter_id.in_(meter_ids),
+                MeterReading.timestamp >= start_dt,
+                MeterReading.timestamp <= end_dt,
+                MeterReading.consumption.is_not(None),
+            ).group_by(MeterReading.meter_id)
+        )).all()
+        return {
+            r.meter_id: (Decimal(str(r.t)) if r.t is not None else Decimal("0"))
+            for r in rows
+        }
 
     # ──────────────────────────────────────────────────────────────────────────
     # Annotierter Zählerbaum

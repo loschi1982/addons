@@ -254,6 +254,7 @@ async def get_site_consumption(
         period_end=period_end,
         gross_consumption_kwh=result["gross_consumption_kwh"],
         cross_site_exit_kwh=result["cross_site_exit_kwh"],
+        cross_site_exit_raw_kwh=result.get("cross_site_exit_raw_kwh", result["cross_site_exit_kwh"]),
         net_consumption_kwh=result["net_consumption_kwh"],
         exit_points=[
             SiteExitPointDetail(
@@ -262,6 +263,7 @@ async def get_site_consumption(
                 owner_site_id=ep["owner_site_id"],
                 owner_site_name=ep["owner_site_name"],
                 consumption_kwh=ep["consumption_kwh"],
+                subtracted=ep.get("subtracted", True),
             )
             for ep in result["exit_points"]
         ],

@@ -38,8 +38,8 @@ interface AnnotatedMeterNode {
 }
 interface SiteConsumption {
   site_id: string; site_name: string; period_start: string; period_end: string;
-  gross_consumption_kwh: number; cross_site_exit_kwh: number; net_consumption_kwh: number;
-  exit_points: Array<{ meter_id: string; meter_name: string; owner_site_id: string | null; owner_site_name: string; consumption_kwh: number; }>;
+  gross_consumption_kwh: number; cross_site_exit_kwh: number; cross_site_exit_raw_kwh?: number; net_consumption_kwh: number;
+  exit_points: Array<{ meter_id: string; meter_name: string; owner_site_id: string | null; owner_site_name: string; consumption_kwh: number; subtracted?: boolean; }>;
 }
 interface SiteConsumptionSummary {
   site_id: string; site_name: string; by_energy: Record<string, number>;
@@ -748,7 +748,13 @@ export default function SitesPage() {
 
   const flatMeters = flattenTree(siteMeters);
   const totalMeterCount = flatMeters.length || selectedSite.meter_count;
-  const hasExits = !!(siteConsumption && siteConsumption.cross_site_exit_kwh > 0);
+  // Abzüge: wirksam (übergeordneter Wurzelzähler gemessen) vs. nicht abgezogen.
+  const exitPoints = siteConsumption?.exit_points ?? [];
+  const subtractedPoints = exitPoints.filter(ep => ep.subtracted !== false);
+  const unaccountedPoints = exitPoints.filter(ep => ep.subtracted === false);
+  const unaccountedKwh = unaccountedPoints.reduce((s, ep) => s + (ep.consumption_kwh || 0), 0);
+  const hasExits = subtractedPoints.length > 0;   // wirksame Abzüge (Liste)
+  const hasAnyExit = exitPoints.length > 0;       // überhaupt Fremd-Unterzähler
 
   const siteEnergySet = new Set(flatMeters.map(m => m.energy_type));
   const activeDefs = SITE_ENERGY_DEFS.filter(d => siteEnergySet.has(d.key));
@@ -863,7 +869,7 @@ export default function SitesPage() {
               <span>Bruttoverbrauch</span>
               <span className="meter-val">{fmtKwh(siteConsumption.gross_consumption_kwh)}</span>
             </div>
-            {hasExits && siteConsumption.exit_points.map(ep => (
+            {hasExits && subtractedPoints.map(ep => (
               <div key={ep.meter_id} className="vbr-line">
                 <div className="meter-line">
                   <span className="meter-code">{ep.meter_name}</span>
@@ -882,12 +888,20 @@ export default function SitesPage() {
               <span>= Nettoverbrauch {selectedSite.name}</span>
               <span className="meter-val">{fmtKwh(siteConsumption.net_consumption_kwh)}</span>
             </div>
-            {!hasExits && (
+            {unaccountedPoints.length > 0 && (
+              <p style={{ fontSize: 11.5, color: '#92551A', fontStyle: 'italic', marginTop: 6 }}>
+                Hinweis: {unaccountedPoints.length} Fremd-Unterzähler ({fmtKwh(unaccountedKwh)}) hängen
+                an Zählern dieses Standorts, die selbst <strong>nicht gemessen</strong> sind, und werden
+                daher nicht abgezogen. Damit der Nettoverbrauch korrekt wird, müssen die übergeordneten
+                Haupt-/Erzeugungszähler Messwerte erhalten.
+              </p>
+            )}
+            {!hasAnyExit && (
               <p style={{ fontSize: 11.5, color: '#92551A', fontStyle: 'italic', marginTop: 4 }}>
                 Keine standortübergreifenden Subtraktionszähler – Brutto = Netto.
               </p>
             )}
-            {hasExits && (
+            {hasAnyExit && (
               <div className="vbr-actions">
                 <button className="btn-amber" onClick={handleSyncNetMeters} disabled={syncingNetMeters}>
                   {syncingNetMeters
