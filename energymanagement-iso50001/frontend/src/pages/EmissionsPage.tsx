@@ -21,6 +21,8 @@ import { EM_ENERGY, resolveEnergyKey } from '@/utils/energyPalette';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import PageHead from '@/components/ui/PageHead';
 import EnergyChip from '@/components/ui/EnergyChip';
+import PeriodNavigator from '@/components/ui/PeriodNavigator';
+import { type PeriodValue, initialPeriod } from '@/utils/period';
 import SourceChip from '@/components/umwelt/SourceChip';
 import MonthBars from '@/components/umwelt/MonthBars';
 
@@ -714,11 +716,7 @@ function FactorsPanel() {
 // ── Tab 3: Berechnung ──
 
 function CalculatePanel() {
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-01-01`;
-  });
-  const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('year'));
   const [calculating, setCalculating] = useState(false);
   const [result, setResult] = useState<{ message: string; calculated?: number; errors?: number } | null>(null);
 
@@ -727,7 +725,7 @@ function CalculatePanel() {
     setResult(null);
     try {
       const res = await apiClient.post(
-        `/api/v1/emissions/calculate?start_date=${startDate}&end_date=${endDate}`
+        `/api/v1/emissions/calculate?start_date=${period.start}&end_date=${period.end}`
       );
       setResult(res.data);
     } catch (err: unknown) {
@@ -754,12 +752,8 @@ function CalculatePanel() {
 
       <div className="toolbar-card" style={{ marginBottom: 16 }}>
         <div className="field">
-          <label className="field-label">Von</label>
-          <input type="date" className="uinput mono" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-        </div>
-        <div className="field">
-          <label className="field-label">Bis</label>
-          <input type="date" className="uinput mono" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          <label className="field-label">Zeitraum</label>
+          <PeriodNavigator value={period} onChange={setPeriod} />
         </div>
         <button className="btn-primary" onClick={handleCalculate} disabled={calculating}>
           {calculating ? <RefreshCw size={14} /> : <Play size={14} />}
@@ -772,7 +766,7 @@ function CalculatePanel() {
           <div className="result-icon"><RefreshCw size={18} /></div>
           <div style={{ flex: 1 }}>
             <div className="result-headline">Aggregiere Zählerdaten…</div>
-            <div className="result-sub">{startDate} – {endDate}</div>
+            <div className="result-sub">{period.start} – {period.end}</div>
           </div>
         </div>
       )}

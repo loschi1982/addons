@@ -6,6 +6,8 @@ import {
 import { RefreshCw, Download, BarChart3 } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import PageHead from '@/components/ui/PageHead';
+import PeriodNavigator from '@/components/ui/PeriodNavigator';
+import { type PeriodValue, initialPeriod } from '@/utils/period';
 
 /* ── Typen ── */
 
@@ -89,23 +91,18 @@ function exportCsv(data: BalanceData) {
 /* ── Hauptkomponente ── */
 
 export default function EnergyBalancePage({ siteId }: { siteId?: string }) {
-  const today = new Date();
-  const firstOfYear = `${today.getFullYear()}-01-01`;
-  const todayStr = today.toISOString().slice(0, 10);
-
-  const [startDate, setStartDate] = useState(firstOfYear);
-  const [endDate, setEndDate] = useState(todayStr);
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('year'));
   const [data, setData] = useState<BalanceData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chartView, setChartView] = useState<'kwh' | 'cost'>('kwh');
 
   const load = useCallback(async () => {
-    if (!startDate || !endDate) return;
+    if (!period.start || !period.end) return;
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ start_date: startDate, end_date: endDate });
+      const params = new URLSearchParams({ start_date: period.start, end_date: period.end });
       if (siteId) params.set('site_id', siteId);
       const res = await apiClient.get<BalanceData>(
         `/api/v1/analytics/energy-balance?${params}`
@@ -116,7 +113,7 @@ export default function EnergyBalancePage({ siteId }: { siteId?: string }) {
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, siteId]);
+  }, [period.start, period.end, siteId]);
 
   // Chart-Daten aufbereiten
   const chartData = data
@@ -154,22 +151,8 @@ export default function EnergyBalancePage({ siteId }: { siteId?: string }) {
       {/* Filter */}
       <div className="card p-4 flex flex-wrap gap-4 items-end">
         <div>
-          <label className="label">Von</label>
-          <input
-            type="date"
-            className="input"
-            value={startDate}
-            onChange={e => setStartDate(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label">Bis</label>
-          <input
-            type="date"
-            className="input"
-            value={endDate}
-            onChange={e => setEndDate(e.target.value)}
-          />
+          <label className="label">Zeitraum</label>
+          <PeriodNavigator value={period} onChange={setPeriod} />
         </div>
         <button
           className="btn-primary flex items-center gap-2"

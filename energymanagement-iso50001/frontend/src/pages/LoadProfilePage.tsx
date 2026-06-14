@@ -6,6 +6,8 @@ import {
 import { RefreshCw, Zap, AlertTriangle, TrendingUp, Activity } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import PageHead from '@/components/ui/PageHead';
+import PeriodNavigator from '@/components/ui/PeriodNavigator';
+import { type PeriodValue, initialPeriod } from '@/utils/period';
 
 /* ── Typen ── */
 
@@ -64,19 +66,10 @@ function shortTs(ts: string): string {
 /* ── Hauptkomponente ── */
 
 export default function LoadProfilePage() {
-  const currentYear = new Date().getFullYear();
-  const currentMonth = new Date().getMonth() + 1;
-  const lastDayOfMonth = new Date(currentYear, currentMonth, 0).getDate();
-
   const [meters, setMeters] = useState<Meter[]>([]);
   const [selectedEnergyType, setSelectedEnergyType] = useState('electricity');
   const [selectedMeters, setSelectedMeters] = useState<string[]>([]);
-  const [startDate, setStartDate] = useState(
-    `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`
-  );
-  const [endDate, setEndDate] = useState(
-    `${currentYear}-${String(currentMonth).padStart(2, '0')}-${lastDayOfMonth}`
-  );
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('month'));
   const [maxDemandContract, setMaxDemandContract] = useState('');
   const [data, setData] = useState<LoadProfileData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -113,8 +106,8 @@ export default function LoadProfilePage() {
     try {
       const params = new URLSearchParams({
         meter_ids: selectedMeters.join(','),
-        start_date: startDate,
-        end_date: endDate,
+        start_date: period.start,
+        end_date: period.end,
       });
       if (maxDemandContract) {
         params.set('max_demand_kw_contract', maxDemandContract);
@@ -128,7 +121,7 @@ export default function LoadProfilePage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedMeters, startDate, endDate, maxDemandContract]);
+  }, [selectedMeters, period.start, period.end, maxDemandContract]);
 
   // Chartdaten vorbereiten: Zeitstempel kürzen für X-Achse
   const chartPoints = data?.data_points.map(p => ({
@@ -197,12 +190,8 @@ export default function LoadProfilePage() {
         {/* Zeitraum + Limit */}
         <div className="flex flex-wrap gap-4 items-end">
           <div>
-            <label className="label">Von</label>
-            <input type="date" className="input w-40" value={startDate} onChange={e => setStartDate(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">Bis</label>
-            <input type="date" className="input w-40" value={endDate} onChange={e => setEndDate(e.target.value)} />
+            <label className="label">Zeitraum</label>
+            <PeriodNavigator value={period} onChange={setPeriod} />
           </div>
           <div>
             <label className="label">Vertragslimit kW (opt.)</label>

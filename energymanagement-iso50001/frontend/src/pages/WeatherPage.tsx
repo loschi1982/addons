@@ -18,6 +18,8 @@ import { apiClient } from '@/utils/api';
 import InfoTip from '@/components/ui/InfoTip';
 import PageHead from '@/components/ui/PageHead';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import PeriodNavigator from '@/components/ui/PeriodNavigator';
+import { type PeriodValue, initialPeriod } from '@/utils/period';
 import MultiLine from '@/components/umwelt/MultiLine';
 import MonthBars from '@/components/umwelt/MonthBars';
 
@@ -169,12 +171,7 @@ function WeatherDataPanel({
 }) {
   const [records, setRecords] = useState<WeatherRecord[]>([]);
   const [loading, setLoading] = useState(false);
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
-  });
-  const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('month'));
   const [fetching, setFetching] = useState(false);
   const [fetchResult, setFetchResult] = useState<string | null>(null);
 
@@ -183,7 +180,7 @@ function WeatherDataPanel({
     setLoading(true);
     try {
       const res = await apiClient.get<WeatherRecord[]>(
-        `/api/v1/weather/stations/${selectedStation}/data?start_date=${startDate}&end_date=${endDate}`
+        `/api/v1/weather/stations/${selectedStation}/data?start_date=${period.start}&end_date=${period.end}`
       );
       setRecords(res.data);
     } catch {
@@ -191,7 +188,7 @@ function WeatherDataPanel({
     } finally {
       setLoading(false);
     }
-  }, [selectedStation, startDate, endDate]);
+  }, [selectedStation, period.start, period.end]);
 
   useEffect(() => {
     if (selectedStation) loadData();
@@ -203,7 +200,7 @@ function WeatherDataPanel({
     setFetchResult(null);
     try {
       await apiClient.post(
-        `/api/v1/weather/fetch?station_id=${selectedStation}&start_date=${startDate}&end_date=${endDate}`
+        `/api/v1/weather/fetch?station_id=${selectedStation}&start_date=${period.start}&end_date=${period.end}`
       );
       setFetchResult('Abruf erfolgreich — Daten aktualisiert.');
       await loadData();
@@ -241,12 +238,8 @@ function WeatherDataPanel({
           </select>
         </div>
         <div className="field">
-          <label className="field-label">Von</label>
-          <input type="date" className="uinput mono" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-        </div>
-        <div className="field">
-          <label className="field-label">Bis</label>
-          <input type="date" className="uinput mono" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          <label className="field-label">Zeitraum</label>
+          <PeriodNavigator value={period} onChange={setPeriod} />
         </div>
         <button className="btn-primary" onClick={loadData} disabled={loading || !selectedStation}>
           {loading ? 'Laden…' : 'Anzeigen'}
@@ -617,12 +610,7 @@ function StationsPanel({
   selectedStation: string;
   onSelectStation: (id: string) => void;
 }) {
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
-  });
-  const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('month'));
   const [fetching, setFetching] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
@@ -632,7 +620,7 @@ function StationsPanel({
     setResult(null);
     try {
       await apiClient.post(
-        `/api/v1/weather/fetch?station_id=${selectedStation}&start_date=${startDate}&end_date=${endDate}`
+        `/api/v1/weather/fetch?station_id=${selectedStation}&start_date=${period.start}&end_date=${period.end}`
       );
       setResult({ ok: true, msg: 'DWD-Abruf erfolgreich abgeschlossen.' });
     } catch {
@@ -709,12 +697,8 @@ function StationsPanel({
             </select>
           </div>
           <div className="field">
-            <label className="field-label">Von</label>
-            <input type="date" className="uinput mono" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-          </div>
-          <div className="field">
-            <label className="field-label">Bis</label>
-            <input type="date" className="uinput mono" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            <label className="field-label">Zeitraum</label>
+            <PeriodNavigator value={period} onChange={setPeriod} />
           </div>
           <button className="btn-primary" onClick={handleFetch} disabled={fetching || !selectedStation}>
             <Download size={14} />
@@ -726,7 +710,7 @@ function StationsPanel({
             <div className="result-icon">{result.ok ? <Check size={18} /> : <Info size={18} />}</div>
             <div style={{ flex: 1 }}>
               <div className="result-headline">{result.msg}</div>
-              <div className="result-sub">{startDate} – {endDate}</div>
+              <div className="result-sub">{period.start} – {period.end}</div>
             </div>
           </div>
         )}

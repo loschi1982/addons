@@ -5,11 +5,13 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { RefreshCw, Wallet, Zap, Building2, Ruler, Info, Calendar } from 'lucide-react';
+import { RefreshCw, Wallet, Zap, Building2, Ruler, Info } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import PageTabs, { COST_TABS } from '@/components/layout/PageTabs';
 import PageHead from '@/components/ui/PageHead';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
+import PeriodNavigator from '@/components/ui/PeriodNavigator';
+import { type PeriodValue, initialPeriod } from '@/utils/period';
 
 interface AllocationUnit {
   usage_unit_id: string;
@@ -48,9 +50,7 @@ const kwhShort = (v: number) => {
 };
 
 export default function CostAllocationPage() {
-  const currentYear = new Date().getFullYear();
-  const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
-  const [endDate, setEndDate] = useState(`${currentYear}-12-31`);
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('year'));
   const [data, setData] = useState<AllocationData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +59,7 @@ export default function CostAllocationPage() {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ start_date: startDate, end_date: endDate });
+      const params = new URLSearchParams({ start_date: period.start, end_date: period.end });
       const res = await apiClient.get<AllocationData>(`/api/v1/analytics/cost-allocation?${params}`);
       setData(res.data);
     } catch {
@@ -67,7 +67,7 @@ export default function CostAllocationPage() {
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate]);
+  }, [period.start, period.end]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -92,12 +92,8 @@ export default function CostAllocationPage() {
         {/* Zeitraum */}
         <div className="period-bar">
           <div className="pf-field">
-            <label>Von</label>
-            <div className="date-input"><Calendar size={13} color="var(--ink-3)" /><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={{ border: 'none', background: 'transparent', font: 'inherit', color: 'var(--ink)', outline: 'none' }} /></div>
-          </div>
-          <div className="pf-field">
-            <label>Bis</label>
-            <div className="date-input"><Calendar size={13} color="var(--ink-3)" /><input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={{ border: 'none', background: 'transparent', font: 'inherit', color: 'var(--ink)', outline: 'none' }} /></div>
+            <label>Zeitraum</label>
+            <PeriodNavigator value={period} onChange={setPeriod} />
           </div>
           <button className="btn-ghost" onClick={load} disabled={loading}><RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Laden</button>
           {data && (

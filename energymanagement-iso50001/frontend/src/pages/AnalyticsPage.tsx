@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import InfoTip from '@/components/ui/InfoTip';
 import EnergyFlowPanel from '@/components/charts/EnergyFlowPanel';
+import PeriodNavigator from '@/components/ui/PeriodNavigator';
+import { type PeriodValue, initialPeriod } from '@/utils/period';
 import { apiClient } from '@/utils/api';
 import { ENERGY_TYPE_LABELS, type EnergyType } from '@/types';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
@@ -174,14 +176,6 @@ function formatDate(iso: string): string {
   } catch {
     return iso;
   }
-}
-
-function today(): string {
-  return new Date().toISOString().split('T')[0];
-}
-
-function yearStart(): string {
-  return `${new Date().getFullYear()}-01-01`;
 }
 
 /* ── Hauptkomponente ── */
@@ -541,8 +535,7 @@ function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
   const [data, setData] = useState<TimeSeriesMeter[]>([]);
   const [selectedEnergyType, setSelectedEnergyType] = useState('electricity');
   const [selectedMeter, setSelectedMeter] = useState('');
-  const [startDate, setStartDate] = useState(yearStart());
-  const [endDate, setEndDate] = useState(today());
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('year'));
   const [granularity, setGranularity] = useState('daily');
   const [loading, setLoading] = useState(false);
   const [chartType, setChartType] = useState<'line' | 'area' | 'bar'>('bar');
@@ -561,8 +554,8 @@ function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
     setLoading(true);
     try {
       const params: Record<string, string> = {
-        start_date: startDate,
-        end_date: endDate,
+        start_date: period.start,
+        end_date: period.end,
         granularity,
       };
       if (selectedMeter) params.meter_ids = selectedMeter;
@@ -574,7 +567,7 @@ function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
       setData(res.data);
     } catch { /* leer */ }
     setLoading(false);
-  }, [selectedMeter, selectedEnergyType, startDate, endDate, granularity, siteId]);
+  }, [selectedMeter, selectedEnergyType, period.start, period.end, granularity, siteId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -625,15 +618,11 @@ function TimeSeriesTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
           </select>
         </div>
         <div>
-          <label className="label">Von</label>
-          <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          <label className="label">Zeitraum</label>
+          <PeriodNavigator value={period} onChange={setPeriod} />
         </div>
         <div>
-          <label className="label">Bis</label>
-          <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-        </div>
-        <div>
-          <label className="label">Granularität</label>
+          <label className="label">Auflösung</label>
           <select className="input" value={granularity} onChange={(e) => setGranularity(e.target.value)}>
             <option value="hourly">Stündlich</option>
             <option value="daily">Täglich</option>
@@ -865,20 +854,19 @@ function ComparisonTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
 function DistributionTab({ siteId }: { siteId?: string }) {
   const [data, setData] = useState<DistributionItem[]>([]);
   const [groupBy, setGroupBy] = useState('energy_type');
-  const [startDate, setStartDate] = useState(yearStart());
-  const [endDate, setEndDate] = useState(today());
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('year'));
   const [loading, setLoading] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const params: Record<string, string> = { start_date: startDate, end_date: endDate, group_by: groupBy };
+      const params: Record<string, string> = { start_date: period.start, end_date: period.end, group_by: groupBy };
       if (siteId) params.site_id = siteId;
       const res = await apiClient.get('/api/v1/analytics/distribution', { params });
       setData(res.data);
     } catch { /* leer */ }
     setLoading(false);
-  }, [startDate, endDate, groupBy, siteId]);
+  }, [period.start, period.end, groupBy, siteId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -894,12 +882,8 @@ function DistributionTab({ siteId }: { siteId?: string }) {
           </select>
         </div>
         <div>
-          <label className="label">Von</label>
-          <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-        </div>
-        <div>
-          <label className="label">Bis</label>
-          <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          <label className="label">Zeitraum</label>
+          <PeriodNavigator value={period} onChange={setPeriod} />
         </div>
       </div>
 
@@ -1095,25 +1079,20 @@ function HeatmapTab({ meters }: { meters: Meter[] }) {
 /* ── Tab: Sankey ── */
 
 function SankeyTab({ siteId }: { siteId?: string }) {
-  const [startDate, setStartDate] = useState(yearStart());
-  const [endDate, setEndDate] = useState(today());
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('year'));
 
   return (
     <div>
       <div className="flex flex-wrap gap-3 items-end mb-6">
         <div>
-          <label className="label">Von</label>
-          <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-        </div>
-        <div>
-          <label className="label">Bis</label>
-          <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          <label className="label">Zeitraum</label>
+          <PeriodNavigator value={period} onChange={setPeriod} />
         </div>
         <div className="text-xs text-gray-400 self-end pb-1">
           Je Energieart ein Diagramm · Fluss bis zu den Verbrauchern · Verbrauch + Kosten (brutto)
         </div>
       </div>
-      <EnergyFlowPanel siteId={siteId} startDate={startDate} endDate={endDate} />
+      <EnergyFlowPanel siteId={siteId} startDate={period.start} endDate={period.end} />
     </div>
   );
 }
@@ -1124,8 +1103,7 @@ function WeatherCorrectionTab({ meters }: { meters: Meter[] }) {
   const [selectedEnergyType, setSelectedEnergyType] = useState('district_heating');
   const [selectedMeter, setSelectedMeter] = useState('');
   const [data, setData] = useState<WeatherCorrectedData | null>(null);
-  const [startDate, setStartDate] = useState(yearStart());
-  const [endDate, setEndDate] = useState(today());
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('year'));
   const [loading, setLoading] = useState(false);
 
   const energyTypes = [...new Set(meters.map((m) => m.energy_type))].sort();
@@ -1136,12 +1114,12 @@ function WeatherCorrectionTab({ meters }: { meters: Meter[] }) {
     setLoading(true);
     try {
       const res = await apiClient.get('/api/v1/analytics/weather-corrected', {
-        params: { meter_id: selectedMeter, start_date: startDate, end_date: endDate },
+        params: { meter_id: selectedMeter, start_date: period.start, end_date: period.end },
       });
       setData(res.data);
     } catch { /* leer */ }
     setLoading(false);
-  }, [selectedMeter, startDate, endDate]);
+  }, [selectedMeter, period.start, period.end]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -1182,12 +1160,8 @@ function WeatherCorrectionTab({ meters }: { meters: Meter[] }) {
           </select>
         </div>
         <div>
-          <label className="label">Von</label>
-          <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-        </div>
-        <div>
-          <label className="label">Bis</label>
-          <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          <label className="label">Zeitraum</label>
+          <PeriodNavigator value={period} onChange={setPeriod} />
         </div>
       </div>
 
@@ -1430,8 +1404,7 @@ interface SelfConsumptionPoint {
 
 function SelfConsumptionTab() {
   const [data, setData] = useState<SelfConsumptionPoint[]>([]);
-  const [startDate, setStartDate] = useState(yearStart());
-  const [endDate, setEndDate] = useState(today());
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('year'));
   const [granularity, setGranularity] = useState('monthly');
   const [loading, setLoading] = useState(false);
 
@@ -1439,12 +1412,12 @@ function SelfConsumptionTab() {
     setLoading(true);
     try {
       const res = await apiClient.get('/api/v1/analytics/self-consumption', {
-        params: { start_date: startDate, end_date: endDate, granularity },
+        params: { start_date: period.start, end_date: period.end, granularity },
       });
       setData(res.data);
     } catch { /* leer */ }
     setLoading(false);
-  }, [startDate, endDate, granularity]);
+  }, [period.start, period.end, granularity]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -1459,15 +1432,11 @@ function SelfConsumptionTab() {
     <div>
       <div className="flex flex-wrap gap-3 items-end mb-6">
         <div>
-          <label className="label">Von</label>
-          <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          <label className="label">Zeitraum</label>
+          <PeriodNavigator value={period} onChange={setPeriod} />
         </div>
         <div>
-          <label className="label">Bis</label>
-          <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-        </div>
-        <div>
-          <label className="label">Granularität</label>
+          <label className="label">Auflösung</label>
           <select className="input" value={granularity} onChange={(e) => setGranularity(e.target.value)}>
             <option value="daily">Täglich</option>
             <option value="weekly">Wöchentlich</option>
@@ -1598,8 +1567,7 @@ function DurationCurveTab({ meters }: { meters: Meter[] }) {
 function CumulativeTab({ meters, siteId }: { meters: Meter[]; siteId?: string }) {
   const [selectedEnergyType, setSelectedEnergyType] = useState('electricity');
   const [selectedMeters, setSelectedMeters] = useState<string[]>([]);
-  const [startDate, setStartDate] = useState(yearStart());
-  const [endDate, setEndDate] = useState(today());
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('year'));
   const [data, setData] = useState<TimeSeriesMeter[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -1610,14 +1578,14 @@ function CumulativeTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
     if (selectedMeters.length === 0 && !siteId) return;
     setLoading(true);
     try {
-      const params: Record<string, string> = { start_date: startDate, end_date: endDate };
+      const params: Record<string, string> = { start_date: period.start, end_date: period.end };
       if (selectedMeters.length > 0) params.meter_ids = selectedMeters.join(',');
       if (siteId) params.site_id = siteId;
       const res = await apiClient.get('/api/v1/analytics/cumulative', { params });
       setData(res.data);
     } catch { /* leer */ }
     setLoading(false);
-  }, [selectedMeters, startDate, endDate, siteId]);
+  }, [selectedMeters, period.start, period.end, siteId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -1665,12 +1633,8 @@ function CumulativeTab({ meters, siteId }: { meters: Meter[]; siteId?: string })
           </select>
         </div>
         <div>
-          <label className="label">Von</label>
-          <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-        </div>
-        <div>
-          <label className="label">Bis</label>
-          <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          <label className="label">Zeitraum</label>
+          <PeriodNavigator value={period} onChange={setPeriod} />
         </div>
       </div>
 
@@ -1722,8 +1686,7 @@ interface SubMeterData {
 
 function SubMeterContributionTab({ meters }: { meters: Meter[] }) {
   const [rootMeterId, setRootMeterId] = useState('');
-  const [startDate, setStartDate] = useState(yearStart());
-  const [endDate, setEndDate] = useState(today());
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('year'));
   const [data, setData] = useState<SubMeterData | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -1732,12 +1695,12 @@ function SubMeterContributionTab({ meters }: { meters: Meter[] }) {
     setLoading(true);
     try {
       const res = await apiClient.get('/api/v1/analytics/submeter-contribution', {
-        params: { root_meter_id: rootMeterId, start_date: startDate, end_date: endDate },
+        params: { root_meter_id: rootMeterId, start_date: period.start, end_date: period.end },
       });
       setData(res.data);
     } catch { /* leer */ }
     setLoading(false);
-  }, [rootMeterId, startDate, endDate]);
+  }, [rootMeterId, period.start, period.end]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -1761,12 +1724,8 @@ function SubMeterContributionTab({ meters }: { meters: Meter[] }) {
           </select>
         </div>
         <div>
-          <label className="label">Von</label>
-          <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-        </div>
-        <div>
-          <label className="label">Bis</label>
-          <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          <label className="label">Zeitraum</label>
+          <PeriodNavigator value={period} onChange={setPeriod} />
         </div>
         <button onClick={fetchData} className="btn-primary flex items-center gap-1.5">
           <RefreshCw className="h-4 w-4" />
@@ -1890,8 +1849,7 @@ interface WeatherRegressionData {
 
 function WeatherRegressionTab({ meters }: { meters: Meter[] }) {
   const [meterId, setMeterId] = useState('');
-  const [startDate, setStartDate] = useState(`${new Date().getFullYear() - 1}-01-01`);
-  const [endDate, setEndDate] = useState(today());
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('year', new Date(new Date().getFullYear() - 1, 0, 1)));
   const [data, setData] = useState<WeatherRegressionData | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -1900,12 +1858,12 @@ function WeatherRegressionTab({ meters }: { meters: Meter[] }) {
     setLoading(true);
     try {
       const res = await apiClient.get('/api/v1/analytics/weather-regression', {
-        params: { meter_id: meterId, start_date: startDate, end_date: endDate },
+        params: { meter_id: meterId, start_date: period.start, end_date: period.end },
       });
       setData(res.data);
     } catch { /* leer */ }
     setLoading(false);
-  }, [meterId, startDate, endDate]);
+  }, [meterId, period.start, period.end]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -1940,12 +1898,8 @@ function WeatherRegressionTab({ meters }: { meters: Meter[] }) {
           </select>
         </div>
         <div>
-          <label className="label">Von</label>
-          <input type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-        </div>
-        <div>
-          <label className="label">Bis</label>
-          <input type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          <label className="label">Zeitraum</label>
+          <PeriodNavigator value={period} onChange={setPeriod} />
         </div>
         <button onClick={fetchData} className="btn-primary flex items-center gap-1.5">
           <RefreshCw className="h-4 w-4" />
