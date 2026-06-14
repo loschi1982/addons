@@ -4,6 +4,8 @@ import Sparkline from '@/components/charts/Sparkline';
 import ShareBar from '@/components/charts/ShareBar';
 import StackedMonthly from '@/components/charts/StackedMonthly';
 import CO2Trajectory from '@/components/charts/CO2Trajectory';
+import PeriodNavigator from '@/components/ui/PeriodNavigator';
+import { type PeriodValue, initialPeriod, defaultAggregation } from '@/utils/period';
 
 /* ── Typen ── */
 
@@ -978,21 +980,12 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [viewMode, setViewMode] = useState<ViewModeKey | null>('year');
-  const [granularity, setGranularity] = useState('monthly');
-  const [periodStart, setPeriodStart] = useState(yearStartStr);
-  const [periodEnd, setPeriodEnd] = useState(todayStr);
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('year'));
   const [selectedSite, setSelectedSite] = useState('');
   const [sites, setSites] = useState<Site[]>([]);
 
-  const applyViewMode = useCallback((key: ViewModeKey) => {
-    const mode = VIEW_MODES.find((m) => m.key === key)!;
-    const [start, end] = mode.getRange();
-    setViewMode(key);
-    setGranularity(mode.apiGranularity);
-    setPeriodStart(start);
-    setPeriodEnd(end);
-  }, []);
+  // Chart-Auflösung aus der Zeitraum-Granularität ableiten.
+  const granularity = defaultAggregation(period.granularity);
 
   useEffect(() => {
     apiClient.get('/api/v1/sites', { params: { page_size: 100 } })
@@ -1005,8 +998,8 @@ export default function DashboardPage() {
       setLoading(true);
       const params: Record<string, string> = {
         granularity,
-        period_start: periodStart,
-        period_end: periodEnd,
+        period_start: period.start,
+        period_end: period.end,
       };
       if (selectedSite) params.site_id = selectedSite;
       const res = await apiClient.get('/api/v1/dashboard', { params });
@@ -1017,7 +1010,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [granularity, periodStart, periodEnd, selectedSite]);
+  }, [granularity, period.start, period.end, selectedSite]);
 
   useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
 
@@ -1105,56 +1098,10 @@ export default function DashboardPage() {
             </select>
           </div>
 
-          {/* Zeitraum Von */}
+          {/* Zeitraum */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Von</span>
-            <input
-              type="date" value={periodStart}
-              onChange={(e) => { setPeriodStart(e.target.value); setViewMode(null); }}
-              style={{
-                border: '1px solid var(--line)', background: 'var(--surface)',
-                padding: '5px 10px', borderRadius: 'var(--r-sm)',
-                fontSize: 12.5, color: 'var(--ink)', outline: 'none',
-              }}
-            />
-          </div>
-
-          {/* Zeitraum Bis */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Bis</span>
-            <input
-              type="date" value={periodEnd}
-              onChange={(e) => { setPeriodEnd(e.target.value); setViewMode(null); }}
-              style={{
-                border: '1px solid var(--line)', background: 'var(--surface)',
-                padding: '5px 10px', borderRadius: 'var(--r-sm)',
-                fontSize: 12.5, color: 'var(--ink)', outline: 'none',
-              }}
-            />
-          </div>
-
-          {/* Zeitfenster-Switcher */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Ansicht</span>
-            <div style={{ display: 'flex', border: '1px solid var(--line)', background: 'var(--surface)', borderRadius: 'var(--r-sm)', overflow: 'hidden' }}>
-              {VIEW_MODES.map((mode, i) => (
-                <button
-                  key={mode.key}
-                  onClick={() => applyViewMode(mode.key)}
-                  style={{
-                    padding: '5px 10px', fontSize: 12, cursor: 'pointer',
-                    background: viewMode === mode.key ? 'var(--ink)' : 'transparent',
-                    color: viewMode === mode.key ? '#FFF' : 'var(--ink-3)',
-                    fontWeight: viewMode === mode.key ? 500 : 400,
-                    border: 'none',
-                    borderRight: i < VIEW_MODES.length - 1 ? '1px solid var(--line)' : 'none',
-                    transition: 'background 120ms',
-                  }}
-                >
-                  {mode.label}
-                </button>
-              ))}
-            </div>
+            <span style={{ fontSize: 10, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Zeitraum</span>
+            <PeriodNavigator value={period} onChange={setPeriod} />
           </div>
         </div>
       </div>

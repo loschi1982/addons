@@ -6,6 +6,8 @@ import { ENERGY_TYPE_LABELS, type PaginatedResponse } from '@/types';
 import LoadingSpinner from '@/components/ui/LoadingSpinner';
 import Sankey from '@/components/charts/Sankey';
 import EnergyFlowPanel from '@/components/charts/EnergyFlowPanel';
+import PeriodNavigator from '@/components/ui/PeriodNavigator';
+import { type PeriodValue, initialPeriod, periodLabel } from '@/utils/period';
 
 // ── Typen ──
 
@@ -327,7 +329,7 @@ export default function SitesPage() {
   const [siteConsumption, setSiteConsumption] = useState<SiteConsumption | null>(null);
   const [vbrCollapsed, setVbrCollapsed] = useState(false);
   const currentYear = new Date().getFullYear();
-  const [consumptionYear, setConsumptionYear] = useState(currentYear - 1);
+  const [period, setPeriod] = useState<PeriodValue>(() => initialPeriod('year', new Date(currentYear - 1, 0, 1)));
 
   // Zähler-Modal
   const [showMeterModal, setShowMeterModal] = useState(false);
@@ -411,18 +413,18 @@ export default function SitesPage() {
     } catch { /* Interceptor */ } finally { setDetailLoading(false); }
   }, []);
 
-  const loadSiteConsumption = useCallback(async (siteId: string, year: number) => {
+  const loadSiteConsumption = useCallback(async (siteId: string, start: string, end: string) => {
     try {
       const res = await apiClient.get<SiteConsumption>(
-        `/api/v1/sites/${siteId}/consumption?period_start=${year}-01-01&period_end=${year}-12-31`
+        `/api/v1/sites/${siteId}/consumption?period_start=${start}&period_end=${end}`
       );
       setSiteConsumption(res.data);
     } catch { /* Interceptor */ }
   }, []);
 
   useEffect(() => {
-    if (selectedSite) loadSiteConsumption(selectedSite.id, consumptionYear);
-  }, [selectedSite, consumptionYear, loadSiteConsumption]);
+    if (selectedSite) loadSiteConsumption(selectedSite.id, period.start, period.end);
+  }, [selectedSite, period.start, period.end, loadSiteConsumption]);
 
   const autoSiteParam = searchParams.get('site');
   const autoOpenedRef = useRef(false);
@@ -552,7 +554,7 @@ export default function SitesPage() {
       const res = await apiClient.post(`/api/v1/sites/${selectedSite.id}/sync-net-meters`);
       setSyncResult(res.data);
       await reloadSiteMeters();
-      loadSiteConsumption(selectedSite.id, consumptionYear);
+      loadSiteConsumption(selectedSite.id, period.start, period.end);
     } catch { /* Interceptor */ }
     setSyncingNetMeters(false);
   };
@@ -834,7 +836,7 @@ export default function SitesPage() {
         <div className="stats-cell">
           <div className="stats-label">Fremd-Abzüge</div>
           <div className="stats-value">{siteConsumption ? siteConsumption.exit_points.length : '–'}</div>
-          {siteConsumption && <div className="stats-sub">{consumptionYear}</div>}
+          {siteConsumption && <div className="stats-sub">{periodLabel(period.granularity, period.start, period.end)}</div>}
         </div>
       </div>
 
@@ -854,13 +856,9 @@ export default function SitesPage() {
                 <div className="vbr-net-label">Netto</div>
                 <div className="vbr-net-value">{fmtKwh(siteConsumption.net_consumption_kwh)}</div>
               </div>
-              <select className="vbr-year-select" value={consumptionYear}
-                onClick={e => e.stopPropagation()}
-                onChange={e => setConsumptionYear(Number(e.target.value))}>
-                {Array.from({ length: 5 }, (_, i) => currentYear - 1 - i).map(y => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
-              </select>
+              <div onClick={e => e.stopPropagation()}>
+                <PeriodNavigator value={period} onChange={setPeriod} />
+              </div>
               <span className="vbr-chev"><ChevronRight size={14} /></span>
             </div>
           </div>
@@ -1028,14 +1026,14 @@ export default function SitesPage() {
               <div className="panel-card">
                 <div className="panel-card-head">
                   <div>
-                    <h3>Energiefluss · {consumptionYear}</h3>
+                    <h3>Energiefluss · {periodLabel(period.granularity, period.start, period.end)}</h3>
                     <div className="panel-card-sub">Je Energieart · Bezug → Unterzähler → Verbraucher · Verbrauch + Kosten (brutto)</div>
                   </div>
                 </div>
                 <EnergyFlowPanel
                   siteId={selectedSite.id}
-                  startDate={`${consumptionYear}-01-01`}
-                  endDate={`${consumptionYear}-12-31`}
+                  startDate={period.start}
+                  endDate={period.end}
                 />
               </div>
 
