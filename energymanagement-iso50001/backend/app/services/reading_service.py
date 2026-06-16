@@ -16,7 +16,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import structlog
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import and_, func, select, text, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import EnergyManagementError
@@ -154,6 +154,7 @@ class ReadingService:
 
         changed = 0
         prev_value: Decimal | None = None
+        to_update: list[tuple[uuid.UUID, Decimal | None]] = []
         for r in readings:
             if r.value is None:
                 # Reiner Direkt-Verbrauchswert ohne Zählerstand → unverändert lassen.
@@ -167,11 +168,19 @@ class ReadingService:
                 new_cons = diff if diff >= 0 else None
 
             if new_cons != r.consumption:
-                r.consumption = new_cons
+                to_update.append((r.id, new_cons))
                 changed += 1
             if r.value is not None:
                 prev_value = r.value
 
+        # Direktes SQL statt ORM-Flush (TimescaleDB rowcount quirk auf Hypertables)
+        for rid, new_cons in to_update:
+            await self.db.execute(
+                sa_update(MeterReading)
+                .where(MeterReading.id == rid)
+                .values(consumption=new_cons)
+                .execution_options(synchronize_session=False)
+            )
         await self.db.commit()
 
         # Monats-Vorberechnung dieses Zählers gezielt erneuern (übrige Zähler
@@ -608,39 +617,56 @@ class ReadingService:
         reading = await self.get_reading(reading_id)
         meter = await self.db.get(Meter, reading.meter_id)
 
+        update_vals: dict = {}
+
         if "value" in data and data["value"] is not None:
-            reading.value = Decimal(str(data["value"]))
+            new_value = Decimal(str(data["value"]))
+            update_vals["value"] = new_value
             if meter is not None and meter.is_delivery_based:
-                # Lieferungsbasiert: Wert IST der Verbrauch.
-                reading.consumption = reading.value
+                update_vals["consumption"] = new_value
             else:
-                # Verbrauch neu berechnen (Differenz zum Vorgänger)
-                reading.consumption = await self._calculate_consumption(
-                    reading.meter_id, reading.value, reading.timestamp
+                update_vals["consumption"] = await self._calculate_consumption(
+                    reading.meter_id, new_value, reading.timestamp
                 )
-                # Nachfolger aktualisieren
                 await self._update_successor_consumption(
-                    reading.meter_id, reading.timestamp, reading.value
+                    reading.meter_id, reading.timestamp, new_value
                 )
 
         if "timestamp" in data and data["timestamp"] is not None:
-            reading.timestamp = data["timestamp"]
+            update_vals["timestamp"] = data["timestamp"]
         if "quality" in data and data["quality"] is not None:
-            reading.quality = data["quality"]
+            update_vals["quality"] = data["quality"]
         if "notes" in data:
-            reading.notes = data["notes"]
+            update_vals["notes"] = data["notes"]
 
-        # Kosten aktualisieren
+        # Kosten: neue Werte aus data, Fallback auf bestehende reading-Werte
+        cost_gross = reading.cost_gross
+        vat_rate = reading.vat_rate
         if "cost_gross" in data:
-            reading.cost_gross = Decimal(str(data["cost_gross"])) if data["cost_gross"] else None
+            cost_gross = Decimal(str(data["cost_gross"])) if data["cost_gross"] else None
+            update_vals["cost_gross"] = cost_gross
         if "vat_rate" in data:
-            reading.vat_rate = Decimal(str(data["vat_rate"])) if data["vat_rate"] else None
-        if reading.cost_gross is not None and reading.vat_rate is not None:
-            reading.cost_net = (reading.cost_gross / (1 + reading.vat_rate / 100)).quantize(Decimal("0.01"))
-        else:
-            reading.cost_net = None
+            vat_rate = Decimal(str(data["vat_rate"])) if data["vat_rate"] else None
+            update_vals["vat_rate"] = vat_rate
+        if "cost_gross" in data or "vat_rate" in data:
+            if cost_gross is not None and vat_rate is not None:
+                update_vals["cost_net"] = (cost_gross / (1 + vat_rate / 100)).quantize(Decimal("0.01"))
+            else:
+                update_vals["cost_net"] = None
 
+        if update_vals:
+            # Direktes SQL statt ORM-Flush: TimescaleDB-Hypertable gibt bei UPDATE
+            # manchmal rowcount=0 zurück (z.B. komprimierte Chunks), was SQLAlchemy
+            # fälschlich als StaleDataError wertet.
+            await self.db.execute(
+                sa_update(MeterReading)
+                .where(MeterReading.id == reading_id)
+                .values(**update_vals)
+                .execution_options(synchronize_session=False)
+            )
         await self.db.commit()
+        await self.db.refresh(reading)
+
         if meter is not None:
             await self._propagate_reading_change(meter)
         return reading
@@ -663,10 +689,16 @@ class ReadingService:
                 predecessor = await self._get_previous_reading(meter_id, successor.timestamp)
                 if predecessor and successor.value is not None:
                     diff = successor.value - predecessor.value
-                    # Negativer Verbrauch (z. B. Zählerwechsel) → None statt Minuswert.
-                    successor.consumption = diff if diff >= 0 else None
+                    new_consumption: Decimal | None = diff if diff >= 0 else None
                 else:
-                    successor.consumption = None
+                    new_consumption = None
+                # Direktes SQL statt ORM-Mutation (TimescaleDB rowcount quirk)
+                await self.db.execute(
+                    sa_update(MeterReading)
+                    .where(MeterReading.id == successor.id)
+                    .values(consumption=new_consumption)
+                    .execution_options(synchronize_session=False)
+                )
 
         await self.db.commit()
         if meter is not None:
@@ -798,7 +830,16 @@ class ReadingService:
         successor = await self._get_next_reading(meter_id, timestamp)
         if successor:
             diff = successor.value - value
-            successor.consumption = diff if diff >= 0 else None
+            new_consumption = diff if diff >= 0 else None
+            # Direktes SQL statt ORM-Flush: TimescaleDB-Hypertable gibt bei UPDATE
+            # manchmal rowcount=0 zurück (z.B. komprimierte Chunks), was SQLAlchemy
+            # fälschlich als StaleDataError wertet.
+            await self.db.execute(
+                sa_update(MeterReading)
+                .where(MeterReading.id == successor.id)
+                .values(consumption=new_consumption)
+                .execution_options(synchronize_session=False)
+            )
 
     async def _get_previous_reading(
         self, meter_id: uuid.UUID, timestamp: datetime

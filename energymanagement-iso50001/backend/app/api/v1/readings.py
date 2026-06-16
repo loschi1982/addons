@@ -17,7 +17,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -300,12 +300,13 @@ async def bulk_handle_outliers(
         await ReadingService(db).prune_outlier_snapshot(set(reading_ids))
         return {"status": "deleted", "count": len(ids)}
     if action == "flag":
-        result = await db.execute(select(MeterReading).where(MeterReading.id.in_(ids)))
-        readings = result.scalars().all()
-        for r in readings:
-            r.quality = "outlier"
-            r.consumption = None
-            r.notes = f"Als Ausreißer markiert (Batch) am {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC"
+        notes = f"Als Ausreißer markiert (Batch) am {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC"
+        await db.execute(
+            sa_update(MeterReading)
+            .where(MeterReading.id.in_(ids))
+            .values(quality="outlier", consumption=None, notes=notes)
+            .execution_options(synchronize_session=False)
+        )
         await db.commit()
         await ReadingService(db).prune_outlier_snapshot(set(reading_ids))
         return {"status": "flagged", "count": len(ids)}
@@ -421,9 +422,13 @@ async def handle_outlier(
         return {"status": "deleted", "reading_id": str(reading_id)}
 
     if body.action == "flag":
-        reading.quality = "outlier"
-        reading.consumption = None
-        reading.notes = f"Als Ausreißer markiert am {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC"
+        notes = f"Als Ausreißer markiert am {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC"
+        await db.execute(
+            sa_update(MeterReading)
+            .where(MeterReading.id == reading_id)
+            .values(quality="outlier", consumption=None, notes=notes)
+            .execution_options(synchronize_session=False)
+        )
         await db.commit()
         await ReadingService(db).prune_outlier_snapshot({str(reading_id)})
         return {"status": "flagged", "reading_id": str(reading_id)}
@@ -454,11 +459,15 @@ async def handle_outlier(
         else:
             raise HTTPException(status_code=422, detail="Keine Nachbarwerte für Interpolation")
 
-        reading.consumption = interpolated
-        reading.quality = "interpolated"
-        reading.notes = (
+        notes = (
             f"Interpoliert am {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC "
             f"(original: {float(reading.value):.1f})"
+        )
+        await db.execute(
+            sa_update(MeterReading)
+            .where(MeterReading.id == reading_id)
+            .values(consumption=interpolated, quality="interpolated", notes=notes)
+            .execution_options(synchronize_session=False)
         )
         await db.commit()
         await ReadingService(db).prune_outlier_snapshot({str(reading_id)})
