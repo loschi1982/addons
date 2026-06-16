@@ -107,9 +107,33 @@ class UpdateService:
                             notes.append(f"- {date}: {msg}")
                         result["release_notes"] = "\n".join(notes)
 
+        except httpx.HTTPStatusError as e:
+            # z.B. 404: Repo/Branch/Pfad stimmen nicht oder Repository ist privat.
+            status = e.response.status_code
+            logger.warning(
+                "update_check_failed", status=status, url=str(e.request.url)
+            )
+            if status == 404:
+                result["error"] = (
+                    f"Update-Prüfung fehlgeschlagen: VERSION-Datei nicht gefunden "
+                    f"(HTTP 404). Repo/Branch/Pfad prüfen ({GITHUB_REPO}/main/"
+                    f"{GITHUB_SUBPATH}/VERSION) oder Repository ist privat."
+                )
+            else:
+                result["error"] = (
+                    f"Update-Prüfung fehlgeschlagen: GitHub antwortete mit HTTP {status}."
+                )
         except Exception as e:
-            logger.warning("update_check_failed", error=str(e))
-            result["error"] = f"Update-Prüfung fehlgeschlagen: {str(e)}"
+            # str(e) ist bei manchen Netzwerk-Exceptions (ConnectError/Timeout) leer
+            # → Exception-Typ ergänzen, damit die Ursache erkennbar bleibt.
+            detail = str(e) or repr(e)
+            logger.warning(
+                "update_check_failed", error=detail, error_type=type(e).__name__
+            )
+            result["error"] = (
+                f"Update-Prüfung fehlgeschlagen: {type(e).__name__}: {detail}. "
+                f"Hat der Container Internetzugang zu raw.githubusercontent.com?"
+            )
 
         return result
 
