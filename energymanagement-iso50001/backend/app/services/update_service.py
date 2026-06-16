@@ -216,10 +216,6 @@ class UpdateService:
 
     async def get_update_log(self) -> dict:
         """Gibt den letzten Update-Log zurück (aus AppSetting)."""
-        from sqlalchemy import select
-        from app.core.database import get_db
-        from app.models.setting import AppSetting
-
         # Vereinfachte Version: Log wird erst beim nächsten Update gespeichert
         return {
             "message": "Kein Update-Log vorhanden.",
