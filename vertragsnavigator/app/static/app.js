@@ -12,6 +12,10 @@ const state = {
   paperlessUrl: "",
   externalUrl: "", // vom Browser erreichbare Paperless-URL (Detailansicht-Link)
   linkSource: null, // Markierungs-ID im Verknüpfungsmodus
+  docModus: "text", // "text" | "split" (OCR-Text bzw. Text + PDF nebeneinander)
+  uebersicht: [], // zuletzt geladene Themen-Gruppen (für Liste + Overlay)
+  overlayOffen: false,
+  offenesThemaId: undefined, // thema_id des im Overlay gezeigten Themas (null = "Ohne Thema")
 };
 
 // --- API-Helfer -----------------------------------------------------------
@@ -52,10 +56,6 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
-function kuerzen(s, n) {
-  return s.length > n ? s.slice(0, n) + "…" : s;
-}
-
 // --- Initialisierung ------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", init);
@@ -74,6 +74,19 @@ async function init() {
 
   // Kontextmenü auf der Dokumentenansicht
   document.getElementById("doc-content").addEventListener("contextmenu", aufContextMenu);
+
+  // Umschalter Text / Text + PDF
+  document.getElementById("btn-text").addEventListener("click", () => setzeDocModus("text"));
+  document.getElementById("btn-split").addEventListener("click", () => setzeDocModus("split"));
+
+  // Themen-Overlay schließen (X, Klick auf Backdrop, ESC)
+  document.getElementById("overlay-close").addEventListener("click", schliesseOverlay);
+  document.getElementById("themen-overlay").addEventListener("click", (ev) => {
+    if (ev.target.id === "themen-overlay") schliesseOverlay();
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && state.overlayOffen) schliesseOverlay();
+  });
 
   await ladeThemen();
   await ladeBaum();
@@ -159,6 +172,8 @@ async function oeffneDokument(id) {
     rendereDokument(dok);
     rendereParentAuswahl(dok);
     markiereAktivenBaum(id);
+    document.getElementById("ansicht-umschalter").hidden = false;
+    aktualisierePdf(); // lädt das PDF, falls der Split-Modus aktiv ist
     setStatus("");
   } catch (e) {
     setStatus("Dokument-Fehler: " + e.message, true);
@@ -240,6 +255,36 @@ function rendereParentAuswahl(dok) {
   };
 
   zeile.hidden = false;
+}
+
+// --- Ansichts-Modus: Text bzw. Text + PDF --------------------------------
+
+function setzeDocModus(modus) {
+  state.docModus = modus;
+  const ansicht = document.getElementById("doc-ansicht");
+  const pdf = document.getElementById("doc-pdf");
+  document.getElementById("btn-text").classList.toggle("aktiv", modus === "text");
+  document.getElementById("btn-split").classList.toggle("aktiv", modus === "split");
+
+  if (modus === "split") {
+    ansicht.classList.add("split");
+    pdf.hidden = false;
+    aktualisierePdf();
+  } else {
+    ansicht.classList.remove("split");
+    pdf.hidden = true;
+  }
+}
+
+function aktualisierePdf() {
+  if (state.docModus !== "split" || !state.aktuellesDok) return;
+  const frame = document.getElementById("pdf-frame");
+  const id = String(state.aktuellesDok.id);
+  // Nur neu laden, wenn ein anderes Dokument als bisher angezeigt wird.
+  if (frame.dataset.docId !== id) {
+    frame.src = API + "/api/pdf/" + state.aktuellesDok.id;
+    frame.dataset.docId = id;
+  }
 }
 
 // --- Markieren & Kontextmenü ---------------------------------------------
@@ -412,83 +457,121 @@ async function ladeThemen() {
 async function ladeUebersicht() {
   try {
     const gruppen = await api("GET", "/api/uebersicht");
-    rendereUebersicht(gruppen);
+    state.uebersicht = gruppen;
+    rendereThemenListe(gruppen);
+    if (state.overlayOffen) rendereOverlay(); // offenes Overlay aktuell halten
   } catch (e) {
-    document.getElementById("uebersicht").innerHTML =
+    document.getElementById("themenliste").innerHTML =
       '<p class="hinweis">' + escapeHtml(e.message) + "</p>";
   }
 }
 
-function rendereUebersicht(gruppen) {
-  const el = document.getElementById("uebersicht");
+// Spalte 3: reine Liste der Themen (Name + Anzahl). Klick öffnet das Overlay.
+function rendereThemenListe(gruppen) {
+  const el = document.getElementById("themenliste");
   el.innerHTML = "";
 
-  const alle = new Map();
-  for (const g of gruppen) for (const m of g.markierungen) alle.set(m.id, m);
-
-  if (gruppen.length === 0) {
-    el.innerHTML = '<p class="hinweis">Noch keine Themen oder Markierungen.</p>';
+  if (!gruppen || gruppen.length === 0) {
+    el.innerHTML = '<p class="hinweis">Noch keine Themen angelegt.</p>';
     return;
   }
 
   for (const g of gruppen) {
-    const box = document.createElement("div");
-    box.className = "thema";
-
-    const titel = document.createElement("div");
-    titel.className = "thema-titel";
-    titel.innerHTML = "<span>" + escapeHtml(g.name) + "</span><span>" + g.markierungen.length + "</span>";
-    box.appendChild(titel);
-
-    for (const m of g.markierungen) {
-      const e = document.createElement("div");
-      e.className = "eintrag";
-
-      // PDF wird vom Add-on selbst inline ausgeliefert (eigene Ingress-URL),
-      // damit #page=n funktioniert und kein Paperless-Auth/Pfad-Problem auftritt.
-      const pdfLink = API + "/api/pdf/" + m.dokument_id + "#page=" + m.seite;
-      let quelle =
-        '<a class="sprung" href="' + pdfLink + '" target="_blank" rel="noopener">📄 ' +
-        escapeHtml(m.dokument_titel) + " · S. " + m.seite + "</a>";
-      // Zusätzlicher Link in die Paperless-Detailansicht (mit Notizen/Metadaten),
-      // sofern eine vom Browser erreichbare Paperless-URL konfiguriert ist.
-      if (state.externalUrl) {
-        const detail = state.externalUrl + "/documents/" + m.dokument_id;
-        quelle +=
-          ' <a class="paperless-link" href="' + detail +
-          '" target="_blank" rel="noopener" title="In Paperless öffnen (mit Notizen)">🗂 Paperless</a>';
-      }
-
-      let inner = '<button class="loeschen" title="Markierung löschen" data-id="' + m.id + '">✕</button>';
-      inner += '<div class="quelle">' + quelle + "</div>";
-      inner += '<div class="auszug">' + escapeHtml(kuerzen(m.textauszug, 160)) + "</div>";
-      if (m.notiz) inner += '<div class="notiz">📝 ' + escapeHtml(m.notiz) + "</div>";
-      if (m.verknuepft_mit && m.verknuepft_mit.length) {
-        const ziele = m.verknuepft_mit
-          .map((id) => {
-            const z = alle.get(id);
-            return z ? escapeHtml(z.dokument_titel) + " S." + z.seite : "#" + id;
-          })
-          .join(", ");
-        inner += '<div class="verkn">🔗 ' + ziele + "</div>";
-      }
-      e.innerHTML = inner;
-
-      e.querySelector(".loeschen").addEventListener("click", async (ev) => {
-        ev.stopPropagation();
-        if (!confirm("Markierung löschen?")) return;
-        try {
-          await api("DELETE", "/api/markierungen/" + m.id);
-          await ladeUebersicht();
-          await ladeBaum();
-          if (state.aktuellesDok) await oeffneDokument(state.aktuellesDok.id);
-        } catch (err) {
-          alert("Fehler: " + err.message);
-        }
-      });
-
-      box.appendChild(e);
-    }
-    el.appendChild(box);
+    const item = document.createElement("div");
+    item.className = "thema-item";
+    item.innerHTML =
+      '<span class="thema-name">' + escapeHtml(g.name) + "</span>" +
+      '<span class="badge">' + g.markierungen.length + "</span>";
+    item.addEventListener("click", () => oeffneThemaOverlay(g.thema_id));
+    el.appendChild(item);
   }
+}
+
+function findeGruppe(themaId) {
+  return (state.uebersicht || []).find((g) => g.thema_id === themaId) || null;
+}
+
+function oeffneThemaOverlay(themaId) {
+  state.offenesThemaId = themaId;
+  state.overlayOffen = true;
+  rendereOverlay();
+  document.getElementById("themen-overlay").hidden = false;
+}
+
+function schliesseOverlay() {
+  state.overlayOffen = false;
+  document.getElementById("themen-overlay").hidden = true;
+}
+
+// Themen-Zusammenfassung: alle Markierungen des Themas, sichtbar getrennt.
+function rendereOverlay() {
+  const g = findeGruppe(state.offenesThemaId);
+  const body = document.getElementById("overlay-body");
+  document.getElementById("overlay-titel").textContent = g ? g.name : "Thema";
+
+  if (!g) {
+    schliesseOverlay();
+    return;
+  }
+  body.innerHTML = "";
+  if (g.markierungen.length === 0) {
+    body.innerHTML = '<p class="hinweis">Noch keine Markierungen für dieses Thema.</p>';
+    return;
+  }
+
+  // alle Markierungen (themenübergreifend) für die Verknüpfungs-Anzeige
+  const alle = new Map();
+  for (const gr of state.uebersicht) for (const m of gr.markierungen) alle.set(m.id, m);
+
+  for (const m of g.markierungen) body.appendChild(baueKarte(m, alle));
+}
+
+// Eine getrennte Karte je Markierung: Quelle + Links, voller Textauszug,
+// Notiz, Verknüpfungen, Löschen.
+function baueKarte(m, alle) {
+  const karte = document.createElement("div");
+  karte.className = "karte";
+
+  // PDF wird vom Add-on selbst inline ausgeliefert (eigene Ingress-URL),
+  // damit #page=n funktioniert und kein Paperless-Auth/Pfad-Problem auftritt.
+  const pdfLink = API + "/api/pdf/" + m.dokument_id + "#page=" + m.seite;
+  let quelle =
+    '<a class="sprung" href="' + pdfLink + '" target="_blank" rel="noopener">📄 ' +
+    escapeHtml(m.dokument_titel) + " · S. " + m.seite + "</a>";
+  if (state.externalUrl) {
+    const detail = state.externalUrl + "/documents/" + m.dokument_id;
+    quelle +=
+      ' <a class="paperless-link" href="' + detail +
+      '" target="_blank" rel="noopener" title="In Paperless öffnen (mit Notizen)">🗂 Paperless</a>';
+  }
+
+  let inner = '<button class="loeschen" title="Markierung löschen" data-id="' + m.id + '">✕</button>';
+  inner += '<div class="quelle">' + quelle + "</div>";
+  inner += '<blockquote class="auszug">' + escapeHtml(m.textauszug) + "</blockquote>";
+  if (m.notiz) inner += '<div class="notiz">📝 ' + escapeHtml(m.notiz) + "</div>";
+  if (m.verknuepft_mit && m.verknuepft_mit.length) {
+    const ziele = m.verknuepft_mit
+      .map((id) => {
+        const z = alle.get(id);
+        return z ? escapeHtml(z.dokument_titel) + " S." + z.seite : "#" + id;
+      })
+      .join(", ");
+    inner += '<div class="verkn">🔗 ' + ziele + "</div>";
+  }
+  karte.innerHTML = inner;
+
+  karte.querySelector(".loeschen").addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    if (!confirm("Markierung löschen?")) return;
+    try {
+      await api("DELETE", "/api/markierungen/" + m.id);
+      await ladeUebersicht(); // aktualisiert Liste + offenes Overlay
+      await ladeBaum();
+      if (state.aktuellesDok) await oeffneDokument(state.aktuellesDok.id);
+    } catch (err) {
+      alert("Fehler: " + err.message);
+    }
+  });
+
+  return karte;
 }

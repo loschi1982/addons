@@ -21,24 +21,36 @@
       <div id="baum" class="baum"></div>
     </section>
 
-    <!-- Spalte 2: Dokumentenansicht -->
+    <!-- Spalte 2: Dokumentenansicht (OCR-Text markierbar, optional PDF daneben) -->
     <section id="spalte-doc" class="spalte">
       <div id="doc-kopf" class="doc-kopf">
-        <h2 id="doc-titel">Kein Dokument gewählt</h2>
+        <div class="doc-kopf-zeile">
+          <h2 id="doc-titel">Kein Dokument gewählt</h2>
+          <div id="ansicht-umschalter" class="ansicht-umschalter" hidden>
+            <button type="button" id="btn-text" class="um-btn aktiv">Text</button>
+            <button type="button" id="btn-split" class="um-btn">Text + PDF</button>
+          </div>
+        </div>
         <label id="parent-zeile" class="parent-zeile" hidden>
           Hauptvertrag:
           <select id="parent-select"></select>
         </label>
       </div>
-      <article id="doc-content" class="doc-content">
-        <p class="hinweis">Wähle links ein Dokument aus, um den OCR-Text anzuzeigen.</p>
-      </article>
+
+      <div id="doc-ansicht" class="doc-ansicht">
+        <article id="doc-content" class="doc-content">
+          <p class="hinweis">Wähle links ein Dokument aus, um den OCR-Text anzuzeigen.</p>
+        </article>
+        <div id="doc-pdf" class="doc-pdf" hidden>
+          <iframe id="pdf-frame" title="PDF-Ansicht"></iframe>
+        </div>
+      </div>
     </section>
 
-    <!-- Spalte 3: Themenübersicht -->
+    <!-- Spalte 3: Themenliste (Klick öffnet die Zusammenfassung als Overlay) -->
     <section id="spalte-themen" class="spalte">
-      <h2>Themenübersicht</h2>
-      <div id="uebersicht" class="uebersicht"></div>
+      <h2>Themen</h2>
+      <div id="themenliste" class="themenliste"></div>
     </section>
   </main>
 
@@ -47,6 +59,17 @@
 
   <!-- Hinweisbanner (z. B. Verknüpfungsmodus) -->
   <div id="banner" class="banner" hidden></div>
+
+  <!-- Themen-Zusammenfassung (Overlay) -->
+  <div id="themen-overlay" class="overlay" hidden>
+    <div class="overlay-panel">
+      <div class="overlay-kopf">
+        <h2 id="overlay-titel">Thema</h2>
+        <button type="button" id="overlay-close" class="overlay-close" title="Schließen">✕</button>
+      </div>
+      <div id="overlay-body" class="overlay-body"></div>
+    </div>
+  </div>
 
   <script src="static/app.js"></script>
 </body>

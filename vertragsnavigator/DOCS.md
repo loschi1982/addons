@@ -23,14 +23,17 @@ Nach dem Speichern das Add-on **starten** und über die **Seitenleiste** öffnen
    - *Zu Thema hinzufügen* (bestehendes Thema oder „+ Neues Thema").
    - *Verknüpfen mit …* – danach auf eine andere hervorgehobene Stelle klicken.
    - *Notiz hinzufügen*.
-3. **Rechts**: Themenübersicht. Klick auf eine Quelle öffnet das PDF im
-   Paperless-Viewer auf der passenden Seite.
+   Über den Umschalter **„Text" / „Text + PDF"** im Dokumentkopf lässt sich rechts
+   neben dem (markierbaren) OCR-Text zusätzlich das **PDF** einblenden.
+3. **Rechts**: die **Themenliste** (nur die angelegten Themen + Anzahl). Klick auf
+   ein Thema öffnet die **Zusammenfassung** als Overlay – alle Markierungen des
+   Themas getrennt, je mit Quelle, PDF-Sprunglink und ggf. „🗂 Paperless"-Link.
 4. Im Dokumentkopf lässt sich ein **Hauptvertrag** zuordnen (Nachträge).
 
 ## Hinweise
 - Die **Seitenzuordnung** wird aus dem PDF berechnet (Paperless liefert keinen
   seitenweisen Text). Bitte an deinen Dokumenten gegenprüfen.
-- Pro Eintrag in der Themenübersicht gibt es zwei Links:
+- In der Themen-Zusammenfassung gibt es pro Markierung Links:
   - **📄 … · S. n** – liefert das PDF über das Add-on aus (`…/api/pdf/{id}#page={n}`)
     und springt im Browser-PDF-Viewer auf die Seite. Braucht **keine** externe URL.
   - **🗂 Paperless** – öffnet die Paperless-Detailansicht (mit Notizen/Metadaten),
