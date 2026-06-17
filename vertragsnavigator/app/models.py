@@ -13,6 +13,10 @@ class ThemaCreate(BaseModel):
     name: str = Field(..., min_length=1)
 
 
+class ThemaUpdate(BaseModel):
+    name: str = Field(..., min_length=1)
+
+
 class Thema(BaseModel):
     id: int
     name: str

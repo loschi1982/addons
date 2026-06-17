@@ -132,6 +132,34 @@ def test_seitenzuordnung_ueber_pdf_wenn_seite_fehlt(client, monkeypatch):
     assert r.json()["seite"] == 2
 
 
+def test_thema_umbenennen_und_loeschen(client):
+    tid = client.post("/api/themen", json={"name": "Haftung"}).json()["id"]
+
+    # Umbenennen
+    r = client.patch("/api/themen/" + str(tid), json={"name": "Haftungsklauseln"})
+    assert r.status_code == 200
+    assert r.json()["name"] == "Haftungsklauseln"
+
+    # Markierung an dem Thema
+    m = client.post(
+        "/api/markierungen",
+        json={"dokument_id": 1, "thema_id": tid, "textauszug": "Haftung ist begrenzt", "seite": 1},
+    ).json()
+
+    # UNIQUE-Konflikt beim Umbenennen
+    tid2 = client.post("/api/themen", json={"name": "Laufzeit"}).json()["id"]
+    assert client.patch("/api/themen/" + str(tid2), json={"name": "Haftungsklauseln"}).status_code == 409
+
+    # Löschen -> Markierung bleibt erhalten, thema_id wird NULL
+    assert client.delete("/api/themen/" + str(tid)).status_code == 200
+    detail = client.get("/api/docs/1").json()
+    mk = next(x for x in detail["markierungen"] if x["id"] == m["id"])
+    assert mk["thema_id"] is None
+
+    # Erneutes Löschen -> 404
+    assert client.delete("/api/themen/" + str(tid)).status_code == 404
+
+
 def test_notiz_aktualisieren(client):
     m = client.post(
         "/api/markierungen",

@@ -32,6 +32,8 @@ Nach dem Speichern das Add-on **starten** und über die **Seitenleiste** öffnen
    ein Thema öffnet die **Zusammenfassung** als Overlay – alle Markierungen des
    Themas getrennt, je mit Quelle, PDF-Sprunglink und ggf. „🗂 Paperless"-Link.
    Pro Markierung kann dort eine **Notiz (Post-It)** angelegt/bearbeitet werden.
+   Im Overlay-Kopf lässt sich das Thema **umbenennen (✎)** oder **löschen (🗑)** –
+   beim Löschen bleiben die Markierungen erhalten und werden „Ohne Thema".
 4. Im Dokumentkopf lässt sich ein **Hauptvertrag** zuordnen (Nachträge).
 
 ## Hinweise

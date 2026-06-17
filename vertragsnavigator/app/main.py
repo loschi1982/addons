@@ -266,6 +266,33 @@ def thema_anlegen(payload: models.ThemaCreate):
     return dict(row)
 
 
+@app.patch("/api/themen/{thema_id}", response_model=models.Thema)
+def thema_umbenennen(thema_id: int, payload: models.ThemaUpdate):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "Themenname darf nicht leer sein")
+    with db.verbindung() as conn:
+        if conn.execute("SELECT 1 FROM themen WHERE id=?", (thema_id,)).fetchone() is None:
+            raise HTTPException(404, "Thema nicht gefunden")
+        try:
+            conn.execute("UPDATE themen SET name=? WHERE id=?", (name, thema_id))
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "Thema existiert bereits")
+        row = conn.execute("SELECT * FROM themen WHERE id=?", (thema_id,)).fetchone()
+    return dict(row)
+
+
+@app.delete("/api/themen/{thema_id}")
+def thema_loeschen(thema_id: int):
+    """Löscht ein Thema; zugeordnete Markierungen bleiben erhalten (Thema -> NULL)."""
+    with db.verbindung() as conn:
+        if conn.execute("SELECT 1 FROM themen WHERE id=?", (thema_id,)).fetchone() is None:
+            raise HTTPException(404, "Thema nicht gefunden")
+        conn.execute("UPDATE markierungen SET thema_id=NULL WHERE thema_id=?", (thema_id,))
+        conn.execute("DELETE FROM themen WHERE id=?", (thema_id,))
+    return {"ok": True}
+
+
 # --- Markierungen --------------------------------------------------------
 
 @app.post("/api/markierungen", response_model=models.Markierung)

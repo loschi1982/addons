@@ -103,6 +103,8 @@ async function init() {
 
   // Themen-Overlay schließen (X, Klick auf Backdrop, ESC)
   document.getElementById("overlay-close").addEventListener("click", schliesseOverlay);
+  document.getElementById("thema-umbenennen").addEventListener("click", themaUmbenennen);
+  document.getElementById("thema-loeschen").addEventListener("click", themaLoeschen);
   document.getElementById("themen-overlay").addEventListener("click", (ev) => {
     if (ev.target.id === "themen-overlay") schliesseOverlay();
   });
@@ -720,11 +722,50 @@ function schliesseOverlay() {
   document.getElementById("themen-overlay").hidden = true;
 }
 
+async function themaUmbenennen() {
+  if (state.offenesThemaId == null) return;
+  const g = findeGruppe(state.offenesThemaId);
+  const name = prompt("Thema umbenennen:", g ? g.name : "");
+  if (!name || !name.trim()) return;
+  try {
+    await api("PATCH", "/api/themen/" + state.offenesThemaId, { name: name.trim() });
+    await ladeThemen();
+    await ladeUebersicht(); // aktualisiert Liste + offenes Overlay (neuer Name)
+  } catch (e) {
+    alert("Fehler: " + e.message);
+  }
+}
+
+async function themaLoeschen() {
+  if (state.offenesThemaId == null) return;
+  const g = findeGruppe(state.offenesThemaId);
+  const anzahl = g ? g.markierungen.length : 0;
+  const msg =
+    anzahl > 0
+      ? 'Thema löschen? Die ' + anzahl + ' Markierung(en) bleiben erhalten und werden "Ohne Thema" zugeordnet.'
+      : "Thema löschen?";
+  if (!confirm(msg)) return;
+  try {
+    await api("DELETE", "/api/themen/" + state.offenesThemaId);
+    schliesseOverlay();
+    await ladeThemen();
+    await ladeUebersicht();
+    await ladeBaum();
+  } catch (e) {
+    alert("Fehler: " + e.message);
+  }
+}
+
 // Themen-Zusammenfassung: alle Markierungen des Themas, sichtbar getrennt.
 function rendereOverlay() {
   const g = findeGruppe(state.offenesThemaId);
   const body = document.getElementById("overlay-body");
   document.getElementById("overlay-titel").textContent = g ? g.name : "Thema";
+
+  // Umbenennen/Löschen nur für echte Themen (nicht für "Ohne Thema").
+  const istEcht = !!g && g.thema_id != null;
+  document.getElementById("thema-umbenennen").hidden = !istEcht;
+  document.getElementById("thema-loeschen").hidden = !istEcht;
 
   if (!g) {
     schliesseOverlay();

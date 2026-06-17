@@ -224,6 +224,9 @@ html, body {
   color: #fff;
 }
 .overlay-kopf h2 { margin: 0; font-size: 1.05rem; }
+.overlay-aktionen { display: flex; align-items: center; gap: 0.6rem; }
+.overlay-akt { background: none; border: none; color: #fff; font-size: 0.95rem; cursor: pointer; line-height: 1; opacity: 0.9; }
+.overlay-akt:hover { opacity: 1; }
 .overlay-close { background: none; border: none; color: #fff; font-size: 1.1rem; cursor: pointer; line-height: 1; }
 .overlay-body { padding: 1rem 1.1rem; overflow-y: auto; }
 .overlay-body .hinweis { color: var(--grau); font-style: italic; }
