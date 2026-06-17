@@ -388,6 +388,14 @@ def uebersicht():
 
 # --- Frontend ------------------------------------------------------------
 
+def _asset_version() -> str:
+    """Cache-Busting-Marke: aendert sich bei jeder neuen app.js (Image-Build)."""
+    try:
+        return str(int((STATIC_DIR / "app.js").stat().st_mtime))
+    except OSError:
+        return "0"
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     """Liefert das Frontend, ingress-tauglich aufbereitet."""
@@ -395,7 +403,13 @@ def index(request: Request):
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     base_tag = f'<base href="{ingress}/">' if ingress else ""
     config_tag = f'<script>window.__VN__={{apiBase:"{ingress}"}};</script>'
-    html = html.replace("<!--BASE-->", base_tag).replace("<!--CONFIG-->", config_tag)
+    ver = _asset_version()
+    html = (
+        html.replace("<!--BASE-->", base_tag)
+        .replace("<!--CONFIG-->", config_tag)
+        .replace('href="static/style.css"', f'href="static/style.css?v={ver}"')
+        .replace('src="static/app.js"', f'src="static/app.js?v={ver}"')
+    )
     return HTMLResponse(html)
 
 
