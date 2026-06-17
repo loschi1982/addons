@@ -139,8 +139,8 @@ def app_config():
     settings = get_settings()
     return {
         "paperless_url": settings.paperless_url,
-        # Basis fuer Sprungmarken im Browser: externe URL, sonst interne URL.
-        "sprung_url": settings.paperless_external_url or settings.paperless_url,
+        # Browser-erreichbare URL fuer den "in Paperless oeffnen"-Link (Detailansicht).
+        "paperless_external_url": settings.paperless_external_url,
         "konfiguriert": bool(settings.paperless_url and settings.paperless_token),
     }
 

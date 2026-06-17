@@ -120,6 +120,8 @@ html, body {
 .uebersicht .eintrag .verkn { color: var(--grau); font-size: 0.74rem; }
 .uebersicht a.sprung { color: var(--akzent); text-decoration: none; font-weight: 600; }
 .uebersicht a.sprung:hover { text-decoration: underline; }
+.uebersicht a.paperless-link { color: var(--grau); text-decoration: none; font-size: 0.76rem; margin-left: 0.4rem; }
+.uebersicht a.paperless-link:hover { text-decoration: underline; color: var(--akzent); }
 .uebersicht .loeschen { float: right; cursor: pointer; color: #b00; border: none; background: none; font-size: 0.8rem; }
 
 /* Kontextmenü */

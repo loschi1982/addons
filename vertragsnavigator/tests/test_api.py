@@ -55,8 +55,8 @@ def test_config(client):
     assert r.status_code == 200
     body = r.json()
     assert body["konfiguriert"] is True
-    # Ohne separate externe URL faellt sprung_url auf die API-URL zurueck.
-    assert body["sprung_url"] == "http://paperless.local"
+    # Ohne gesetzte externe URL ist das Feld leer (kein Paperless-Detail-Link).
+    assert body["paperless_external_url"] == ""
 
 
 def test_pdf_inline(client):

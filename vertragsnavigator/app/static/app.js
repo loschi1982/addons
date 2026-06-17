@@ -10,7 +10,7 @@ const state = {
   alleDocs: [],
   aktuellesDok: null,
   paperlessUrl: "",
-  sprungUrl: "", // vom Browser erreichbare Paperless-URL für Sprungmarken
+  externalUrl: "", // vom Browser erreichbare Paperless-URL (Detailansicht-Link)
   linkSource: null, // Markierungs-ID im Verknüpfungsmodus
 };
 
@@ -66,7 +66,7 @@ async function init() {
   try {
     const cfg = await api("GET", "/api/config");
     state.paperlessUrl = cfg.paperless_url || "";
-    state.sprungUrl = cfg.sprung_url || cfg.paperless_url || "";
+    state.externalUrl = cfg.paperless_external_url || "";
     if (!cfg.konfiguriert) {
       setStatus("Paperless nicht konfiguriert – bitte Add-on-Optionen prüfen.", true);
     }
@@ -446,10 +446,18 @@ function rendereUebersicht(gruppen) {
 
       // PDF wird vom Add-on selbst inline ausgeliefert (eigene Ingress-URL),
       // damit #page=n funktioniert und kein Paperless-Auth/Pfad-Problem auftritt.
-      const sprung = API + "/api/pdf/" + m.dokument_id + "#page=" + m.seite;
-      const quelle =
-        '<a class="sprung" href="' + sprung + '" target="_blank" rel="noopener">📄 ' +
+      const pdfLink = API + "/api/pdf/" + m.dokument_id + "#page=" + m.seite;
+      let quelle =
+        '<a class="sprung" href="' + pdfLink + '" target="_blank" rel="noopener">📄 ' +
         escapeHtml(m.dokument_titel) + " · S. " + m.seite + "</a>";
+      // Zusätzlicher Link in die Paperless-Detailansicht (mit Notizen/Metadaten),
+      // sofern eine vom Browser erreichbare Paperless-URL konfiguriert ist.
+      if (state.externalUrl) {
+        const detail = state.externalUrl + "/documents/" + m.dokument_id;
+        quelle +=
+          ' <a class="paperless-link" href="' + detail +
+          '" target="_blank" rel="noopener" title="In Paperless öffnen (mit Notizen)">🗂 Paperless</a>';
+      }
 
       let inner = '<button class="loeschen" title="Markierung löschen" data-id="' + m.id + '">✕</button>';
       inner += '<div class="quelle">' + quelle + "</div>";
