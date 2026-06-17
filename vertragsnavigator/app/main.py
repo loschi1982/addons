@@ -90,18 +90,6 @@ def auth_status(request: Request):
     }
 
 
-@app.post("/api/login")
-def login(payload: models.LoginRequest, client: PaperlessClient = Depends(get_client)):
-    if not client.pruefe_zugangsdaten(payload.username, payload.password):
-        raise HTTPException(401, "Benutzername oder Passwort falsch")
-    token = _neue_session()
-    antwort = JSONResponse({"ok": True})
-    antwort.set_cookie(
-        SESSION_COOKIE, token, httponly=True, samesite="lax", max_age=SESSION_TTL, path="/"
-    )
-    return antwort
-
-
 @app.post("/api/logout")
 def logout(request: Request):
     token = request.cookies.get(SESSION_COOKIE)
@@ -123,6 +111,18 @@ def get_client() -> PaperlessClient:
             detail="Paperless-URL ist nicht konfiguriert. Bitte in den Add-on-Optionen setzen.",
         )
     return PaperlessClient(settings.paperless_url, settings.paperless_token)
+
+
+@app.post("/api/login")
+def login(payload: models.LoginRequest, client: PaperlessClient = Depends(get_client)):
+    if not client.pruefe_zugangsdaten(payload.username, payload.password):
+        raise HTTPException(401, "Benutzername oder Passwort falsch")
+    token = _neue_session()
+    antwort = JSONResponse({"ok": True})
+    antwort.set_cookie(
+        SESSION_COOKIE, token, httponly=True, samesite="lax", max_age=SESSION_TTL, path="/"
+    )
+    return antwort
 
 
 def _jetzt() -> str:
