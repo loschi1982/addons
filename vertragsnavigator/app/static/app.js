@@ -338,6 +338,9 @@ async function renderePdf(dok) {
 
       const textLayerDiv = document.createElement("div");
       textLayerDiv.className = "textLayer";
+      // pdf.js 3.x positioniert/skaliert die Text-Spans über diese CSS-Variable.
+      // Ohne sie liegt die Textebene nicht bündig über dem PDF.
+      textLayerDiv.style.setProperty("--scale-factor", String(scale));
       seiteDiv.appendChild(textLayerDiv);
 
       ziel.appendChild(seiteDiv);

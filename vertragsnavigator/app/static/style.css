@@ -107,6 +107,10 @@ html, body {
   inset: 0;
   overflow: hidden;
   line-height: 1;
+  text-align: initial;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
 }
 .textLayer > span {
   color: transparent;
