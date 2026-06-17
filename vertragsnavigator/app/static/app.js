@@ -5,6 +5,9 @@
 
 const API = (window.__VN__ && window.__VN__.apiBase) || "";
 
+//: Breite der rechten Marginalspalte für Verweis-Annotationen (px).
+const VERWEIS_GUTTER = 250;
+
 const state = {
   themen: [],
   alleDocs: [],
@@ -372,7 +375,12 @@ async function zeichneSeiten() {
   const token = ++pdfRenderToken;
   ziel.innerHTML = "";
   state.pdfSeiten = [];
-  const breite = (ziel.clientWidth || 800) - 4;
+
+  // Rechter Rand (Marginalspalte) für Verweis-Annotationen – nur wenn das
+  // Dokument Verweise hat, sonst volle Breite fürs PDF.
+  const hatVerweise = !!(state.aktuellesDok && (state.aktuellesDok.verweise || []).length);
+  const gutter = hatVerweise ? VERWEIS_GUTTER : 0;
+  const breite = Math.max(120, (ziel.clientWidth || 800) - gutter - 8);
 
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
@@ -385,7 +393,7 @@ async function zeichneSeiten() {
     const seiteDiv = document.createElement("div");
     seiteDiv.className = "pdf-seite";
     seiteDiv.dataset.seite = n;
-    seiteDiv.style.width = viewport.width + "px";
+    seiteDiv.style.width = viewport.width + gutter + "px"; // Seite + Marginalspalte
     seiteDiv.style.height = viewport.height + "px";
 
     const canvas = document.createElement("canvas");
@@ -395,6 +403,9 @@ async function zeichneSeiten() {
 
     const textLayerDiv = document.createElement("div");
     textLayerDiv.className = "textLayer";
+    // Textebene exakt über dem Canvas (nicht über der Marginalspalte).
+    textLayerDiv.style.width = viewport.width + "px";
+    textLayerDiv.style.height = viewport.height + "px";
     // pdf.js 3.x positioniert/skaliert die Text-Spans über diese CSS-Variable.
     textLayerDiv.style.setProperty("--scale-factor", String(scale));
     seiteDiv.appendChild(textLayerDiv);
@@ -412,7 +423,12 @@ async function zeichneSeiten() {
       textDivs: textDivs,
     }).promise;
 
-    state.pdfSeiten.push({ n: n, textDivs: textDivs, seiteDiv: seiteDiv });
+    state.pdfSeiten.push({
+      n: n,
+      textDivs: textDivs,
+      seiteDiv: seiteDiv,
+      pageWidth: viewport.width,
+    });
   }
 
   refreshPdfMarken();
@@ -460,10 +476,9 @@ function refreshPdfMarken() {
       });
     }
 
-    // Verweise (Redline)
-    for (const v of verweise.filter((x) => x.eigene_seite === seite.n)) {
-      rendereVerweis(seite, v);
-    }
+    // Verweise (Redline + Annotation in der Marginalspalte)
+    const vs = verweise.filter((x) => x.eigene_seite === seite.n);
+    if (vs.length) platziereVerweise(seite, vs);
   }
 }
 
@@ -484,38 +499,48 @@ function verweisLabel(v) {
   return escapeHtml(v.art);
 }
 
-function rendereVerweis(seite, v) {
-  const spans = findeSpansFuerText(seite.textDivs, v.eigene_text);
-  const istZiel = v.rolle === "ziel";
+// Markiert die betroffene Stelle im PDF und platziert die Annotationen gestapelt
+// in der rechten Marginalspalte (überdeckt den Originaltext NICHT).
+function platziereVerweise(seite, vs) {
+  const eintraege = vs.map((v) => {
+    const spans = findeSpansFuerText(seite.textDivs, v.eigene_text);
+    const istZiel = v.rolle === "ziel";
 
-  if (istZiel && (v.art === "gestrichen" || v.art === "geändert")) {
-    spans.forEach((s) => s.classList.add("verweis-strich"));
-  }
-  if (!istZiel) {
-    spans.forEach((s) => s.classList.add("verweis-quelle"));
-  }
-  platziereAnnotation(seite.seiteDiv, spans, v);
-}
+    if (istZiel && (v.art === "gestrichen" || v.art === "geändert")) {
+      spans.forEach((s) => s.classList.add("verweis-strich"));
+    } else if (istZiel) {
+      spans.forEach((s) => s.classList.add("verweis-ziel")); // Einfügepunkt (ergänzt/erweitert)
+    } else {
+      spans.forEach((s) => s.classList.add("verweis-quelle"));
+    }
 
-// Platziert eine Redline-Annotation knapp unter der betroffenen Stelle.
-function platziereAnnotation(seiteDiv, spans, v) {
-  if (!seiteDiv || !spans.length) return;
-  let maxBottom = 0;
-  let minLeft = Infinity;
-  spans.forEach((s) => {
-    if (s.offsetTop + s.offsetHeight > maxBottom) maxBottom = s.offsetTop + s.offsetHeight;
-    if (s.offsetLeft < minLeft) minLeft = s.offsetLeft;
+    const tops = spans.map((s) => s.offsetTop);
+    const ankerTop = tops.length ? Math.min.apply(null, tops) : 0;
+    return { v: v, ankerTop: ankerTop, gefunden: spans.length > 0 };
   });
 
-  const ann = document.createElement("div");
-  ann.className = "verweis-annot art-" + artKey(v.art);
-  ann.style.left = Math.max(0, minLeft) + "px";
-  ann.style.top = maxBottom + 2 + "px";
-  ann.innerHTML =
+  eintraege.sort((a, b) => a.ankerTop - b.ankerTop);
+
+  const left = seite.pageWidth + 8;
+  let prevBottom = -Infinity;
+  for (const e of eintraege) {
+    const card = baueVerweisKarte(e.v, e.gefunden);
+    card.style.left = left + "px";
+    card.style.width = VERWEIS_GUTTER - 16 + "px";
+    card.style.top = Math.max(e.ankerTop, prevBottom + 6) + "px";
+    seite.seiteDiv.appendChild(card);
+    prevBottom = parseFloat(card.style.top) + card.offsetHeight;
+  }
+}
+
+function baueVerweisKarte(v, gefunden) {
+  const card = document.createElement("div");
+  card.className = "verweis-annot art-" + artKey(v.art) + (gefunden ? "" : " ohne-anker");
+  card.innerHTML =
     '<span class="vtext">' + verweisLabel(v) + "</span>" +
     '<button class="vdel" title="Verweis löschen">✕</button>';
-  ann.title = "Zum Gegenstück springen (" + v.andere_dokument_titel + " S. " + v.andere_seite + ")";
-  ann.addEventListener("click", (ev) => {
+  card.title = "Zum Gegenstück springen (" + v.andere_dokument_titel + " · S. " + v.andere_seite + ")";
+  card.addEventListener("click", (ev) => {
     if (ev.target.closest(".vdel")) {
       ev.stopPropagation();
       loescheVerweis(v.id);
@@ -523,7 +548,7 @@ function platziereAnnotation(seiteDiv, spans, v) {
     }
     springeZuSeite(v.andere_dokument_id, v.andere_seite);
   });
-  seiteDiv.appendChild(ann);
+  return card;
 }
 
 // Aus der Themen-Zusammenfassung in die PDF-Ansicht springen (kein neues Fenster).

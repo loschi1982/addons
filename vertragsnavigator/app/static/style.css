@@ -137,7 +137,8 @@ html, body {
 .pdf-seite canvas { display: block; }
 .textLayer {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
   overflow: hidden;
   line-height: 1;
   text-align: initial;
@@ -165,20 +166,26 @@ html, body {
 .textLayer span.verweis-quelle {
   background: linear-gradient(to bottom, transparent 82%, rgba(27, 94, 123, 0.7) 82%);
 }
+/* Einfügepunkt im Original (ergänzt/erweitert) – dezent markiert */
+.textLayer span.verweis-ziel {
+  background: linear-gradient(to bottom, transparent 80%, rgba(20, 120, 60, 0.55) 80%);
+}
 
-/* Redline-Annotation (eingeblendeter Nachtragstext / Hinweis) */
+/* Redline-Annotation in der rechten Marginalspalte (überdeckt den Text nicht) */
 .verweis-annot {
   position: absolute;
   z-index: 5;
-  max-width: 70%;
   font-size: 0.72rem;
   line-height: 1.25;
-  padding: 0.15rem 1.5rem 0.15rem 0.45rem;
+  padding: 0.2rem 1.5rem 0.2rem 0.45rem;
   border-radius: 3px;
   cursor: pointer;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
   white-space: normal;
+  word-wrap: break-word;
 }
+/* Stelle im PDF nicht gefunden -> Anker unsicher (gestrichelt) */
+.verweis-annot.ohne-anker { border-style: dashed !important; opacity: 0.92; }
 .verweis-annot .vdel {
   position: absolute;
   top: 1px;
