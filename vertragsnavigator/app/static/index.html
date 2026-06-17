@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <!--BASE-->
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vertragsnavigator</title>
+  <link rel="stylesheet" href="static/style.css" />
+  <!--CONFIG-->
+</head>
+<body>
+  <header id="kopf">
+    <h1>Vertragsnavigator</h1>
+    <span id="status" class="status"></span>
+  </header>
+
+  <main id="layout">
+    <!-- Spalte 1: Vertragsbaum -->
+    <section id="spalte-baum" class="spalte">
+      <h2>Verträge</h2>
+      <div id="baum" class="baum"></div>
+    </section>
+
+    <!-- Spalte 2: Dokumentenansicht -->
+    <section id="spalte-doc" class="spalte">
+      <div id="doc-kopf" class="doc-kopf">
+        <h2 id="doc-titel">Kein Dokument gewählt</h2>
+        <label id="parent-zeile" class="parent-zeile" hidden>
+          Hauptvertrag:
+          <select id="parent-select"></select>
+        </label>
+      </div>
+      <article id="doc-content" class="doc-content">
+        <p class="hinweis">Wähle links ein Dokument aus, um den OCR-Text anzuzeigen.</p>
+      </article>
+    </section>
+
+    <!-- Spalte 3: Themenübersicht -->
+    <section id="spalte-themen" class="spalte">
+      <h2>Themenübersicht</h2>
+      <div id="uebersicht" class="uebersicht"></div>
+    </section>
+  </main>
+
+  <!-- Eigenes Kontextmenü für Markierungen -->
+  <div id="ctxmenu" class="ctxmenu" hidden></div>
+
+  <!-- Hinweisbanner (z. B. Verknüpfungsmodus) -->
+  <div id="banner" class="banner" hidden></div>
+
+  <script src="static/app.js"></script>
+</body>
+</html>

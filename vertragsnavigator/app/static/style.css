@@ -1,0 +1,165 @@
+/* Vertragsnavigator – ruhiges, lesbares Drei-Spalten-Layout */
+
+:root {
+  --rand: #d8d8d2;
+  --bg: #faf9f6;
+  --bg-spalte: #ffffff;
+  --text: #2b2b2b;
+  --akzent: #1b5e7b;
+  --akzent-hell: #e6f0f4;
+  --mark: #fff3bf;
+  --grau: #6b6b6b;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+#kopf {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  background: var(--akzent);
+  color: #fff;
+}
+#kopf h1 { font-size: 1.1rem; margin: 0; font-weight: 600; }
+.status { font-size: 0.85rem; opacity: 0.9; }
+.status.fehler { color: #ffd0d0; }
+
+#layout {
+  display: grid;
+  grid-template-columns: 260px 1fr 340px;
+  gap: 1px;
+  background: var(--rand);
+  height: calc(100% - 48px);
+}
+
+.spalte {
+  background: var(--bg-spalte);
+  overflow-y: auto;
+  padding: 0.8rem 1rem;
+}
+.spalte h2 {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--grau);
+  margin: 0 0 0.6rem;
+}
+
+/* Vertragsbaum */
+.baum .knoten {
+  padding: 0.3rem 0.4rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+.baum .knoten:hover { background: var(--akzent-hell); }
+.baum .knoten.aktiv { background: var(--akzent-hell); font-weight: 600; }
+.baum .kind { margin-left: 1.1rem; border-left: 2px solid var(--rand); }
+.baum .badge {
+  background: var(--akzent);
+  color: #fff;
+  border-radius: 10px;
+  padding: 0 0.45rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+/* Dokumentenansicht */
+.doc-kopf { border-bottom: 1px solid var(--rand); padding-bottom: 0.5rem; margin-bottom: 0.6rem; }
+.doc-kopf h2 { font-size: 1rem; color: var(--text); text-transform: none; letter-spacing: 0; margin: 0; }
+.parent-zeile { font-size: 0.8rem; color: var(--grau); display: inline-flex; gap: 0.4rem; align-items: center; margin-top: 0.4rem; }
+.parent-zeile select { font: inherit; }
+
+.doc-content {
+  font-family: "Georgia", "Times New Roman", serif;
+  font-size: 0.98rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.doc-content .hinweis { font-family: inherit; color: var(--grau); font-style: italic; }
+.doc-content mark {
+  background: var(--mark);
+  border-radius: 2px;
+  cursor: pointer;
+  padding: 0 1px;
+}
+
+/* Themenübersicht */
+.uebersicht .thema { margin-bottom: 1rem; }
+.uebersicht .thema-titel {
+  font-weight: 600;
+  font-size: 0.92rem;
+  margin: 0 0 0.3rem;
+  display: flex;
+  justify-content: space-between;
+}
+.uebersicht .eintrag {
+  border-left: 3px solid var(--akzent-hell);
+  padding: 0.3rem 0.5rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.84rem;
+}
+.uebersicht .eintrag .quelle { color: var(--grau); font-size: 0.76rem; }
+.uebersicht .eintrag .auszug { margin: 0.15rem 0; }
+.uebersicht .eintrag .notiz { color: var(--akzent); font-size: 0.78rem; }
+.uebersicht .eintrag .verkn { color: var(--grau); font-size: 0.74rem; }
+.uebersicht a.sprung { color: var(--akzent); text-decoration: none; font-weight: 600; }
+.uebersicht a.sprung:hover { text-decoration: underline; }
+.uebersicht .loeschen { float: right; cursor: pointer; color: #b00; border: none; background: none; font-size: 0.8rem; }
+
+/* Kontextmenü */
+.ctxmenu {
+  position: fixed;
+  z-index: 1000;
+  background: #fff;
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+  min-width: 200px;
+  padding: 0.3rem 0;
+  font-size: 0.88rem;
+}
+.ctxmenu .item { padding: 0.4rem 0.8rem; cursor: pointer; white-space: nowrap; }
+.ctxmenu .item:hover { background: var(--akzent-hell); }
+.ctxmenu .trenner { height: 1px; background: var(--rand); margin: 0.25rem 0; }
+.ctxmenu .ueberschrift { padding: 0.25rem 0.8rem; font-size: 0.72rem; color: var(--grau); text-transform: uppercase; }
+.ctxmenu .thema-item:hover { background: var(--mark); }
+
+/* Banner */
+.banner {
+  position: fixed;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--akzent);
+  color: #fff;
+  padding: 0.6rem 1rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  z-index: 1001;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+}
+.banner button {
+  margin-left: 0.8rem;
+  background: #fff;
+  color: var(--akzent);
+  border: none;
+  border-radius: 4px;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+}

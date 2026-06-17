@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Lokale Entwicklung
+*.db
+*.db-journal
+dev.db
+options.json
