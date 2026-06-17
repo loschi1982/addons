@@ -13,8 +13,16 @@ Original-PDF.
 | `paperless_url`          | ja      | Interne API-URL (App → Paperless), z. B. `http://ca5234a0-paperless-ngx:8000` (Add-on-Hostname, ohne Slash am Ende) |
 | `paperless_token`        | ja      | API-Token für die Token-Authentifizierung                                   |
 | `paperless_external_url` | nein    | Vom **Browser** erreichbare Paperless-URL (z. B. `https://homeassistant.elphi.musik/ca5234a0_paperless-ngx`). Nur für den zusätzlichen „🗂 Paperless"-Link (Detailansicht mit Notizen). Leer = dieser Link wird ausgeblendet; der PDF-Seitensprung funktioniert trotzdem. |
+| `passwortschutz`         | nein    | Wenn aktiv (Standard), verlangt das Add-on einen **Login mit den Paperless-Zugangsdaten** (zusätzlich zur HA-Anmeldung). Auf `false` setzen, um den Login abzuschalten (Notausgang, falls die Paperless-Anmeldung nicht erreichbar ist). |
 
 Nach dem Speichern das Add-on **starten** und über die **Seitenleiste** öffnen.
+
+## Anmeldung
+Standardmäßig erscheint beim Öffnen eine **Login-Maske**. Melde dich mit deinem
+**Paperless-Benutzernamen und -Passwort** an (dieselben Zugangsdaten wie in Paperless;
+geprüft via Paperless-API). Die Sitzung gilt ca. 12 Stunden bzw. bis zum Add-on-Neustart;
+rechts oben kannst du dich **abmelden**. Der Login lässt sich über die Option
+`passwortschutz: false` deaktivieren.
 
 ## Bedienung
 1. **Links** der Vertragsbaum. Oben **„Objekt"** wählt die Gruppierung: **Alle Objekte**

@@ -7,7 +7,9 @@ aus. Hinter HA-Ingress wird das Frontend mit passendem ``<base href>`` und
 
 from __future__ import annotations
 
+import secrets
 import sqlite3
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +36,80 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Vertragsnavigator", lifespan=lifespan)
+
+
+# --- Authentifizierung (Login mit Paperless-Zugangsdaten) ----------------
+
+SESSION_COOKIE = "vn_session"
+SESSION_TTL = 12 * 60 * 60  # 12 Stunden
+
+#: aktive Sessions: Token -> Ablauf-Zeitstempel (in-memory, Single-Process).
+_sessions: Dict[str, float] = {}
+
+#: Öffentliche Pfade (ohne Login erreichbar).
+_OEFFENTLICH = {"/", "/api/login", "/api/logout", "/api/auth/status"}
+
+
+def _neue_session() -> str:
+    token = secrets.token_urlsafe(32)
+    _sessions[token] = time.time() + SESSION_TTL
+    return token
+
+
+def _ist_angemeldet(request: Request) -> bool:
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        return False
+    ablauf = _sessions.get(token)
+    if not ablauf:
+        return False
+    if ablauf < time.time():
+        _sessions.pop(token, None)
+        return False
+    return True
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if not get_settings().passwortschutz:
+        return await call_next(request)
+    pfad = request.url.path
+    if pfad in _OEFFENTLICH or pfad.startswith("/static"):
+        return await call_next(request)
+    if pfad.startswith("/api/") and not _ist_angemeldet(request):
+        return JSONResponse(status_code=401, content={"detail": "Nicht angemeldet"})
+    return await call_next(request)
+
+
+@app.get("/api/auth/status")
+def auth_status(request: Request):
+    settings = get_settings()
+    return {
+        "erforderlich": settings.passwortschutz,
+        "angemeldet": (not settings.passwortschutz) or _ist_angemeldet(request),
+    }
+
+
+@app.post("/api/login")
+def login(payload: models.LoginRequest, client: PaperlessClient = Depends(get_client)):
+    if not client.pruefe_zugangsdaten(payload.username, payload.password):
+        raise HTTPException(401, "Benutzername oder Passwort falsch")
+    token = _neue_session()
+    antwort = JSONResponse({"ok": True})
+    antwort.set_cookie(
+        SESSION_COOKIE, token, httponly=True, samesite="lax", max_age=SESSION_TTL, path="/"
+    )
+    return antwort
+
+
+@app.post("/api/logout")
+def logout(request: Request):
+    token = request.cookies.get(SESSION_COOKIE)
+    if token:
+        _sessions.pop(token, None)
+    antwort = JSONResponse({"ok": True})
+    antwort.delete_cookie(SESSION_COOKIE, path="/")
+    return antwort
 
 
 # --- Abhaengigkeiten & Hilfsfunktionen -----------------------------------

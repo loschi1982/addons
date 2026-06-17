@@ -38,6 +38,9 @@ async function api(method, pfad, body) {
     opt.body = JSON.stringify(body);
   }
   const res = await fetch(API + pfad, opt);
+  if (res.status === 401 && pfad !== "/api/login") {
+    zeigeLogin(); // Session fehlt/abgelaufen -> Login einblenden
+  }
   if (!res.ok) {
     let detail = res.status + " " + res.statusText;
     try {
@@ -72,8 +75,59 @@ function escapeHtml(s) {
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
+  // Immer aktive Bindings (auch vor dem Login)
   document.addEventListener("click", verbergeCtxMenu);
+  document.getElementById("login-form").addEventListener("submit", aufLogin);
+  document.getElementById("abmelden").addEventListener("click", aufLogout);
 
+  let status = { erforderlich: false, angemeldet: true };
+  try {
+    status = await api("GET", "/api/auth/status");
+  } catch (e) { /* Status sollte immer gehen */ }
+
+  if (status.erforderlich && !status.angemeldet) {
+    zeigeLogin();
+    return; // App erst nach erfolgreichem Login starten
+  }
+  if (status.erforderlich) document.getElementById("abmelden").hidden = false;
+  await starteApp();
+}
+
+// --- Login / Logout -------------------------------------------------------
+
+function zeigeLogin() {
+  document.getElementById("login-overlay").hidden = false;
+  const u = document.getElementById("login-user");
+  if (u) u.focus();
+}
+
+async function aufLogin(ev) {
+  ev.preventDefault();
+  const user = document.getElementById("login-user").value.trim();
+  const pass = document.getElementById("login-pass").value;
+  const fehler = document.getElementById("login-fehler");
+  fehler.hidden = true;
+  try {
+    await api("POST", "/api/login", { username: user, password: pass });
+    document.getElementById("login-overlay").hidden = true;
+    document.getElementById("login-pass").value = "";
+    document.getElementById("abmelden").hidden = false;
+    await starteApp();
+  } catch (e) {
+    fehler.textContent = e.message || "Anmeldung fehlgeschlagen";
+    fehler.hidden = false;
+  }
+}
+
+async function aufLogout() {
+  try {
+    await api("POST", "/api/logout");
+  } catch (e) { /* egal */ }
+  location.reload();
+}
+
+// Startet die eigentliche App (nach bestandener Anmeldung).
+async function starteApp() {
   try {
     const cfg = await api("GET", "/api/config");
     state.paperlessUrl = cfg.paperless_url || "";
@@ -81,7 +135,7 @@ async function init() {
     if (!cfg.konfiguriert) {
       setStatus("Paperless nicht konfiguriert – bitte Add-on-Optionen prüfen.", true);
     }
-  } catch (e) { /* /api/config sollte immer gehen */ }
+  } catch (e) { /* /api/config sollte hier gehen */ }
 
   // Kontextmenü auf Text- bzw. PDF-Ansicht
   document.getElementById("doc-content").addEventListener("contextmenu", aufContextMenu);

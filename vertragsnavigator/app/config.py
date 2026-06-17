@@ -20,6 +20,7 @@ class Settings:
     paperless_token: str
     paperless_external_url: str   # vom Browser erreichbare URL (Sprungmarken)
     db_path: str
+    passwortschutz: bool          # Login mit Paperless-Zugangsdaten erforderlich?
 
 
 def get_settings() -> Settings:
@@ -28,9 +29,11 @@ def get_settings() -> Settings:
     Bewusst bei jedem Aufruf frisch gelesen, damit Tests die Umgebung
     veraendern koennen, ohne Importreihenfolge beachten zu muessen.
     """
+    schutz = os.environ.get("PASSWORTSCHUTZ", "true").strip().lower()
     return Settings(
         paperless_url=os.environ.get("PAPERLESS_URL", "").rstrip("/"),
         paperless_token=os.environ.get("PAPERLESS_TOKEN", ""),
         paperless_external_url=os.environ.get("PAPERLESS_EXTERNAL_URL", "").rstrip("/"),
         db_path=os.environ.get("VN_DB_PATH", "/data/vertragsnavigator.db"),
+        passwortschutz=schutz not in ("0", "false", "no", "off"),
     )

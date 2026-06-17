@@ -33,6 +33,49 @@ html, body {
   color: #fff;
 }
 #kopf h1 { font-size: 1.1rem; margin: 0; font-weight: 600; }
+.abmelden {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 4px;
+  padding: 0.2rem 0.7rem;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.abmelden:hover { background: rgba(255, 255, 255, 0.28); }
+
+/* Login-Overlay */
+.login-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3000;
+  padding: 1rem;
+}
+.login-card {
+  background: var(--bg-spalte);
+  border: 1px solid var(--rand);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+  padding: 1.5rem 1.6rem;
+  width: min(360px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.login-card h2 { margin: 0; font-size: 1.15rem; color: var(--akzent); }
+.login-hinweis { margin: 0; font-size: 0.82rem; color: var(--grau); }
+.login-card label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.82rem; color: var(--text); }
+.login-card input { font: inherit; padding: 0.45rem 0.55rem; border: 1px solid var(--rand); border-radius: 4px; }
+.login-card input:focus { outline: 2px solid var(--akzent-hell); border-color: var(--akzent); }
+.login-fehler { color: #b00; font-size: 0.82rem; }
+#login-btn { margin-top: 0.3rem; background: var(--akzent); color: #fff; border: none; border-radius: 4px; padding: 0.5rem; font: inherit; font-weight: 600; cursor: pointer; }
+#login-btn:hover { filter: brightness(1.07); }
 .status { font-size: 0.85rem; opacity: 0.9; }
 .status.fehler { color: #ffd0d0; }
 

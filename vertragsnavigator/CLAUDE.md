@@ -92,6 +92,9 @@ docker build -t vertragsnavigator .
 - [x] v0.6.x: Verweis-Annotationen in rechter Randspalte + blasse Verbindungslinien (SVG)
 - [x] v0.7.0: Paperless-Tags übernommen (`get_tags`, in `/api/docs` als `tags`),
       Vertragsbaum nach Objekt (Tag) gruppierbar, Hierarchie per Drag & Drop
+- [x] v0.8.0: Passwortschutz via Paperless-Login (`pruefe_zugangsdaten` → `/api/token/`),
+      Session-Cookie + Auth-Middleware, `/api/login|logout|auth/status`, Login-Maske;
+      Option `passwortschutz` (abschaltbar)
 - [ ] Phase 4 (optional, später): Ähnlichkeitsvorschläge für Abhängigkeiten
 - [ ] **Offen**: Seitenzuordnung + Paperless-API-Version an echter Instanz
       verifizieren (Tests laufen bisher nur gegen synthetische PDFs/Mocks).

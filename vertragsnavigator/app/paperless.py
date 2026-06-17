@@ -77,6 +77,29 @@ class PaperlessClient:
         """Metadaten inkl. ``content`` (OCR), ``notes`` und ``page_count``."""
         return self._request("GET", f"/api/documents/{doc_id}/").json()
 
+    def pruefe_zugangsdaten(self, username: str, password: str) -> bool:
+        """Prüft Benutzername/Passwort gegen Paperless (POST /api/token/).
+
+        True bei gültigen Daten, False bei abgelehnten. Bei Verbindungs-/
+        Serverfehlern wird ``PaperlessError`` ausgelöst.
+        """
+        url = f"{self.base_url}/api/token/"
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                antwort = client.post(url, json={"username": username, "password": password})
+        except httpx.HTTPError as exc:
+            raise PaperlessError(f"Verbindung zu Paperless fehlgeschlagen: {exc}") from exc
+        if antwort.status_code == 200:
+            try:
+                return bool(antwort.json().get("token"))
+            except ValueError:
+                return False
+        if antwort.status_code in (400, 401, 403):
+            return False
+        raise PaperlessError(
+            f"Unerwartete Antwort von Paperless ({antwort.status_code}) bei der Anmeldung"
+        )
+
     def get_tags(self) -> Dict[int, str]:
         """Liefert eine Zuordnung Tag-ID -> Tag-Name (folgt der Paginierung)."""
         tags: Dict[int, str] = {}

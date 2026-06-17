@@ -14,6 +14,7 @@
   <header id="kopf">
     <h1>Vertragsnavigator</h1>
     <span id="status" class="status"></span>
+    <button type="button" id="abmelden" class="abmelden" hidden>Abmelden</button>
   </header>
 
   <main id="layout">
@@ -87,6 +88,22 @@
       </div>
       <div id="overlay-body" class="overlay-body"></div>
     </div>
+  </div>
+
+  <!-- Login (Paperless-Zugangsdaten) -->
+  <div id="login-overlay" class="login-overlay" hidden>
+    <form id="login-form" class="login-card">
+      <h2>Anmelden</h2>
+      <p class="login-hinweis">Mit deinen Paperless-Zugangsdaten anmelden.</p>
+      <label>Benutzername
+        <input type="text" id="login-user" autocomplete="username" required />
+      </label>
+      <label>Passwort
+        <input type="password" id="login-pass" autocomplete="current-password" required />
+      </label>
+      <div id="login-fehler" class="login-fehler" hidden></div>
+      <button type="submit" id="login-btn">Anmelden</button>
+    </form>
   </div>
 
   <script src="static/app.js"></script>

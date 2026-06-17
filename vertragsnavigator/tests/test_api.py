@@ -23,6 +23,9 @@ class FakeClient:
     def get_tags(self):
         return {10: "Elbphilharmonie", 20: "Laeiszhalle"}
 
+    def pruefe_zugangsdaten(self, username, password):
+        return username == "admin" and password == "geheim"
+
     def get_document(self, doc_id):
         d = self.docs[doc_id]
         return {"id": doc_id, **d}
@@ -39,6 +42,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("VN_DB_PATH", str(tmp_path / "test.db"))
     monkeypatch.setenv("PAPERLESS_URL", "http://paperless.local")
     monkeypatch.setenv("PAPERLESS_TOKEN", "tok")
+    monkeypatch.setenv("PASSWORTSCHUTZ", "false")  # für die meisten Tests aus
 
     from app import main
 
@@ -51,6 +55,29 @@ def client(tmp_path, monkeypatch):
         yield c
 
     main.app.dependency_overrides.clear()
+
+
+def test_login(client, monkeypatch):
+    monkeypatch.setenv("PASSWORTSCHUTZ", "true")  # Schutz für diesen Test aktiv
+
+    st = client.get("/api/auth/status").json()
+    assert st["erforderlich"] is True
+    assert st["angemeldet"] is False
+
+    # ohne Anmeldung sind Daten-Endpunkte gesperrt
+    assert client.get("/api/docs").status_code == 401
+
+    # falsche Zugangsdaten
+    assert client.post("/api/login", json={"username": "admin", "password": "falsch"}).status_code == 401
+
+    # korrekte Zugangsdaten -> Session-Cookie
+    assert client.post("/api/login", json={"username": "admin", "password": "geheim"}).status_code == 200
+    assert client.get("/api/auth/status").json()["angemeldet"] is True
+    assert client.get("/api/docs").status_code == 200
+
+    # Abmelden -> wieder gesperrt
+    assert client.post("/api/logout").status_code == 200
+    assert client.get("/api/docs").status_code == 401
 
 
 def test_config(client):
