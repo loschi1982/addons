@@ -375,6 +375,11 @@ html, body {
 .karte a.paperless-link:hover { text-decoration: underline; color: var(--akzent); }
 .karte .loeschen { position: absolute; top: 0.4rem; right: 0.5rem; cursor: pointer; color: #b00; border: none; background: none; font-size: 0.85rem; }
 
+/* PDF-Ausschnitt (formatiertes Bild der markierten Stelle) */
+.karte .ausschnitt { margin: 0.2rem 0 0.4rem; }
+.karte .ausschnitt-bild { max-width: 100%; height: auto; display: block; border: 1px solid var(--rand); border-radius: 3px; }
+.karte .ausschnitt-laden { font-size: 0.78rem; color: var(--grau); font-style: italic; }
+
 /* Notiz / Post-It in der Zusammenfassung */
 .karte .notiz-bereich { margin-top: 0.5rem; }
 .postit {

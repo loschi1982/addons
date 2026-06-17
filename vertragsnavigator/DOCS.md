@@ -43,8 +43,10 @@ rechts oben kannst du dich **abmelden**. Der Login lässt sich über die Option
    markierbar). Mit **„+" / „−"** im Dokumentkopf lässt sich das PDF zoomen.
 3. **Rechts**: die **Themenliste** (nur die angelegten Themen + Anzahl). Klick auf
    ein Thema öffnet die **Zusammenfassung** als Overlay – alle Markierungen des
-   Themas getrennt, je mit Quelle, PDF-Sprunglink und ggf. „🗂 Paperless"-Link.
-   Pro Markierung kann dort eine **Notiz (Post-It)** angelegt/bearbeitet werden.
+   Themas getrennt, je als **PDF-Ausschnitt** (formatiert, mit gelber Hervorhebung)
+   samt Quelle, PDF-Sprunglink und ggf. „🗂 Paperless"-Link. Pro Markierung kann dort
+   eine **Notiz (Post-It)** angelegt/bearbeitet werden. (Wird die Stelle im PDF nicht
+   gefunden, erscheint stattdessen der Textauszug.)
    Im Overlay-Kopf lässt sich das Thema **umbenennen (✎)** oder **löschen (🗑)** –
    beim Löschen bleiben die Markierungen erhalten und werden „Ohne Thema".
 4. Im Dokumentkopf lässt sich ein **Hauptvertrag** zuordnen (Nachträge).

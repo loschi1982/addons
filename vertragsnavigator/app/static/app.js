@@ -1220,7 +1220,129 @@ function baueKarte(m, alle) {
     }
   });
 
+  // PDF-Ausschnitt (formatiert, mit Hervorhebung) asynchron nachladen
+  rendereAusschnitt(karte, m);
+
   return karte;
+}
+
+// --- PDF-Ausschnitte für die Themen-Zusammenfassung -----------------------
+
+const _ausschnittDocs = {}; // docId -> Promise<pdfDocument|null>
+const _ausschnittSeiten = {}; // "docId:seite" -> Promise<{canvas, items}|null>
+
+function _ladeAusschnittDok(docId) {
+  if (!_ausschnittDocs[docId]) {
+    _ausschnittDocs[docId] = window.pdfjsLib
+      ? pdfjsLib.getDocument({ url: API + "/api/pdf/" + docId, withCredentials: true }).promise.catch(() => null)
+      : Promise.resolve(null);
+  }
+  return _ausschnittDocs[docId];
+}
+
+function _ladeAusschnittSeite(docId, seite) {
+  const key = docId + ":" + seite;
+  if (!_ausschnittSeiten[key]) {
+    _ausschnittSeiten[key] = (async () => {
+      const pdf = await _ladeAusschnittDok(docId);
+      if (!pdf || seite < 1 || seite > pdf.numPages) return null;
+      const page = await pdf.getPage(seite);
+      const scale = 2; // für scharfe Ausschnitte
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+      const tc = await page.getTextContent();
+      const items = tc.items.map((it) => {
+        const tx = pdfjsLib.Util.transform(viewport.transform, it.transform);
+        const fh = Math.hypot(tx[2], tx[3]) || 1;
+        return { str: it.str || "", x: tx[4], y: tx[5] - fh, w: (it.width || 0) * scale, h: fh * 1.25 };
+      });
+      return { canvas: canvas, items: items };
+    })().catch(() => null);
+  }
+  return _ausschnittSeiten[key];
+}
+
+// Findet die Text-Items, die den (whitespace-toleranten) Auszug abdecken.
+function _findeItemBoxen(items, text) {
+  let compact = "";
+  const charItem = [];
+  for (const it of items) {
+    for (const ch of it.str) {
+      if (/\s/.test(ch)) continue;
+      compact += ch.toLowerCase();
+      charItem.push(it);
+    }
+  }
+  const needle = (text || "").replace(/\s+/g, "").toLowerCase();
+  if (!needle) return [];
+  const idx = compact.indexOf(needle);
+  if (idx < 0) return [];
+  const set = new Set();
+  for (let i = idx; i < idx + needle.length && i < charItem.length; i++) set.add(charItem[i]);
+  return Array.from(set);
+}
+
+async function rendereAusschnitt(karte, m) {
+  const wrap = document.createElement("div");
+  wrap.className = "ausschnitt";
+  wrap.innerHTML = '<span class="ausschnitt-laden">PDF-Ausschnitt wird erstellt …</span>';
+  karte.insertBefore(wrap, karte.firstChild);
+
+  try {
+    const seite = await _ladeAusschnittSeite(m.dokument_id, m.seite);
+    if (!seite) {
+      wrap.remove();
+      return;
+    }
+    const boxen = _findeItemBoxen(seite.items, m.textauszug);
+    if (!boxen.length) {
+      wrap.remove(); // Stelle nicht gefunden -> Text bleibt sichtbar
+      return;
+    }
+
+    let l = Infinity, t = Infinity, r = 0, b = 0;
+    boxen.forEach((bx) => {
+      l = Math.min(l, bx.x);
+      t = Math.min(t, bx.y);
+      r = Math.max(r, bx.x + bx.w);
+      b = Math.max(b, bx.y + bx.h);
+    });
+    const pad = 8;
+    l = Math.max(0, l - pad);
+    t = Math.max(0, t - pad);
+    r = Math.min(seite.canvas.width, r + pad);
+    b = Math.min(seite.canvas.height, b + pad);
+    const w = r - l, h = b - t;
+    if (w <= 0 || h <= 0) {
+      wrap.remove();
+      return;
+    }
+
+    const clip = document.createElement("canvas");
+    clip.width = w;
+    clip.height = h;
+    const ctx = clip.getContext("2d");
+    ctx.drawImage(seite.canvas, l, t, w, h, 0, 0, w, h);
+    ctx.fillStyle = "rgba(255, 213, 0, 0.4)"; // Hervorhebung wie im PDF
+    boxen.forEach((bx) => ctx.fillRect(bx.x - l, bx.y - t, bx.w, bx.h));
+
+    const img = document.createElement("img");
+    img.className = "ausschnitt-bild";
+    img.alt = m.textauszug;
+    img.title = m.textauszug;
+    img.src = clip.toDataURL("image/png");
+    wrap.innerHTML = "";
+    wrap.appendChild(img);
+
+    // Unformatierten Text ausblenden, wenn der Ausschnitt vorhanden ist
+    const aus = karte.querySelector(".auszug");
+    if (aus) aus.hidden = true;
+  } catch (e) {
+    wrap.remove();
+  }
 }
 
 // Zeigt die Notiz als Post-It (klickbar zum Bearbeiten) bzw. einen Button zum Anlegen.

@@ -95,6 +95,9 @@ docker build -t vertragsnavigator .
 - [x] v0.8.0: Passwortschutz via Paperless-Login (`pruefe_zugangsdaten` → `/api/token/`),
       Session-Cookie + Auth-Middleware, `/api/login|logout|auth/status`, Login-Maske;
       Option `passwortschutz` (abschaltbar)
+- [x] v0.9.0: Themen-Zusammenfassung zeigt PDF-Ausschnitte (PDF.js offscreen rendert
+      Seite, croppt die Fundstelle, zeichnet Hervorhebung; Text als Fallback). Rein
+      Frontend.
 - [ ] Phase 4 (optional, später): Ähnlichkeitsvorschläge für Abhängigkeiten
 - [ ] **Offen**: Seitenzuordnung + Paperless-API-Version an echter Instanz
       verifizieren (Tests laufen bisher nur gegen synthetische PDFs/Mocks).
