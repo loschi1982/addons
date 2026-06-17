@@ -12,6 +12,7 @@ const state = {
   paperlessUrl: "",
   externalUrl: "", // vom Browser erreichbare Paperless-URL (Detailansicht-Link)
   linkSource: null, // Markierungs-ID im Verknüpfungsmodus
+  verweisSource: null, // { dokument_id, seite, text } im Verweis-Modus (Quelle = Nachtrag)
   docModus: "pdf", // "pdf" (gerendertes PDF, markierbar) | "text" (reiner OCR-Text)
   pdfZoom: 1, // Zoom-Faktor relativ zur eingepassten Breite (1 = Breite einpassen)
   pdfDocId: null, // aktuell im PDF-Renderer angezeigtes Dokument
@@ -325,7 +326,7 @@ async function zoomAendern(delta) {
 function aktualisierePdf() {
   if (state.docModus !== "pdf" || !state.aktuellesDok) return;
   if (state.pdfDocId === state.aktuellesDok.id) {
-    aktualisierePdfHighlights(state.aktuellesDok.markierungen || []);
+    refreshPdfMarken();
   } else {
     renderePdf(state.aktuellesDok);
   }
@@ -411,27 +412,14 @@ async function zeichneSeiten() {
       textDivs: textDivs,
     }).promise;
 
-    state.pdfSeiten.push({ n: n, textDivs: textDivs });
+    state.pdfSeiten.push({ n: n, textDivs: textDivs, seiteDiv: seiteDiv });
   }
 
-  aktualisierePdfHighlights((state.aktuellesDok && state.aktuellesDok.markierungen) || []);
+  refreshPdfMarken();
 }
 
-// Hebt gespeicherte Markierungen in der PDF-Textebene hervor.
-function aktualisierePdfHighlights(markierungen) {
-  for (const seite of state.pdfSeiten) {
-    for (const d of seite.textDivs) {
-      d.classList.remove("markiert");
-      delete d.dataset.markId;
-    }
-    const marken = markierungen.filter((m) => m.seite === seite.n);
-    if (marken.length) hebeHervorDivs(seite.textDivs, marken);
-  }
-}
-
-// Sucht den Textauszug (whitespace-tolerant) in der Textebene und markiert die
-// betroffenen Spans.
-function hebeHervorDivs(textDivs, marken) {
+// Findet die Spans, die einen (whitespace-toleranten) Textauszug abdecken.
+function findeSpansFuerText(textDivs, text) {
   let compact = "";
   const charDiv = [];
   for (const div of textDivs) {
@@ -442,18 +430,100 @@ function hebeHervorDivs(textDivs, marken) {
       charDiv.push(div);
     }
   }
-  for (const m of marken) {
-    const needle = (m.textauszug || "").replace(/\s+/g, "").toLowerCase();
-    if (!needle) continue;
-    const idx = compact.indexOf(needle);
-    if (idx < 0) continue;
-    const divs = new Set();
-    for (let i = idx; i < idx + needle.length && i < charDiv.length; i++) divs.add(charDiv[i]);
-    divs.forEach((d) => {
-      d.classList.add("markiert");
-      d.dataset.markId = m.id;
-    });
+  const needle = (text || "").replace(/\s+/g, "").toLowerCase();
+  if (!needle) return [];
+  const idx = compact.indexOf(needle);
+  if (idx < 0) return [];
+  const divs = new Set();
+  for (let i = idx; i < idx + needle.length && i < charDiv.length; i++) divs.add(charDiv[i]);
+  return Array.from(divs);
+}
+
+// Rendert pro Seite die Themen-Markierungen (gelb) und die Verweis-Redlines neu.
+function refreshPdfMarken() {
+  const marks = (state.aktuellesDok && state.aktuellesDok.markierungen) || [];
+  const verweise = (state.aktuellesDok && state.aktuellesDok.verweise) || [];
+  for (const seite of state.pdfSeiten) {
+    // Zurücksetzen
+    for (const d of seite.textDivs) {
+      d.classList.remove("markiert", "verweis-strich", "verweis-quelle");
+      delete d.dataset.markId;
+    }
+    if (seite.seiteDiv) seite.seiteDiv.querySelectorAll(".verweis-annot").forEach((e) => e.remove());
+
+    // Themen-Markierungen (gelb)
+    for (const m of marks.filter((x) => x.seite === seite.n)) {
+      const divs = findeSpansFuerText(seite.textDivs, m.textauszug);
+      divs.forEach((d) => {
+        d.classList.add("markiert");
+        d.dataset.markId = m.id;
+      });
+    }
+
+    // Verweise (Redline)
+    for (const v of verweise.filter((x) => x.eigene_seite === seite.n)) {
+      rendereVerweis(seite, v);
+    }
   }
+}
+
+function artKey(art) {
+  return { "geändert": "geaendert", "ergänzt": "ergaenzt", "erweitert": "erweitert", "gestrichen": "gestrichen" }[art] || "ergaenzt";
+}
+
+// Beschriftung der Annotation, abhängig von Rolle/Art.
+function verweisLabel(v) {
+  const ziel = v.andere_dokument_titel + " · S. " + v.andere_seite;
+  if (v.rolle === "quelle") {
+    return "↪ " + escapeHtml(v.art) + " in " + escapeHtml(ziel);
+  }
+  if (v.art === "gestrichen") return "✗ gestrichen (Nachtrag: " + escapeHtml(ziel) + ")";
+  if (v.art === "geändert") return "✎ geändert → " + escapeHtml(v.andere_text);
+  if (v.art === "ergänzt") return "＋ ergänzt: " + escapeHtml(v.andere_text);
+  if (v.art === "erweitert") return "＋ erweitert: " + escapeHtml(v.andere_text);
+  return escapeHtml(v.art);
+}
+
+function rendereVerweis(seite, v) {
+  const spans = findeSpansFuerText(seite.textDivs, v.eigene_text);
+  const istZiel = v.rolle === "ziel";
+
+  if (istZiel && (v.art === "gestrichen" || v.art === "geändert")) {
+    spans.forEach((s) => s.classList.add("verweis-strich"));
+  }
+  if (!istZiel) {
+    spans.forEach((s) => s.classList.add("verweis-quelle"));
+  }
+  platziereAnnotation(seite.seiteDiv, spans, v);
+}
+
+// Platziert eine Redline-Annotation knapp unter der betroffenen Stelle.
+function platziereAnnotation(seiteDiv, spans, v) {
+  if (!seiteDiv || !spans.length) return;
+  let maxBottom = 0;
+  let minLeft = Infinity;
+  spans.forEach((s) => {
+    if (s.offsetTop + s.offsetHeight > maxBottom) maxBottom = s.offsetTop + s.offsetHeight;
+    if (s.offsetLeft < minLeft) minLeft = s.offsetLeft;
+  });
+
+  const ann = document.createElement("div");
+  ann.className = "verweis-annot art-" + artKey(v.art);
+  ann.style.left = Math.max(0, minLeft) + "px";
+  ann.style.top = maxBottom + 2 + "px";
+  ann.innerHTML =
+    '<span class="vtext">' + verweisLabel(v) + "</span>" +
+    '<button class="vdel" title="Verweis löschen">✕</button>';
+  ann.title = "Zum Gegenstück springen (" + v.andere_dokument_titel + " S. " + v.andere_seite + ")";
+  ann.addEventListener("click", (ev) => {
+    if (ev.target.closest(".vdel")) {
+      ev.stopPropagation();
+      loescheVerweis(v.id);
+      return;
+    }
+    springeZuSeite(v.andere_dokument_id, v.andere_seite);
+  });
+  seiteDiv.appendChild(ann);
 }
 
 // Aus der Themen-Zusammenfassung in die PDF-Ansicht springen (kein neues Fenster).
@@ -582,6 +652,20 @@ function zeigeCtxMenu(x, y, kontext) {
     await markierungSpeichern(kontext, null, n);
   });
 
+  // Verweise (gerichtete Änderungen zwischen PDFs) – nur sinnvoll im PDF,
+  // da dort die Seitenzahl exakt bekannt ist.
+  if (kontext.seite != null) {
+    trenner();
+    if (state.verweisSource) {
+      ueberschrift("Verweis abschließen als");
+      for (const art of ["ergänzt", "erweitert", "geändert", "gestrichen"]) {
+        add(art, "verweis-item", () => abschliesseVerweis(kontext, art));
+      }
+    } else {
+      add("↪ Verweis von hier starten", null, () => starteVerweis(kontext));
+    }
+  }
+
   menu.style.left = Math.min(x, window.innerWidth - 220) + "px";
   menu.style.top = Math.min(y, window.innerHeight - 20) + "px";
   menu.hidden = false;
@@ -626,6 +710,67 @@ async function starteVerknuepfung(kontext) {
     state.linkSource = null;
     verbergeBanner();
   });
+}
+
+// --- Verweise zwischen PDFs (gerichtete Änderungen) -----------------------
+
+function starteVerweis(kontext) {
+  state.verweisSource = {
+    dokument_id: state.aktuellesDok.id,
+    seite: kontext.seite,
+    text: kontext.text,
+  };
+  zeigeBanner(
+    "Verweis gestartet (Quelle im Nachtrag). Öffne den Originalvertrag, markiere die Stelle und wähle „Verweis abschließen“.",
+    () => {
+      state.verweisSource = null;
+      verbergeBanner();
+    }
+  );
+}
+
+async function abschliesseVerweis(kontext, art) {
+  const q = state.verweisSource;
+  if (!q || !state.aktuellesDok) return;
+  try {
+    await api("POST", "/api/verweise", {
+      quelle_dokument_id: q.dokument_id,
+      quelle_seite: q.seite,
+      quelle_text: q.text,
+      ziel_dokument_id: state.aktuellesDok.id,
+      ziel_seite: kontext.seite,
+      ziel_text: kontext.text,
+      art: art,
+    });
+    state.verweisSource = null;
+    verbergeBanner();
+    setStatus("Verweis (" + art + ") erstellt.");
+    await oeffneDokument(state.aktuellesDok.id); // Redline neu rendern
+  } catch (e) {
+    setStatus("Fehler beim Verweis: " + e.message, true);
+    alert("Fehler: " + e.message);
+  }
+}
+
+async function loescheVerweis(id) {
+  if (!confirm("Verweis löschen?")) return;
+  try {
+    await api("DELETE", "/api/verweise/" + id);
+    if (state.aktuellesDok) await oeffneDokument(state.aktuellesDok.id);
+  } catch (e) {
+    alert("Fehler: " + e.message);
+  }
+}
+
+// Öffnet ein Dokument in der PDF-Ansicht und scrollt zur Seite (Gegenstück).
+async function springeZuSeite(dokId, seite) {
+  state.docModus = "pdf";
+  if (state.aktuellesDok && state.aktuellesDok.id === dokId) {
+    scrolleZu(seite, null);
+  } else {
+    await oeffneDokument(dokId);
+    scrolleZu(seite, null);
+  }
 }
 
 async function klickAufMarkierung(id) {

@@ -84,6 +84,11 @@ docker build -t vertragsnavigator .
       Umschalter PDF/Text (reiner Frontend-Umbau)
 - [x] v0.4.0: Notiz/Post-It je Markierung in der Zusammenfassung anlegen/bearbeiten
       (`PATCH /api/markierungen/{id}` + `MarkierungUpdate`)
+- [x] v0.4.x: PDF-Zoom (+/-, Ansicht bleibt erhalten), fixe Kopfleiste, In-App-Sprung
+- [x] v0.5.0: Themen umbenennen/löschen (`PATCH`/`DELETE /api/themen/{id}`)
+- [x] v0.6.0: Verweise zwischen PDFs (Tabelle `verweise`, `POST`/`DELETE /api/verweise`,
+      in `/api/docs/{id}`): gerichtete Änderung Nachtrag→Original, Redline im PDF
+      (Durchstreichung + eingeblendeter Nachtragstext), 2-Schritt-Erstellung im Kontextmenü
 - [ ] Phase 4 (optional, später): Ähnlichkeitsvorschläge für Abhängigkeiten
 - [ ] **Offen**: Seitenzuordnung + Paperless-API-Version an echter Instanz
       verifizieren (Tests laufen bisher nur gegen synthetische PDFs/Mocks).

@@ -73,6 +73,18 @@ class VerknuepfungCreate(BaseModel):
     markierung_b_id: int
 
 
+# --- Verweise (gerichtete Änderungen zwischen PDFs) -----------------------
+
+class VerweisCreate(BaseModel):
+    quelle_dokument_id: int   # Nachtrag (ändernder Text)
+    quelle_seite: int
+    quelle_text: str = Field(..., min_length=1)
+    ziel_dokument_id: int     # Originalvertrag (geänderte Stelle)
+    ziel_seite: int
+    ziel_text: str = Field(..., min_length=1)
+    art: str                  # ergänzt|erweitert|geändert|gestrichen
+
+
 class Verknuepfung(BaseModel):
     id: int
     markierung_a_id: int

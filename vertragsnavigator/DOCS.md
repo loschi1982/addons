@@ -35,6 +35,14 @@ Nach dem Speichern das Add-on **starten** und über die **Seitenleiste** öffnen
    Im Overlay-Kopf lässt sich das Thema **umbenennen (✎)** oder **löschen (🗑)** –
    beim Löschen bleiben die Markierungen erhalten und werden „Ohne Thema".
 4. Im Dokumentkopf lässt sich ein **Hauptvertrag** zuordnen (Nachträge).
+5. **Verweise zwischen PDFs** (Änderungen durch Nachträge): Im **Nachtrag** die Stelle
+   markieren → Rechtsklick → **„↪ Verweis von hier starten"**. Dann den
+   **Originalvertrag** öffnen, dort die betroffene Stelle markieren → Rechtsklick →
+   **„Verweis abschließen"** und die **Art** wählen (ergänzt / erweitert / geändert /
+   gestrichen). Im Original-PDF erscheint die Stelle dann als **Redline**:
+   durchgestrichen (gestrichen/geändert) und/oder mit dem eingeblendeten Nachtragstext
+   (ergänzt / erweitert / geändert). Ein Klick auf die Einblendung springt zum
+   Gegenstück im anderen PDF; das **✕** an der Einblendung löscht den Verweis.
 
 ## Hinweise
 - Die **PDF-Ansicht** nutzt PDF.js, das beim Öffnen vom CDN (cdnjs) geladen wird –

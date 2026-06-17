@@ -46,6 +46,20 @@ CREATE TABLE IF NOT EXISTS verknuepfungen (
     FOREIGN KEY (markierung_a_id) REFERENCES markierungen(id),
     FOREIGN KEY (markierung_b_id) REFERENCES markierungen(id)
 );
+
+-- Gerichtete Verweise zwischen PDFs (Nachtrag -> Originalvertrag). Die Stellen
+-- werden inline gespeichert (unabhängig von Themen/Markierungen).
+CREATE TABLE IF NOT EXISTS verweise (
+    id                  INTEGER PRIMARY KEY,
+    quelle_dokument_id  INTEGER NOT NULL,   -- Nachtrag (ändernder Text)
+    quelle_seite        INTEGER NOT NULL,
+    quelle_text         TEXT NOT NULL,
+    ziel_dokument_id    INTEGER NOT NULL,   -- Originalvertrag (geänderte Stelle)
+    ziel_seite          INTEGER NOT NULL,
+    ziel_text           TEXT NOT NULL,
+    art                 TEXT NOT NULL,      -- ergänzt|erweitert|geändert|gestrichen
+    erstellt_am         TEXT NOT NULL
+);
 """
 
 

@@ -71,6 +71,38 @@ def _markierung_dict(row: sqlite3.Row) -> dict:
     }
 
 
+#: Erlaubte Verweis-Arten (Nachtrag -> Originalvertrag).
+ERLAUBTE_ARTEN = {"ergänzt", "erweitert", "geändert", "gestrichen"}
+
+
+def _dokument_titel(conn: sqlite3.Connection, doc_id: int) -> str:
+    row = conn.execute("SELECT titel FROM dokumente WHERE id=?", (doc_id,)).fetchone()
+    return row["titel"] if row else f"Dokument {doc_id}"
+
+
+def _verweis_fuer_dokument(conn: sqlite3.Connection, v: sqlite3.Row, doc_id: int) -> dict:
+    """Bereitet einen Verweis aus Sicht des angezeigten Dokuments auf."""
+    if v["ziel_dokument_id"] == doc_id:
+        rolle = "ziel"
+        eigene_seite, eigene_text = v["ziel_seite"], v["ziel_text"]
+        andere_id, andere_seite, andere_text = v["quelle_dokument_id"], v["quelle_seite"], v["quelle_text"]
+    else:
+        rolle = "quelle"
+        eigene_seite, eigene_text = v["quelle_seite"], v["quelle_text"]
+        andere_id, andere_seite, andere_text = v["ziel_dokument_id"], v["ziel_seite"], v["ziel_text"]
+    return {
+        "id": v["id"],
+        "art": v["art"],
+        "rolle": rolle,
+        "eigene_seite": eigene_seite,
+        "eigene_text": eigene_text,
+        "andere_dokument_id": andere_id,
+        "andere_dokument_titel": _dokument_titel(conn, andere_id),
+        "andere_seite": andere_seite,
+        "andere_text": andere_text,
+    }
+
+
 def _seiten_text(client: PaperlessClient, doc_id: int) -> List[str]:
     if doc_id not in _seiten_cache:
         pdf = client.download_pdf(doc_id)
@@ -187,6 +219,11 @@ def dokument_detail(doc_id: int, client: PaperlessClient = Depends(get_client)):
             "SELECT * FROM markierungen WHERE dokument_id=? ORDER BY seite, id", (doc_id,)
         ).fetchall()
         eltern = conn.execute("SELECT eltern_id FROM dokumente WHERE id=?", (doc_id,)).fetchone()
+        vrows = conn.execute(
+            "SELECT * FROM verweise WHERE quelle_dokument_id=? OR ziel_dokument_id=?",
+            (doc_id, doc_id),
+        ).fetchall()
+        verweise = [_verweis_fuer_dokument(conn, v, doc_id) for v in vrows]
     return {
         "id": doc_id,
         "titel": titel,
@@ -194,6 +231,7 @@ def dokument_detail(doc_id: int, client: PaperlessClient = Depends(get_client)):
         "page_count": dok.get("page_count"),
         "eltern_id": eltern["eltern_id"] if eltern else None,
         "markierungen": [_markierung_dict(r) for r in rows],
+        "verweise": verweise,
     }
 
 
@@ -394,6 +432,42 @@ def verknuepfung_loeschen(verknuepfung_id: int):
         cur = conn.execute("DELETE FROM verknuepfungen WHERE id=?", (verknuepfung_id,))
         if cur.rowcount == 0:
             raise HTTPException(404, "Verknuepfung nicht gefunden")
+    return {"ok": True}
+
+
+# --- Verweise (gerichtete Änderungen zwischen PDFs) ----------------------
+
+@app.post("/api/verweise")
+def verweis_anlegen(payload: models.VerweisCreate):
+    if payload.art not in ERLAUBTE_ARTEN:
+        raise HTTPException(400, f"Unbekannte Verweis-Art: {payload.art}")
+    erstellt = _jetzt()
+    with db.verbindung() as conn:
+        cur = conn.execute(
+            "INSERT INTO verweise (quelle_dokument_id, quelle_seite, quelle_text, "
+            "ziel_dokument_id, ziel_seite, ziel_text, art, erstellt_am) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                payload.quelle_dokument_id,
+                payload.quelle_seite,
+                payload.quelle_text,
+                payload.ziel_dokument_id,
+                payload.ziel_seite,
+                payload.ziel_text,
+                payload.art,
+                erstellt,
+            ),
+        )
+        vid = cur.lastrowid
+    return {"id": vid}
+
+
+@app.delete("/api/verweise/{verweis_id}")
+def verweis_loeschen(verweis_id: int):
+    with db.verbindung() as conn:
+        cur = conn.execute("DELETE FROM verweise WHERE id=?", (verweis_id,))
+        if cur.rowcount == 0:
+            raise HTTPException(404, "Verweis nicht gefunden")
     return {"ok": True}
 
 

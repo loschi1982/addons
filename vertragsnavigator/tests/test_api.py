@@ -182,6 +182,52 @@ def test_notiz_aktualisieren(client):
     assert client.patch("/api/markierungen/99999", json={"notiz": "x"}).status_code == 404
 
 
+def test_verweise(client):
+    # Nachtrag (Doc 2) ändert eine Stelle im Originalvertrag (Doc 1)
+    r = client.post(
+        "/api/verweise",
+        json={
+            "quelle_dokument_id": 2,
+            "quelle_seite": 1,
+            "quelle_text": "Ergaenzung zur Laufzeit",
+            "ziel_dokument_id": 1,
+            "ziel_seite": 2,
+            "ziel_text": "Laufzeit zwei Jahre",
+            "art": "geändert",
+        },
+    )
+    assert r.status_code == 200
+    vid = r.json()["id"]
+
+    # Im Originalvertrag als "ziel" sichtbar
+    d1 = client.get("/api/docs/1").json()
+    v1 = next(v for v in d1["verweise"] if v["id"] == vid)
+    assert v1["rolle"] == "ziel"
+    assert v1["eigene_seite"] == 2
+    assert v1["andere_dokument_id"] == 2
+    assert v1["art"] == "geändert"
+
+    # Im Nachtrag als "quelle" sichtbar
+    d2 = client.get("/api/docs/2").json()
+    v2 = next(v for v in d2["verweise"] if v["id"] == vid)
+    assert v2["rolle"] == "quelle"
+    assert v2["eigene_seite"] == 1
+
+    # Ungültige Art -> 400
+    bad = client.post(
+        "/api/verweise",
+        json={
+            "quelle_dokument_id": 2, "quelle_seite": 1, "quelle_text": "x",
+            "ziel_dokument_id": 1, "ziel_seite": 1, "ziel_text": "y", "art": "unsinn",
+        },
+    )
+    assert bad.status_code == 400
+
+    # Löschen (+ 404 beim zweiten Mal)
+    assert client.delete("/api/verweise/" + str(vid)).status_code == 200
+    assert client.delete("/api/verweise/" + str(vid)).status_code == 404
+
+
 def test_hauptvertrag_hierarchie(client):
     # Beide Dokumente lokal bekannt machen
     client.get("/api/docs")

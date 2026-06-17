@@ -158,6 +158,43 @@ html, body {
   border-radius: 2px;
   cursor: pointer;
 }
+/* Verweise: Durchstreichung (Ziel: gestrichen/geändert) und Quelle (Unterstrich) */
+.textLayer span.verweis-strich {
+  background: linear-gradient(to bottom, transparent 44%, rgba(200, 0, 0, 0.85) 44%, rgba(200, 0, 0, 0.85) 58%, transparent 58%);
+}
+.textLayer span.verweis-quelle {
+  background: linear-gradient(to bottom, transparent 82%, rgba(27, 94, 123, 0.7) 82%);
+}
+
+/* Redline-Annotation (eingeblendeter Nachtragstext / Hinweis) */
+.verweis-annot {
+  position: absolute;
+  z-index: 5;
+  max-width: 70%;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  padding: 0.15rem 1.5rem 0.15rem 0.45rem;
+  border-radius: 3px;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  white-space: normal;
+}
+.verweis-annot .vdel {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.7rem;
+  color: inherit;
+  opacity: 0.6;
+}
+.verweis-annot .vdel:hover { opacity: 1; }
+.verweis-annot.art-gestrichen { background: #ffd9d6; color: #7a1a12; border: 1px solid #e8a9a2; }
+.verweis-annot.art-geaendert { background: #ffe7c2; color: #6b3b00; border: 1px solid #e6c184; }
+.verweis-annot.art-ergaenzt { background: #d6f3d9; color: #14532d; border: 1px solid #a3d8ab; }
+.verweis-annot.art-erweitert { background: #d6ecf3; color: #0b4a5b; border: 1px solid #a3cdd8; }
 
 .doc-content {
   font-family: "Georgia", "Times New Roman", serif;
