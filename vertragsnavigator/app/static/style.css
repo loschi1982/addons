@@ -112,9 +112,20 @@ html, body {
 .zoom-btn:hover { background: var(--akzent-hell); }
 .zoom-anzeige { font-size: 0.78rem; color: var(--grau); min-width: 3.2rem; text-align: center; }
 
+/* Dokumentspalte: Kopfleiste fix, Inhalt in eigenem scrollbarem Rahmen */
+#spalte-doc { display: flex; flex-direction: column; overflow: hidden; }
+#doc-kopf { flex: none; }
+#doc-ansicht {
+  flex: 1 1 auto;
+  min-height: 0;            /* erlaubt Scrollen im Flex-Kind */
+  overflow: auto;           /* vertikal + (bei Zoom) horizontal */
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  background: #f3f2ef;
+  padding: 0.6rem;
+}
+
 /* PDF-Ansicht (PDF.js: Canvas + transparente, markierbare Textebene) */
-/* Dokumentspalte darf bei Zoom auch horizontal scrollen */
-#spalte-doc { overflow: auto; }
 .doc-pdf { width: 100%; }
 .pdf-render { width: 100%; }
 .pdf-seite {
@@ -156,6 +167,9 @@ html, body {
   word-wrap: break-word;
   -webkit-user-select: text;
   user-select: text;
+  background: #fff;
+  padding: 0.8rem 1rem;
+  border-radius: 4px;
 }
 .doc-content .hinweis { font-family: inherit; color: var(--grau); font-style: italic; }
 .doc-content mark {
