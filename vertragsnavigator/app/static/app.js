@@ -13,6 +13,7 @@ const state = {
   externalUrl: "", // vom Browser erreichbare Paperless-URL (Detailansicht-Link)
   linkSource: null, // Markierungs-ID im Verknüpfungsmodus
   docModus: "pdf", // "pdf" (gerendertes PDF, markierbar) | "text" (reiner OCR-Text)
+  pdfZoom: 1, // Zoom-Faktor relativ zur eingepassten Breite (1 = Breite einpassen)
   pdfDocId: null, // aktuell im PDF-Renderer angezeigtes Dokument
   pdfSeiten: [], // [{ n, textDivs }] je gerenderter Seite (für Hervorhebungen)
   uebersicht: [], // zuletzt geladene Themen-Gruppen (für Liste + Overlay)
@@ -93,6 +94,11 @@ async function init() {
   // Umschalter PDF / Text
   document.getElementById("btn-pdf").addEventListener("click", () => setzeDocModus("pdf"));
   document.getElementById("btn-text").addEventListener("click", () => setzeDocModus("text"));
+
+  // Zoom für die PDF-Ansicht
+  document.getElementById("btn-zoom-in").addEventListener("click", () => zoomAendern(0.2));
+  document.getElementById("btn-zoom-out").addEventListener("click", () => zoomAendern(-0.2));
+  updateZoomAnzeige();
 
   // Themen-Overlay schließen (X, Klick auf Backdrop, ESC)
   document.getElementById("overlay-close").addEventListener("click", schliesseOverlay);
@@ -280,7 +286,24 @@ function setzeDocModus(modus) {
   document.getElementById("btn-text").classList.toggle("aktiv", modus === "text");
   document.getElementById("doc-pdf").hidden = modus !== "pdf";
   document.getElementById("doc-content").hidden = modus !== "text";
+  document.getElementById("pdf-zoom").hidden = modus !== "pdf";
   if (modus === "pdf") aktualisierePdf();
+}
+
+function updateZoomAnzeige() {
+  const el = document.getElementById("zoom-anzeige");
+  if (el) el.textContent = Math.round(state.pdfZoom * 100) + " %";
+}
+
+function zoomAendern(delta) {
+  const neu = Math.min(3, Math.max(0.4, Math.round((state.pdfZoom + delta) * 10) / 10));
+  if (neu === state.pdfZoom) return;
+  state.pdfZoom = neu;
+  updateZoomAnzeige();
+  if (state.docModus === "pdf" && state.aktuellesDok) {
+    state.pdfDocId = null; // Neu-Rendern mit neuem Zoom erzwingen
+    renderePdf(state.aktuellesDok);
+  }
 }
 
 // Rendert das PDF (bei neuem Dokument) oder aktualisiert nur die Hervorhebungen.
@@ -322,7 +345,7 @@ async function renderePdf(dok) {
       if (token !== pdfRenderToken) return;
 
       const basis = page.getViewport({ scale: 1 });
-      const scale = Math.max(0.2, breite / basis.width);
+      const scale = Math.max(0.1, (breite / basis.width) * state.pdfZoom);
       const viewport = page.getViewport({ scale });
 
       const seiteDiv = document.createElement("div");

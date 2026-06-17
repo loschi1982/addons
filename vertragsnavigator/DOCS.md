@@ -27,7 +27,7 @@ Nach dem Speichern das Add-on **starten** und über die **Seitenleiste** öffnen
    Bereits erfasste Stellen sind im PDF farbig hervorgehoben. Die Seitenzahl ist
    beim Markieren im PDF exakt bekannt. Über den Umschalter **„PDF" / „Text"** im
    Dokumentkopf kann auf den reinen OCR-Text gewechselt werden (ebenfalls
-   markierbar).
+   markierbar). Mit **„+" / „−"** im Dokumentkopf lässt sich das PDF zoomen.
 3. **Rechts**: die **Themenliste** (nur die angelegten Themen + Anzahl). Klick auf
    ein Thema öffnet die **Zusammenfassung** als Overlay – alle Markierungen des
    Themas getrennt, je mit Quelle, PDF-Sprunglink und ggf. „🗂 Paperless"-Link.

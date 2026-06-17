@@ -86,13 +86,35 @@ html, body {
 .parent-zeile { font-size: 0.8rem; color: var(--grau); display: inline-flex; gap: 0.4rem; align-items: center; margin-top: 0.4rem; }
 .parent-zeile select { font: inherit; }
 
-/* Umschalter Text / Text + PDF */
+/* Kopfzeilen-Steuerung (Umschalter + Zoom) */
+.doc-kopf-controls { display: inline-flex; align-items: center; gap: 0.6rem; flex: none; }
+
+/* Umschalter PDF / Text */
 .ansicht-umschalter { display: inline-flex; border: 1px solid var(--rand); border-radius: 6px; overflow: hidden; flex: none; }
 .um-btn { font: inherit; font-size: 0.8rem; border: none; background: #fff; color: var(--grau); padding: 0.25rem 0.7rem; cursor: pointer; }
 .um-btn + .um-btn { border-left: 1px solid var(--rand); }
 .um-btn.aktiv { background: var(--akzent); color: #fff; }
 
+/* Zoom-Steuerung (nur in der PDF-Ansicht) */
+.pdf-zoom { display: inline-flex; align-items: center; gap: 0.3rem; }
+.zoom-btn {
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  width: 1.7rem;
+  height: 1.7rem;
+  border: 1px solid var(--rand);
+  background: #fff;
+  color: var(--text);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.zoom-btn:hover { background: var(--akzent-hell); }
+.zoom-anzeige { font-size: 0.78rem; color: var(--grau); min-width: 3.2rem; text-align: center; }
+
 /* PDF-Ansicht (PDF.js: Canvas + transparente, markierbare Textebene) */
+/* Dokumentspalte darf bei Zoom auch horizontal scrollen */
+#spalte-doc { overflow: auto; }
 .doc-pdf { width: 100%; }
 .pdf-render { width: 100%; }
 .pdf-seite {

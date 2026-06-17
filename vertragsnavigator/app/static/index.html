@@ -28,9 +28,16 @@
       <div id="doc-kopf" class="doc-kopf">
         <div class="doc-kopf-zeile">
           <h2 id="doc-titel">Kein Dokument gewählt</h2>
-          <div id="ansicht-umschalter" class="ansicht-umschalter" hidden>
-            <button type="button" id="btn-pdf" class="um-btn aktiv">PDF</button>
-            <button type="button" id="btn-text" class="um-btn">Text</button>
+          <div class="doc-kopf-controls">
+            <div id="pdf-zoom" class="pdf-zoom" hidden>
+              <button type="button" id="btn-zoom-out" class="zoom-btn" title="Verkleinern">−</button>
+              <span id="zoom-anzeige" class="zoom-anzeige">100 %</span>
+              <button type="button" id="btn-zoom-in" class="zoom-btn" title="Vergrößern">+</button>
+            </div>
+            <div id="ansicht-umschalter" class="ansicht-umschalter" hidden>
+              <button type="button" id="btn-pdf" class="um-btn aktiv">PDF</button>
+              <button type="button" id="btn-text" class="um-btn">Text</button>
+            </div>
           </div>
         </div>
         <label id="parent-zeile" class="parent-zeile" hidden>
