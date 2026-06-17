@@ -58,6 +58,27 @@ html, body {
 }
 
 /* Vertragsbaum */
+.gruppieren-zeile { display: flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: var(--grau); margin-bottom: 0.6rem; }
+.gruppieren-zeile select { font: inherit; font-size: 0.8rem; flex: 1; min-width: 0; }
+
+.objekt-kopf {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.4rem;
+  margin-top: 0.3rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  background: #f0efea;
+}
+.objekt-kopf:hover { background: var(--akzent-hell); }
+.objekt-kopf .pfeil { width: 0.9rem; color: var(--grau); }
+.objekt-kopf .objekt-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.objekt-body { margin-bottom: 0.3rem; }
+
 .baum .knoten {
   padding: 0.3rem 0.4rem;
   border-radius: 4px;
@@ -70,6 +91,8 @@ html, body {
 .baum .knoten:hover { background: var(--akzent-hell); }
 .baum .knoten.aktiv { background: var(--akzent-hell); font-weight: 600; }
 .baum .kind { margin-left: 1.1rem; border-left: 2px solid var(--rand); }
+/* Drag & Drop: aktives Drop-Ziel hervorheben */
+.baum .knoten.drop-ziel, .objekt-kopf.drop-ziel { outline: 2px dashed var(--akzent); outline-offset: -2px; background: var(--akzent-hell); }
 .baum .badge {
   background: var(--akzent);
   color: #fff;

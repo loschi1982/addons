@@ -24,6 +24,9 @@ const state = {
   uebersicht: [], // zuletzt geladene Themen-Gruppen (für Liste + Overlay)
   overlayOffen: false,
   offenesThemaId: undefined, // thema_id des im Overlay gezeigten Themas (null = "Ohne Thema")
+  gruppierung: "alle", // "alle" | "keine" | <Tag-Name>
+  zugeklappt: new Set(), // eingeklappte Objekt-Gruppen
+  dragId: null, // Dokument-ID im Drag-Vorgang
 };
 
 // --- API-Helfer -----------------------------------------------------------
@@ -127,6 +130,7 @@ async function ladeBaum() {
   try {
     const docs = await api("GET", "/api/docs");
     state.alleDocs = docs;
+    fuelleGruppierung(docs);
     rendereBaum(docs);
   } catch (e) {
     setStatus("Dokumente konnten nicht geladen werden: " + e.message, true);
@@ -134,54 +138,166 @@ async function ladeBaum() {
   }
 }
 
+// Füllt das "Objekt"-Auswahlfeld: Alle Objekte / je Tag / keine Gruppierung.
+function fuelleGruppierung(docs) {
+  const sel = document.getElementById("gruppierung");
+  const tags = Array.from(new Set(docs.flatMap((d) => d.tags || []))).sort((a, b) => a.localeCompare(b));
+
+  let aktuell = state.gruppierung || "alle";
+  if (aktuell !== "alle" && aktuell !== "keine" && !tags.includes(aktuell)) {
+    aktuell = "alle"; // gewählter Tag existiert nicht mehr
+    state.gruppierung = "alle";
+  }
+
+  sel.innerHTML = "";
+  const opt = (val, label) => {
+    const o = document.createElement("option");
+    o.value = val;
+    o.textContent = label;
+    if (val === aktuell) o.selected = true;
+    sel.appendChild(o);
+  };
+  opt("alle", "Alle Objekte");
+  for (const t of tags) opt(t, t);
+  opt("keine", "keine Gruppierung");
+
+  sel.onchange = () => {
+    state.gruppierung = sel.value;
+    rendereBaum(state.alleDocs);
+  };
+}
+
 function rendereBaum(docs) {
-  const byId = new Map(docs.map((d) => [d.id, d]));
+  const container = document.getElementById("baum");
+  container.innerHTML = "";
+  if (!docs || docs.length === 0) {
+    container.innerHTML = '<p class="hinweis">Keine Dokumente in Paperless gefunden.</p>';
+    return;
+  }
+
+  const modus = state.gruppierung || "alle";
+
+  if (modus === "keine") {
+    rendereGruppeInhalt(container, docs);
+    macheDropZiel(container, null); // freie Fläche -> Hauptvertrag
+    return;
+  }
+
+  let gruppen;
+  if (modus === "alle") {
+    const tags = Array.from(new Set(docs.flatMap((d) => d.tags || []))).sort((a, b) => a.localeCompare(b));
+    gruppen = tags.map((t) => ({ name: t, docs: docs.filter((d) => (d.tags || []).includes(t)) }));
+    const ohne = docs.filter((d) => !(d.tags || []).length);
+    if (ohne.length) gruppen.push({ name: "Ohne Objekt", docs: ohne });
+  } else {
+    gruppen = [{ name: modus, docs: docs.filter((d) => (d.tags || []).includes(modus)) }];
+  }
+
+  for (const g of gruppen) {
+    const zu = state.zugeklappt.has(g.name);
+
+    const kopf = document.createElement("div");
+    kopf.className = "objekt-kopf";
+    kopf.innerHTML =
+      '<span class="pfeil">' + (zu ? "▸" : "▾") + "</span>" +
+      '<span class="objekt-name">' + escapeHtml(g.name) + "</span>" +
+      '<span class="badge">' + g.docs.length + "</span>";
+    kopf.addEventListener("click", () => {
+      if (zu) state.zugeklappt.delete(g.name);
+      else state.zugeklappt.add(g.name);
+      rendereBaum(state.alleDocs);
+    });
+    macheDropZiel(kopf, null); // Drop auf Objekt-Kopf -> Hauptvertrag (kein Elternteil)
+    container.appendChild(kopf);
+
+    if (!zu) {
+      const body = document.createElement("div");
+      body.className = "objekt-body";
+      rendereGruppeInhalt(body, g.docs);
+      container.appendChild(body);
+    }
+  }
+}
+
+// Baut innerhalb einer Gruppe die Hauptvertrag/Nachtrag-Hierarchie auf.
+function rendereGruppeInhalt(container, docsInGruppe) {
+  const ids = new Set(docsInGruppe.map((d) => d.id));
   const kinder = new Map();
   const wurzeln = [];
-  for (const d of docs) {
-    if (d.eltern_id != null && byId.has(d.eltern_id)) {
+  for (const d of docsInGruppe) {
+    if (d.eltern_id != null && ids.has(d.eltern_id)) {
       if (!kinder.has(d.eltern_id)) kinder.set(d.eltern_id, []);
       kinder.get(d.eltern_id).push(d);
     } else {
       wurzeln.push(d);
     }
   }
+  const renderKnoten = (d, tiefe) => {
+    container.appendChild(erstelleKnoten(d, tiefe));
+    (kinder.get(d.id) || []).sort((a, b) => a.titel.localeCompare(b.titel)).forEach((k) => renderKnoten(k, tiefe + 1));
+  };
+  wurzeln.sort((a, b) => a.titel.localeCompare(b.titel)).forEach((w) => renderKnoten(w, 0));
+}
 
-  const container = document.getElementById("baum");
-  container.innerHTML = "";
-  if (docs.length === 0) {
-    container.innerHTML = '<p class="hinweis">Keine Dokumente in Paperless gefunden.</p>';
-    return;
+function erstelleKnoten(d, tiefe) {
+  const div = document.createElement("div");
+  div.className = "knoten" + (tiefe > 0 ? " kind" : "");
+  div.dataset.id = d.id;
+  div.draggable = true;
+  div.style.paddingLeft = 0.4 + tiefe * 1.0 + "rem";
+  if (state.aktuellesDok && state.aktuellesDok.id === d.id) div.classList.add("aktiv");
+
+  const titel = document.createElement("span");
+  titel.className = "titel";
+  titel.textContent = d.titel;
+  div.appendChild(titel);
+
+  if (d.anzahl_markierungen > 0) {
+    const b = document.createElement("span");
+    b.className = "badge";
+    b.textContent = d.anzahl_markierungen;
+    div.appendChild(b);
   }
 
-  const renderKnoten = (d, tiefe) => {
-    const div = document.createElement("div");
-    div.className = "knoten" + (tiefe > 0 ? " kind" : "");
-    div.dataset.id = d.id;
-    div.style.paddingLeft = 0.4 + tiefe * 1.0 + "rem";
-    if (state.aktuellesDok && state.aktuellesDok.id === d.id) div.classList.add("aktiv");
+  div.addEventListener("click", () => oeffneDokument(d.id));
+  div.addEventListener("dragstart", (ev) => {
+    ev.stopPropagation();
+    state.dragId = d.id;
+    ev.dataTransfer.effectAllowed = "move";
+    try {
+      ev.dataTransfer.setData("text/plain", String(d.id));
+    } catch (e) { /* manche Browser */ }
+  });
 
-    const titel = document.createElement("span");
-    titel.className = "titel";
-    titel.textContent = d.titel;
-    div.appendChild(titel);
+  macheDropZiel(div, d.id); // Drop hierauf -> wird Nachtrag dieses Dokuments
+  return div;
+}
 
-    if (d.anzahl_markierungen > 0) {
-      const b = document.createElement("span");
-      b.className = "badge";
-      b.textContent = d.anzahl_markierungen;
-      div.appendChild(b);
+// Macht ein Element zum Drop-Ziel; setzt beim Drop den Hauptvertrag des
+// gezogenen Dokuments (zielElternId = Dokument-ID oder null für "Hauptvertrag").
+function macheDropZiel(el, zielElternId) {
+  el.addEventListener("dragover", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    ev.dataTransfer.dropEffect = "move";
+    el.classList.add("drop-ziel");
+  });
+  el.addEventListener("dragleave", () => el.classList.remove("drop-ziel"));
+  el.addEventListener("drop", async (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    el.classList.remove("drop-ziel");
+    const id = state.dragId;
+    state.dragId = null;
+    if (id == null) return;
+    if (zielElternId != null && id === zielElternId) return; // auf sich selbst
+    try {
+      await api("POST", "/api/docs/" + id + "/parent", { eltern_id: zielElternId });
+      await ladeBaum();
+    } catch (e) {
+      alert("Fehler: " + e.message);
     }
-
-    div.addEventListener("click", () => oeffneDokument(d.id));
-    container.appendChild(div);
-
-    const ks = (kinder.get(d.id) || []).sort((a, b) => a.titel.localeCompare(b.titel));
-    for (const k of ks) renderKnoten(k, tiefe + 1);
-  };
-
-  wurzeln.sort((a, b) => a.titel.localeCompare(b.titel));
-  for (const w of wurzeln) renderKnoten(w, 0);
+  });
 }
 
 function markiereAktivenBaum(id) {

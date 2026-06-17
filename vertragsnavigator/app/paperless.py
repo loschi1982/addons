@@ -77,6 +77,19 @@ class PaperlessClient:
         """Metadaten inkl. ``content`` (OCR), ``notes`` und ``page_count``."""
         return self._request("GET", f"/api/documents/{doc_id}/").json()
 
+    def get_tags(self) -> Dict[int, str]:
+        """Liefert eine Zuordnung Tag-ID -> Tag-Name (folgt der Paginierung)."""
+        tags: Dict[int, str] = {}
+        pfad: Optional[str] = "/api/tags/?page_size=250"
+        while pfad:
+            antwort = self._request("GET", pfad)
+            daten = antwort.json()
+            for t in daten.get("results", []):
+                tags[t["id"]] = t.get("name", str(t["id"]))
+            naechste = daten.get("next")
+            pfad = naechste.replace(self.base_url, "") if naechste else None
+        return tags
+
     def download_pdf(self, doc_id: int, original: bool = False) -> bytes:
         """Laedt das PDF herunter (Archiv-Version, optional Original)."""
         pfad = f"/api/documents/{doc_id}/download/"

@@ -183,6 +183,10 @@ def app_config():
 def liste_dokumente(client: PaperlessClient = Depends(get_client)):
     """Vertragsbaum: alle Paperless-Dokumente, angereichert um lokale Daten."""
     paperless_docs = client.list_documents()
+    try:
+        tags_map = client.get_tags()
+    except PaperlessError:
+        tags_map = {}  # Tags sind optional – Listing darf daran nicht scheitern
     with db.verbindung() as conn:
         eltern = {r["id"]: r["eltern_id"] for r in conn.execute("SELECT id, eltern_id FROM dokumente")}
         zaehler = {
@@ -196,12 +200,14 @@ def liste_dokumente(client: PaperlessClient = Depends(get_client)):
             did = d["id"]
             titel = d.get("title") or f"Dokument {did}"
             _ensure_dokument(conn, did, titel)
+            tag_namen = [tags_map.get(tid, str(tid)) for tid in (d.get("tags") or [])]
             ergebnis.append(
                 {
                     "id": did,
                     "titel": titel,
                     "eltern_id": eltern.get(did),
                     "anzahl_markierungen": zaehler.get(did, 0),
+                    "tags": tag_namen,
                 }
             )
     return ergebnis

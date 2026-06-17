@@ -89,6 +89,9 @@ docker build -t vertragsnavigator .
 - [x] v0.6.0: Verweise zwischen PDFs (Tabelle `verweise`, `POST`/`DELETE /api/verweise`,
       in `/api/docs/{id}`): gerichtete Änderung Nachtrag→Original, Redline im PDF
       (Durchstreichung + eingeblendeter Nachtragstext), 2-Schritt-Erstellung im Kontextmenü
+- [x] v0.6.x: Verweis-Annotationen in rechter Randspalte + blasse Verbindungslinien (SVG)
+- [x] v0.7.0: Paperless-Tags übernommen (`get_tags`, in `/api/docs` als `tags`),
+      Vertragsbaum nach Objekt (Tag) gruppierbar, Hierarchie per Drag & Drop
 - [ ] Phase 4 (optional, später): Ähnlichkeitsvorschläge für Abhängigkeiten
 - [ ] **Offen**: Seitenzuordnung + Paperless-API-Version an echter Instanz
       verifizieren (Tests laufen bisher nur gegen synthetische PDFs/Mocks).

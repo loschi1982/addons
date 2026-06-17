@@ -13,12 +13,15 @@ class FakeClient:
     def __init__(self):
         self.hinweise = []
         self.docs = {
-            1: {"title": "Hauptvertrag", "content": "Die Haftung ist begrenzt. Laufzeit zwei Jahre.", "notes": [], "page_count": 3},
-            2: {"title": "Nachtrag A", "content": "Ergaenzung zur Laufzeit.", "notes": [], "page_count": 1},
+            1: {"title": "Hauptvertrag", "content": "Die Haftung ist begrenzt. Laufzeit zwei Jahre.", "notes": [], "page_count": 3, "tags": [10]},
+            2: {"title": "Nachtrag A", "content": "Ergaenzung zur Laufzeit.", "notes": [], "page_count": 1, "tags": [10, 20]},
         }
 
     def list_documents(self):
-        return [{"id": i, "title": d["title"]} for i, d in self.docs.items()]
+        return [{"id": i, "title": d["title"], "tags": d.get("tags", [])} for i, d in self.docs.items()]
+
+    def get_tags(self):
+        return {10: "Elbphilharmonie", 20: "Laeiszhalle"}
 
     def get_document(self, doc_id):
         d = self.docs[doc_id]
@@ -71,6 +74,10 @@ def test_vertragsbaum_und_detail(client):
     assert r.status_code == 200
     docs = r.json()
     assert {d["id"] for d in docs} == {1, 2}
+    # Tags (Objekte) werden aus Paperless übernommen und als Namen geliefert
+    byid = {d["id"]: d for d in docs}
+    assert byid[1]["tags"] == ["Elbphilharmonie"]
+    assert byid[2]["tags"] == ["Elbphilharmonie", "Laeiszhalle"]
 
     r = client.get("/api/docs/1")
     detail = r.json()

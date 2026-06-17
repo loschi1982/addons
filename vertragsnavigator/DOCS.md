@@ -17,7 +17,12 @@ Original-PDF.
 Nach dem Speichern das Add-on **starten** und über die **Seitenleiste** öffnen.
 
 ## Bedienung
-1. **Links** ein Dokument im Vertragsbaum wählen.
+1. **Links** der Vertragsbaum. Oben **„Objekt"** wählt die Gruppierung: **Alle Objekte**
+   (gruppiert nach Paperless-**Tags**), ein **einzelnes Objekt** (nur dessen Verträge)
+   oder **keine Gruppierung**. Tags werden aus Paperless übernommen (und dort nicht
+   verändert). Per **Drag & Drop** lässt sich ein Vertrag auf einen anderen ziehen →
+   er wird dessen **Nachtrag**; Ziehen auf einen Objekt-Kopf/freie Fläche macht ihn
+   wieder zum **Hauptvertrag**. Klick auf ein Dokument öffnet es.
 2. **Mitte**: Standardmäßig wird das **PDF** angezeigt (vertraute Vertragsoptik)
    mit einer unsichtbaren, **markierbaren Textebene** darüber. Text mit der Maus
    markieren, **Rechtsklick** öffnet das Kontextmenü:
