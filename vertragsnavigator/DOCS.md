@@ -42,7 +42,8 @@ Nach dem Speichern das Add-on **starten** und über die **Seitenleiste** öffnen
    gestrichen). Im Original-PDF wird die Stelle markiert (durchgestrichen bei
    gestrichen/geändert, dezent unterstrichen bei ergänzt/erweitert), und der
    **Nachtragstext erscheint als Notiz in der rechten Randspalte** auf Höhe der
-   Stelle – ohne den Originaltext zu überdecken. Ein Klick auf die Randnotiz springt
+   Stelle (mit einer blassen Verbindungslinie zur Markierung) – ohne den
+   Originaltext zu überdecken. Ein Klick auf die Randnotiz springt
    zum Gegenstück im anderen PDF; das **✕** löscht den Verweis. (Wird die Stelle im
    PDF-Text nicht eindeutig gefunden, ist die Randnotiz gestrichelt umrandet.)
 

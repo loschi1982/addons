@@ -186,6 +186,14 @@ html, body {
 }
 /* Stelle im PDF nicht gefunden -> Anker unsicher (gestrichelt) */
 .verweis-annot.ohne-anker { border-style: dashed !important; opacity: 0.92; }
+
+/* Verbindungslinien Stelle <-> Randnotiz (blass, transparent) */
+.verweis-linien { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 4; overflow: visible; }
+.vlinie { stroke: rgba(120, 120, 120, 0.4); stroke-width: 1; }
+.vlinie.art-gestrichen { stroke: rgba(200, 0, 0, 0.35); }
+.vlinie.art-geaendert { stroke: rgba(190, 110, 0, 0.4); }
+.vlinie.art-ergaenzt { stroke: rgba(20, 120, 60, 0.4); }
+.vlinie.art-erweitert { stroke: rgba(11, 74, 91, 0.4); }
 .verweis-annot .vdel {
   position: absolute;
   top: 1px;

@@ -465,7 +465,7 @@ function refreshPdfMarken() {
       d.classList.remove("markiert", "verweis-strich", "verweis-quelle");
       delete d.dataset.markId;
     }
-    if (seite.seiteDiv) seite.seiteDiv.querySelectorAll(".verweis-annot").forEach((e) => e.remove());
+    if (seite.seiteDiv) seite.seiteDiv.querySelectorAll(".verweis-annot, .verweis-linien").forEach((e) => e.remove());
 
     // Themen-Markierungen (gelb)
     for (const m of marks.filter((x) => x.seite === seite.n)) {
@@ -499,8 +499,10 @@ function verweisLabel(v) {
   return escapeHtml(v.art);
 }
 
-// Markiert die betroffene Stelle im PDF und platziert die Annotationen gestapelt
-// in der rechten Marginalspalte (überdeckt den Originaltext NICHT).
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// Markiert die betroffene Stelle im PDF, platziert die Annotationen gestapelt in
+// der rechten Marginalspalte und verbindet beide mit einer blassen Linie.
 function platziereVerweise(seite, vs) {
   const eintraege = vs.map((v) => {
     const spans = findeSpansFuerText(seite.textDivs, v.eigene_text);
@@ -514,12 +516,31 @@ function platziereVerweise(seite, vs) {
       spans.forEach((s) => s.classList.add("verweis-quelle"));
     }
 
-    const tops = spans.map((s) => s.offsetTop);
-    const ankerTop = tops.length ? Math.min.apply(null, tops) : 0;
-    return { v: v, ankerTop: ankerTop, gefunden: spans.length > 0 };
+    // Bounding-Box der Stelle (für Ankerpunkt der Verbindungslinie)
+    let top = Infinity, bottom = 0, right = 0;
+    spans.forEach((s) => {
+      top = Math.min(top, s.offsetTop);
+      bottom = Math.max(bottom, s.offsetTop + s.offsetHeight);
+      right = Math.max(right, s.offsetLeft + s.offsetWidth);
+    });
+    const gefunden = spans.length > 0;
+    return {
+      v: v,
+      gefunden: gefunden,
+      ankerTop: gefunden ? top : 0,
+      sx: gefunden ? right : null,
+      sy: gefunden ? (top + bottom) / 2 : null,
+    };
   });
 
   eintraege.sort((a, b) => a.ankerTop - b.ankerTop);
+
+  // SVG-Overlay für die Verbindungslinien (unter den Karten, über dem Text)
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", "verweis-linien");
+  svg.style.width = seite.seiteDiv.style.width;
+  svg.style.height = seite.seiteDiv.style.height;
+  seite.seiteDiv.appendChild(svg);
 
   const left = seite.pageWidth + 8;
   let prevBottom = -Infinity;
@@ -527,9 +548,20 @@ function platziereVerweise(seite, vs) {
     const card = baueVerweisKarte(e.v, e.gefunden);
     card.style.left = left + "px";
     card.style.width = VERWEIS_GUTTER - 16 + "px";
-    card.style.top = Math.max(e.ankerTop, prevBottom + 6) + "px";
+    const top = Math.max(e.ankerTop, prevBottom + 6);
+    card.style.top = top + "px";
     seite.seiteDiv.appendChild(card);
-    prevBottom = parseFloat(card.style.top) + card.offsetHeight;
+    prevBottom = top + card.offsetHeight;
+
+    if (e.gefunden) {
+      const cy = top + card.offsetHeight / 2;
+      const poly = document.createElementNS(SVG_NS, "polyline");
+      // Stelle -> Seitenrand (entlang der eigenen Zeile) -> Karte (in der Randspalte)
+      poly.setAttribute("points", e.sx + "," + e.sy + " " + seite.pageWidth + "," + e.sy + " " + left + "," + cy);
+      poly.setAttribute("class", "vlinie art-" + artKey(e.v.art));
+      poly.setAttribute("fill", "none");
+      svg.appendChild(poly);
+    }
   }
 }
 
