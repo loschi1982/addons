@@ -1230,6 +1230,12 @@ function baueKarte(m, alle) {
 
 const _ausschnittDocs = {}; // docId -> Promise<pdfDocument|null>
 const _ausschnittSeiten = {}; // "docId:seite" -> Promise<{canvas, items}|null>
+const _dokMeta = {}; // docId -> Promise<doc-detail|null> (für Verweise im Ausschnitt)
+
+function _ladeDokMeta(docId) {
+  if (!_dokMeta[docId]) _dokMeta[docId] = api("GET", "/api/docs/" + docId).catch(() => null);
+  return _dokMeta[docId];
+}
 
 function _ladeAusschnittDok(docId) {
   if (!_ausschnittDocs[docId]) {
@@ -1249,23 +1255,51 @@ function _ladeAusschnittSeite(docId, seite) {
       const page = await pdf.getPage(seite);
       const scale = 2; // für scharfe Ausschnitte
       const viewport = page.getViewport({ scale });
+
       const canvas = document.createElement("canvas");
       canvas.width = viewport.width;
       canvas.height = viewport.height;
       await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+
+      // Textebene offscreen rendern und Span-Positionen messen (wie im Viewer
+      // -> exakte Boxen). Anschließend DOM wieder entfernen.
       const tc = await page.getTextContent();
-      const items = tc.items.map((it) => {
-        const tx = pdfjsLib.Util.transform(viewport.transform, it.transform);
-        const fh = Math.hypot(tx[2], tx[3]) || 1;
-        return { str: it.str || "", x: tx[4], y: tx[5] - fh, w: (it.width || 0) * scale, h: fh * 1.25 };
-      });
+      const halter = document.createElement("div");
+      halter.style.cssText = "position:fixed;left:-100000px;top:0;";
+      const tl = document.createElement("div");
+      tl.className = "textLayer";
+      tl.style.width = viewport.width + "px";
+      tl.style.height = viewport.height + "px";
+      tl.style.setProperty("--scale-factor", String(scale));
+      halter.appendChild(tl);
+      document.body.appendChild(halter);
+      const textDivs = [];
+      try {
+        await pdfjsLib.renderTextLayer({
+          textContentSource: tc,
+          container: tl,
+          viewport: viewport,
+          textDivs: textDivs,
+        }).promise;
+      } catch (e) { /* ignorieren */ }
+      const items = textDivs.map((d) => ({
+        str: d.textContent || "",
+        x: d.offsetLeft,
+        y: d.offsetTop,
+        w: d.offsetWidth,
+        h: d.offsetHeight,
+      }));
+      document.body.removeChild(halter);
+
       return { canvas: canvas, items: items };
     })().catch(() => null);
   }
   return _ausschnittSeiten[key];
 }
 
-// Findet die Text-Items, die den (whitespace-toleranten) Auszug abdecken.
+// Findet die Text-Items, die den Auszug (whitespace-tolerant) abdecken. Wird der
+// vollständige Auszug nicht gefunden (z. B. Seitenumbruch), wird der längste auf
+// der Seite vorhandene Präfix verwendet.
 function _findeItemBoxen(items, text) {
   let compact = "";
   const charItem = [];
@@ -1278,11 +1312,39 @@ function _findeItemBoxen(items, text) {
   }
   const needle = (text || "").replace(/\s+/g, "").toLowerCase();
   if (!needle) return [];
-  const idx = compact.indexOf(needle);
-  if (idx < 0) return [];
+
+  let bestIdx = compact.indexOf(needle);
+  let bestLen = needle.length;
+  if (bestIdx < 0) {
+    // längsten vorkommenden Präfix per Binärsuche bestimmen
+    bestLen = 0;
+    let lo = 1, hi = needle.length;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const p = compact.indexOf(needle.slice(0, mid));
+      if (p >= 0) {
+        bestLen = mid;
+        bestIdx = p;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+  }
+  if (bestIdx < 0 || bestLen < 3) return [];
+
   const set = new Set();
-  for (let i = idx; i < idx + needle.length && i < charItem.length; i++) set.add(charItem[i]);
+  for (let i = bestIdx; i < bestIdx + bestLen && i < charItem.length; i++) set.add(charItem[i]);
   return Array.from(set);
+}
+
+// Zeichnet eine horizontale Linie über eine Box (Anteil = vertikale Position).
+function _linie(ctx, bx, l, t, anteil) {
+  const yy = bx.y - t + bx.h * anteil;
+  ctx.beginPath();
+  ctx.moveTo(bx.x - l, yy);
+  ctx.lineTo(bx.x + bx.w - l, yy);
+  ctx.stroke();
 }
 
 async function rendereAusschnitt(karte, m) {
@@ -1328,6 +1390,26 @@ async function rendereAusschnitt(karte, m) {
     ctx.drawImage(seite.canvas, l, t, w, h, 0, 0, w, h);
     ctx.fillStyle = "rgba(255, 213, 0, 0.4)"; // Hervorhebung wie im PDF
     boxen.forEach((bx) => ctx.fillRect(bx.x - l, bx.y - t, bx.w, bx.h));
+
+    // Verweis-Annotationen (Redlines) des Dokuments in den Ausschnitt zeichnen
+    try {
+      const meta = await _ladeDokMeta(m.dokument_id);
+      const verweise = (meta && meta.verweise) || [];
+      for (const v of verweise) {
+        if (v.eigene_seite !== m.seite) continue;
+        const vboxen = _findeItemBoxen(seite.items, v.eigene_text);
+        if (!vboxen.length) continue;
+        const istZiel = v.rolle === "ziel";
+        ctx.lineWidth = 2;
+        if (istZiel && (v.art === "gestrichen" || v.art === "geändert")) {
+          ctx.strokeStyle = "rgba(200, 0, 0, 0.85)"; // Durchstreichung
+          vboxen.forEach((bx) => _linie(ctx, bx, l, t, 0.55));
+        } else {
+          ctx.strokeStyle = istZiel ? "rgba(20, 120, 60, 0.85)" : "rgba(27, 94, 123, 0.85)"; // Unterstrich
+          vboxen.forEach((bx) => _linie(ctx, bx, l, t, 0.92));
+        }
+      }
+    } catch (e) { /* Verweise optional */ }
 
     const img = document.createElement("img");
     img.className = "ausschnitt-bild";
