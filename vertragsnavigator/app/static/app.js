@@ -15,6 +15,7 @@ const state = {
   docModus: "pdf", // "pdf" (gerendertes PDF, markierbar) | "text" (reiner OCR-Text)
   pdfZoom: 1, // Zoom-Faktor relativ zur eingepassten Breite (1 = Breite einpassen)
   pdfDocId: null, // aktuell im PDF-Renderer angezeigtes Dokument
+  pdfDokument: null, // geladenes PDF.js-Dokument (Cache: kein Reload beim Zoom)
   pdfSeiten: [], // [{ n, textDivs }] je gerenderter Seite (für Hervorhebungen)
   uebersicht: [], // zuletzt geladene Themen-Gruppen (für Liste + Overlay)
   overlayOffen: false,
@@ -295,15 +296,27 @@ function updateZoomAnzeige() {
   if (el) el.textContent = Math.round(state.pdfZoom * 100) + " %";
 }
 
-function zoomAendern(delta) {
+async function zoomAendern(delta) {
   const neu = Math.min(3, Math.max(0.4, Math.round((state.pdfZoom + delta) * 10) / 10));
   if (neu === state.pdfZoom) return;
   state.pdfZoom = neu;
   updateZoomAnzeige();
-  if (state.docModus === "pdf" && state.aktuellesDok) {
-    state.pdfDocId = null; // Neu-Rendern mit neuem Zoom erzwingen
-    renderePdf(state.aktuellesDok);
+  if (state.docModus !== "pdf" || !state.aktuellesDok) return;
+
+  // Sichtbares Zentrum als Anteil merken, um die Ansicht nach dem Neuzeichnen
+  // zu erhalten (sonst springt das PDF an den Anfang).
+  const frame = document.getElementById("doc-ansicht");
+  const vMitte = frame.scrollHeight ? (frame.scrollTop + frame.clientHeight / 2) / frame.scrollHeight : 0;
+  const hMitte = frame.scrollWidth ? (frame.scrollLeft + frame.clientWidth / 2) / frame.scrollWidth : 0;
+
+  if (state.pdfDokument && state.pdfDocId === state.aktuellesDok.id) {
+    await zeichneSeiten(); // nur neu zeichnen (kein erneuter Download)
+  } else {
+    await renderePdf(state.aktuellesDok);
   }
+
+  frame.scrollTop = Math.max(0, vMitte * frame.scrollHeight - frame.clientHeight / 2);
+  frame.scrollLeft = Math.max(0, hMitte * frame.scrollWidth - frame.clientWidth / 2);
 }
 
 // Rendert das PDF (bei neuem Dokument) oder aktualisiert nur die Hervorhebungen.
@@ -318,10 +331,11 @@ function aktualisierePdf() {
 
 let pdfRenderToken = 0;
 
+// Lädt das PDF-Dokument (einmal) und zeichnet es anschließend.
 async function renderePdf(dok) {
   const ziel = document.getElementById("pdf-render");
-  const token = ++pdfRenderToken;
   state.pdfDocId = null;
+  state.pdfDokument = null;
   state.pdfSeiten = [];
 
   if (!window.pdfjsLib) {
@@ -335,60 +349,70 @@ async function renderePdf(dok) {
       url: API + "/api/pdf/" + dok.id,
       withCredentials: true,
     }).promise;
-    if (token !== pdfRenderToken) return; // zwischenzeitlich anderes Dokument geöffnet
-
-    ziel.innerHTML = "";
-    const breite = (ziel.clientWidth || 800) - 4;
-
-    for (let n = 1; n <= pdf.numPages; n++) {
-      const page = await pdf.getPage(n);
-      if (token !== pdfRenderToken) return;
-
-      const basis = page.getViewport({ scale: 1 });
-      const scale = Math.max(0.1, (breite / basis.width) * state.pdfZoom);
-      const viewport = page.getViewport({ scale });
-
-      const seiteDiv = document.createElement("div");
-      seiteDiv.className = "pdf-seite";
-      seiteDiv.dataset.seite = n;
-      seiteDiv.style.width = viewport.width + "px";
-      seiteDiv.style.height = viewport.height + "px";
-
-      const canvas = document.createElement("canvas");
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      seiteDiv.appendChild(canvas);
-
-      const textLayerDiv = document.createElement("div");
-      textLayerDiv.className = "textLayer";
-      // pdf.js 3.x positioniert/skaliert die Text-Spans über diese CSS-Variable.
-      // Ohne sie liegt die Textebene nicht bündig über dem PDF.
-      textLayerDiv.style.setProperty("--scale-factor", String(scale));
-      seiteDiv.appendChild(textLayerDiv);
-
-      ziel.appendChild(seiteDiv);
-
-      await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-      const textContent = await page.getTextContent();
-      const textDivs = [];
-      // pdf.js 3.x: Parameter heißt textContentSource (nicht textContent).
-      await pdfjsLib.renderTextLayer({
-        textContentSource: textContent,
-        container: textLayerDiv,
-        viewport: viewport,
-        textDivs: textDivs,
-      }).promise;
-
-      state.pdfSeiten.push({ n: n, textDivs: textDivs });
-    }
-
+    state.pdfDokument = pdf;
     state.pdfDocId = dok.id;
-    aktualisierePdfHighlights(dok.markierungen || []);
+    await zeichneSeiten();
   } catch (e) {
     ziel.innerHTML =
       '<p class="hinweis">PDF konnte nicht geladen werden: ' + escapeHtml(e.message) + "</p>";
     state.pdfDocId = null;
+    state.pdfDokument = null;
   }
+}
+
+// Zeichnet alle Seiten des geladenen PDFs im aktuellen Zoom (ohne Neu-Download).
+async function zeichneSeiten() {
+  const pdf = state.pdfDokument;
+  const ziel = document.getElementById("pdf-render");
+  if (!pdf) return;
+
+  const token = ++pdfRenderToken;
+  ziel.innerHTML = "";
+  state.pdfSeiten = [];
+  const breite = (ziel.clientWidth || 800) - 4;
+
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const page = await pdf.getPage(n);
+    if (token !== pdfRenderToken) return; // zwischenzeitlich neu gezeichnet/gewechselt
+
+    const basis = page.getViewport({ scale: 1 });
+    const scale = Math.max(0.1, (breite / basis.width) * state.pdfZoom);
+    const viewport = page.getViewport({ scale });
+
+    const seiteDiv = document.createElement("div");
+    seiteDiv.className = "pdf-seite";
+    seiteDiv.dataset.seite = n;
+    seiteDiv.style.width = viewport.width + "px";
+    seiteDiv.style.height = viewport.height + "px";
+
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    seiteDiv.appendChild(canvas);
+
+    const textLayerDiv = document.createElement("div");
+    textLayerDiv.className = "textLayer";
+    // pdf.js 3.x positioniert/skaliert die Text-Spans über diese CSS-Variable.
+    textLayerDiv.style.setProperty("--scale-factor", String(scale));
+    seiteDiv.appendChild(textLayerDiv);
+
+    ziel.appendChild(seiteDiv);
+
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+    const textContent = await page.getTextContent();
+    const textDivs = [];
+    // pdf.js 3.x: Parameter heißt textContentSource (nicht textContent).
+    await pdfjsLib.renderTextLayer({
+      textContentSource: textContent,
+      container: textLayerDiv,
+      viewport: viewport,
+      textDivs: textDivs,
+    }).promise;
+
+    state.pdfSeiten.push({ n: n, textDivs: textDivs });
+  }
+
+  aktualisierePdfHighlights((state.aktuellesDok && state.aktuellesDok.markierungen) || []);
 }
 
 // Hebt gespeicherte Markierungen in der PDF-Textebene hervor.
