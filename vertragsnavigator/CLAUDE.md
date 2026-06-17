@@ -78,8 +78,10 @@ docker build -t vertragsnavigator .
 - [x] Phase 1: Add-on-Hülle, Paperless-Verbindung, Vertragsbaum, OCR-Anzeige
 - [x] Phase 2: Markieren + Kontextmenü, Themen, Themenübersicht + Sprungmarken
 - [x] Phase 3: Verknüpfungen, Hauptvertrag-Hierarchie, Paperless-Notiz-Spiegel
-- [x] UI v0.2.0: Umschalter Text/Text+PDF (eingebettetes PDF via `/api/pdf`),
-      Spalte 3 = Themenliste, Klick öffnet Zusammenfassungs-Overlay (reiner Frontend-Umbau)
+- [x] UI v0.2.0: Spalte 3 = Themenliste, Klick öffnet Zusammenfassungs-Overlay
+- [x] UI v0.3.0: PDF-Ansicht via PDF.js (CDN) mit markierbarer Textebene —
+      Markieren direkt im PDF (exakte Seite), bestehende Marken im PDF hervorgehoben;
+      Umschalter PDF/Text (reiner Frontend-Umbau)
 - [ ] Phase 4 (optional, später): Ähnlichkeitsvorschläge für Abhängigkeiten
 - [ ] **Offen**: Seitenzuordnung + Paperless-API-Version an echter Instanz
       verifizieren (Tests laufen bisher nur gegen synthetische PDFs/Mocks).

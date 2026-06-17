@@ -18,21 +18,28 @@ Nach dem Speichern das Add-on **starten** und über die **Seitenleiste** öffnen
 
 ## Bedienung
 1. **Links** ein Dokument im Vertragsbaum wählen.
-2. **Mitte**: Im OCR-Text Text mit der Maus markieren, **Rechtsklick** öffnet das
-   Kontextmenü:
+2. **Mitte**: Standardmäßig wird das **PDF** angezeigt (vertraute Vertragsoptik)
+   mit einer unsichtbaren, **markierbaren Textebene** darüber. Text mit der Maus
+   markieren, **Rechtsklick** öffnet das Kontextmenü:
    - *Zu Thema hinzufügen* (bestehendes Thema oder „+ Neues Thema").
    - *Verknüpfen mit …* – danach auf eine andere hervorgehobene Stelle klicken.
    - *Notiz hinzufügen*.
-   Über den Umschalter **„Text" / „Text + PDF"** im Dokumentkopf lässt sich rechts
-   neben dem (markierbaren) OCR-Text zusätzlich das **PDF** einblenden.
+   Bereits erfasste Stellen sind im PDF farbig hervorgehoben. Die Seitenzahl ist
+   beim Markieren im PDF exakt bekannt. Über den Umschalter **„PDF" / „Text"** im
+   Dokumentkopf kann auf den reinen OCR-Text gewechselt werden (ebenfalls
+   markierbar).
 3. **Rechts**: die **Themenliste** (nur die angelegten Themen + Anzahl). Klick auf
    ein Thema öffnet die **Zusammenfassung** als Overlay – alle Markierungen des
    Themas getrennt, je mit Quelle, PDF-Sprunglink und ggf. „🗂 Paperless"-Link.
 4. Im Dokumentkopf lässt sich ein **Hauptvertrag** zuordnen (Nachträge).
 
 ## Hinweise
-- Die **Seitenzuordnung** wird aus dem PDF berechnet (Paperless liefert keinen
-  seitenweisen Text). Bitte an deinen Dokumenten gegenprüfen.
+- Die **PDF-Ansicht** nutzt PDF.js, das beim Öffnen vom CDN (cdnjs) geladen wird –
+  der Browser braucht dafür Internet. Ohne Internet auf die **„Text"**-Ansicht
+  wechseln.
+- Beim Markieren in der **„Text"**-Ansicht wird die **Seitenzuordnung** aus dem PDF
+  berechnet (Paperless liefert keinen seitenweisen Text); im **PDF** ist die Seite
+  exakt bekannt.
 - In der Themen-Zusammenfassung gibt es pro Markierung Links:
   - **📄 … · S. n** – liefert das PDF über das Add-on aus (`…/api/pdf/{id}#page={n}`)
     und springt im Browser-PDF-Viewer auf die Seite. Braucht **keine** externe URL.

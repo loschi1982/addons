@@ -6,6 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Vertragsnavigator</title>
   <link rel="stylesheet" href="static/style.css" />
+  <!-- PDF.js (CDN) für die markierbare PDF-Ansicht -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <!--CONFIG-->
 </head>
 <body>
@@ -21,14 +23,14 @@
       <div id="baum" class="baum"></div>
     </section>
 
-    <!-- Spalte 2: Dokumentenansicht (OCR-Text markierbar, optional PDF daneben) -->
+    <!-- Spalte 2: Dokumentenansicht (PDF markierbar bzw. OCR-Text) -->
     <section id="spalte-doc" class="spalte">
       <div id="doc-kopf" class="doc-kopf">
         <div class="doc-kopf-zeile">
           <h2 id="doc-titel">Kein Dokument gewählt</h2>
           <div id="ansicht-umschalter" class="ansicht-umschalter" hidden>
-            <button type="button" id="btn-text" class="um-btn aktiv">Text</button>
-            <button type="button" id="btn-split" class="um-btn">Text + PDF</button>
+            <button type="button" id="btn-pdf" class="um-btn aktiv">PDF</button>
+            <button type="button" id="btn-text" class="um-btn">Text</button>
           </div>
         </div>
         <label id="parent-zeile" class="parent-zeile" hidden>
@@ -38,12 +40,14 @@
       </div>
 
       <div id="doc-ansicht" class="doc-ansicht">
-        <article id="doc-content" class="doc-content">
-          <p class="hinweis">Wähle links ein Dokument aus, um den OCR-Text anzuzeigen.</p>
-        </article>
+        <!-- PDF-Ansicht: gerendertes PDF mit markierbarer Textebene -->
         <div id="doc-pdf" class="doc-pdf" hidden>
-          <iframe id="pdf-frame" title="PDF-Ansicht"></iframe>
+          <div id="pdf-render" class="pdf-render"></div>
         </div>
+        <!-- Text-Ansicht: reiner OCR-Text (markierbar) -->
+        <article id="doc-content" class="doc-content">
+          <p class="hinweis">Wähle links ein Dokument aus.</p>
+        </article>
       </div>
     </section>
 

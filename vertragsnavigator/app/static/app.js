@@ -12,7 +12,9 @@ const state = {
   paperlessUrl: "",
   externalUrl: "", // vom Browser erreichbare Paperless-URL (Detailansicht-Link)
   linkSource: null, // Markierungs-ID im Verknüpfungsmodus
-  docModus: "text", // "text" | "split" (OCR-Text bzw. Text + PDF nebeneinander)
+  docModus: "pdf", // "pdf" (gerendertes PDF, markierbar) | "text" (reiner OCR-Text)
+  pdfDocId: null, // aktuell im PDF-Renderer angezeigtes Dokument
+  pdfSeiten: [], // [{ n, textDivs }] je gerenderter Seite (für Hervorhebungen)
   uebersicht: [], // zuletzt geladene Themen-Gruppen (für Liste + Overlay)
   overlayOffen: false,
   offenesThemaId: undefined, // thema_id des im Overlay gezeigten Themas (null = "Ohne Thema")
@@ -72,12 +74,25 @@ async function init() {
     }
   } catch (e) { /* /api/config sollte immer gehen */ }
 
-  // Kontextmenü auf der Dokumentenansicht
+  // Kontextmenü auf Text- bzw. PDF-Ansicht
   document.getElementById("doc-content").addEventListener("contextmenu", aufContextMenu);
+  document.getElementById("pdf-render").addEventListener("contextmenu", aufContextMenuPdf);
 
-  // Umschalter Text / Text + PDF
+  // Klick auf hervorgehobene PDF-Stelle = Ziel im Verknüpfungsmodus
+  document.getElementById("pdf-render").addEventListener("click", (ev) => {
+    const el = ev.target.closest(".markiert");
+    if (el && el.dataset.markId) klickAufMarkierung(parseInt(el.dataset.markId, 10));
+  });
+
+  // PDF.js-Worker (vom selben CDN)
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  }
+
+  // Umschalter PDF / Text
+  document.getElementById("btn-pdf").addEventListener("click", () => setzeDocModus("pdf"));
   document.getElementById("btn-text").addEventListener("click", () => setzeDocModus("text"));
-  document.getElementById("btn-split").addEventListener("click", () => setzeDocModus("split"));
 
   // Themen-Overlay schließen (X, Klick auf Backdrop, ESC)
   document.getElementById("overlay-close").addEventListener("click", schliesseOverlay);
@@ -173,7 +188,7 @@ async function oeffneDokument(id) {
     rendereParentAuswahl(dok);
     markiereAktivenBaum(id);
     document.getElementById("ansicht-umschalter").hidden = false;
-    aktualisierePdf(); // lädt das PDF, falls der Split-Modus aktiv ist
+    setzeDocModus(state.docModus); // Ansicht anwenden + PDF rendern/hervorheben
     setStatus("");
   } catch (e) {
     setStatus("Dokument-Fehler: " + e.message, true);
@@ -257,33 +272,135 @@ function rendereParentAuswahl(dok) {
   zeile.hidden = false;
 }
 
-// --- Ansichts-Modus: Text bzw. Text + PDF --------------------------------
+// --- Ansichts-Modus: PDF (markierbar) bzw. Text (OCR) --------------------
 
 function setzeDocModus(modus) {
   state.docModus = modus;
-  const ansicht = document.getElementById("doc-ansicht");
-  const pdf = document.getElementById("doc-pdf");
+  document.getElementById("btn-pdf").classList.toggle("aktiv", modus === "pdf");
   document.getElementById("btn-text").classList.toggle("aktiv", modus === "text");
-  document.getElementById("btn-split").classList.toggle("aktiv", modus === "split");
+  document.getElementById("doc-pdf").hidden = modus !== "pdf";
+  document.getElementById("doc-content").hidden = modus !== "text";
+  if (modus === "pdf") aktualisierePdf();
+}
 
-  if (modus === "split") {
-    ansicht.classList.add("split");
-    pdf.hidden = false;
-    aktualisierePdf();
+// Rendert das PDF (bei neuem Dokument) oder aktualisiert nur die Hervorhebungen.
+function aktualisierePdf() {
+  if (state.docModus !== "pdf" || !state.aktuellesDok) return;
+  if (state.pdfDocId === state.aktuellesDok.id) {
+    aktualisierePdfHighlights(state.aktuellesDok.markierungen || []);
   } else {
-    ansicht.classList.remove("split");
-    pdf.hidden = true;
+    renderePdf(state.aktuellesDok);
   }
 }
 
-function aktualisierePdf() {
-  if (state.docModus !== "split" || !state.aktuellesDok) return;
-  const frame = document.getElementById("pdf-frame");
-  const id = String(state.aktuellesDok.id);
-  // Nur neu laden, wenn ein anderes Dokument als bisher angezeigt wird.
-  if (frame.dataset.docId !== id) {
-    frame.src = API + "/api/pdf/" + state.aktuellesDok.id;
-    frame.dataset.docId = id;
+let pdfRenderToken = 0;
+
+async function renderePdf(dok) {
+  const ziel = document.getElementById("pdf-render");
+  const token = ++pdfRenderToken;
+  state.pdfDocId = null;
+  state.pdfSeiten = [];
+
+  if (!window.pdfjsLib) {
+    ziel.innerHTML = '<p class="hinweis">PDF-Bibliothek nicht geladen (Internet/CDN erreichbar?).</p>';
+    return;
+  }
+
+  ziel.innerHTML = '<p class="hinweis">PDF wird geladen …</p>';
+  try {
+    const pdf = await pdfjsLib.getDocument({
+      url: API + "/api/pdf/" + dok.id,
+      withCredentials: true,
+    }).promise;
+    if (token !== pdfRenderToken) return; // zwischenzeitlich anderes Dokument geöffnet
+
+    ziel.innerHTML = "";
+    const breite = (ziel.clientWidth || 800) - 4;
+
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const page = await pdf.getPage(n);
+      if (token !== pdfRenderToken) return;
+
+      const basis = page.getViewport({ scale: 1 });
+      const scale = Math.max(0.2, breite / basis.width);
+      const viewport = page.getViewport({ scale });
+
+      const seiteDiv = document.createElement("div");
+      seiteDiv.className = "pdf-seite";
+      seiteDiv.dataset.seite = n;
+      seiteDiv.style.width = viewport.width + "px";
+      seiteDiv.style.height = viewport.height + "px";
+
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      seiteDiv.appendChild(canvas);
+
+      const textLayerDiv = document.createElement("div");
+      textLayerDiv.className = "textLayer";
+      seiteDiv.appendChild(textLayerDiv);
+
+      ziel.appendChild(seiteDiv);
+
+      await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+      const textContent = await page.getTextContent();
+      const textDivs = [];
+      // pdf.js 3.x: Parameter heißt textContentSource (nicht textContent).
+      await pdfjsLib.renderTextLayer({
+        textContentSource: textContent,
+        container: textLayerDiv,
+        viewport: viewport,
+        textDivs: textDivs,
+      }).promise;
+
+      state.pdfSeiten.push({ n: n, textDivs: textDivs });
+    }
+
+    state.pdfDocId = dok.id;
+    aktualisierePdfHighlights(dok.markierungen || []);
+  } catch (e) {
+    ziel.innerHTML =
+      '<p class="hinweis">PDF konnte nicht geladen werden: ' + escapeHtml(e.message) + "</p>";
+    state.pdfDocId = null;
+  }
+}
+
+// Hebt gespeicherte Markierungen in der PDF-Textebene hervor.
+function aktualisierePdfHighlights(markierungen) {
+  for (const seite of state.pdfSeiten) {
+    for (const d of seite.textDivs) {
+      d.classList.remove("markiert");
+      delete d.dataset.markId;
+    }
+    const marken = markierungen.filter((m) => m.seite === seite.n);
+    if (marken.length) hebeHervorDivs(seite.textDivs, marken);
+  }
+}
+
+// Sucht den Textauszug (whitespace-tolerant) in der Textebene und markiert die
+// betroffenen Spans.
+function hebeHervorDivs(textDivs, marken) {
+  let compact = "";
+  const charDiv = [];
+  for (const div of textDivs) {
+    const t = div.textContent || "";
+    for (const ch of t) {
+      if (/\s/.test(ch)) continue;
+      compact += ch.toLowerCase();
+      charDiv.push(div);
+    }
+  }
+  for (const m of marken) {
+    const needle = (m.textauszug || "").replace(/\s+/g, "").toLowerCase();
+    if (!needle) continue;
+    const idx = compact.indexOf(needle);
+    if (idx < 0) continue;
+    const divs = new Set();
+    for (let i = idx; i < idx + needle.length && i < charDiv.length; i++) divs.add(charDiv[i]);
+    divs.forEach((d) => {
+      d.classList.add("markiert");
+      d.dataset.markId = m.id;
+    });
   }
 }
 
@@ -309,10 +426,25 @@ function aufContextMenu(ev) {
   const range = sel.getRangeAt(0);
   const cont = document.getElementById("doc-content");
   const offset = globalerOffset(cont, range.startContainer, range.startOffset);
-  zeigeCtxMenu(ev.clientX, ev.clientY, text.trim(), offset);
+  zeigeCtxMenu(ev.clientX, ev.clientY, { text: text.trim(), offset: offset });
 }
 
-function zeigeCtxMenu(x, y, text, offset) {
+// Kontextmenü beim Markieren direkt im gerenderten PDF.
+function aufContextMenuPdf(ev) {
+  const sel = window.getSelection();
+  const text = sel && sel.toString();
+  if (!text || !text.trim()) return;
+  if (!state.aktuellesDok) return;
+  // Seite aus dem umgebenden .pdf-seite-Container ableiten (exakte Seitenzahl).
+  let node = sel.anchorNode;
+  let el = node && (node.nodeType === 1 ? node : node.parentElement);
+  el = el && el.closest(".pdf-seite");
+  const seite = el ? parseInt(el.dataset.seite, 10) : undefined;
+  ev.preventDefault();
+  zeigeCtxMenu(ev.clientX, ev.clientY, { text: text.trim(), seite: seite });
+}
+
+function zeigeCtxMenu(x, y, kontext) {
   const menu = document.getElementById("ctxmenu");
   menu.innerHTML = "";
 
@@ -341,7 +473,7 @@ function zeigeCtxMenu(x, y, text, offset) {
 
   ueberschrift("Zu Thema hinzufügen");
   for (const th of state.themen) {
-    add(th.name, "thema-item", () => markierungSpeichern(text, offset, th.id, null));
+    add(th.name, "thema-item", () => markierungSpeichern(kontext, th.id, null));
   }
   add("+ Neues Thema …", "thema-item", async () => {
     const name = prompt("Name des neuen Themas:");
@@ -350,18 +482,18 @@ function zeigeCtxMenu(x, y, text, offset) {
       const th = await api("POST", "/api/themen", { name: name.trim() });
       state.themen.push(th);
       state.themen.sort((a, b) => a.name.localeCompare(b.name));
-      await markierungSpeichern(text, offset, th.id, null);
+      await markierungSpeichern(kontext, th.id, null);
     } catch (e) {
       alert("Fehler: " + e.message);
     }
   });
 
   trenner();
-  add("Verknüpfen mit …", null, () => starteVerknuepfung(text, offset));
+  add("Verknüpfen mit …", null, () => starteVerknuepfung(kontext));
   add("Notiz hinzufügen", null, async () => {
     const n = prompt("Notiz zur Markierung:");
     if (n === null) return;
-    await markierungSpeichern(text, offset, null, n);
+    await markierungSpeichern(kontext, null, n);
   });
 
   menu.style.left = Math.min(x, window.innerWidth - 220) + "px";
@@ -373,16 +505,17 @@ function verbergeCtxMenu() {
   document.getElementById("ctxmenu").hidden = true;
 }
 
-async function markierungSpeichern(text, offset, themaId, notiz) {
+async function markierungSpeichern(kontext, themaId, notiz) {
   if (!state.aktuellesDok) return null;
   try {
     setStatus("Speichere Markierung …");
     const m = await api("POST", "/api/markierungen", {
       dokument_id: state.aktuellesDok.id,
       thema_id: themaId,
-      textauszug: text,
+      textauszug: kontext.text,
       notiz: notiz,
-      offset: offset,
+      seite: kontext.seite, // bei PDF-Markierung exakt bekannt
+      offset: kontext.offset, // bei Text-Markierung für die Seiten-Heuristik
     });
     setStatus("Markierung auf Seite " + m.seite + " gespeichert.");
     await oeffneDokument(state.aktuellesDok.id);
@@ -398,9 +531,9 @@ async function markierungSpeichern(text, offset, themaId, notiz) {
 
 // --- Verknüpfungen --------------------------------------------------------
 
-async function starteVerknuepfung(text, offset) {
+async function starteVerknuepfung(kontext) {
   // Aktuelle Auswahl als Markierung (ohne Thema) sichern, dann Ziel wählen.
-  const m = await markierungSpeichern(text, offset, null, null);
+  const m = await markierungSpeichern(kontext, null, null);
   if (!m) return;
   state.linkSource = m.id;
   zeigeBanner("Verknüpfung: Klicke auf eine hervorgehobene Stelle als Ziel.", () => {
