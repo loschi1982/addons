@@ -82,6 +82,8 @@ docker build -t vertragsnavigator .
 - [x] UI v0.3.0: PDF-Ansicht via PDF.js (CDN) mit markierbarer Textebene —
       Markieren direkt im PDF (exakte Seite), bestehende Marken im PDF hervorgehoben;
       Umschalter PDF/Text (reiner Frontend-Umbau)
+- [x] v0.4.0: Notiz/Post-It je Markierung in der Zusammenfassung anlegen/bearbeiten
+      (`PATCH /api/markierungen/{id}` + `MarkierungUpdate`)
 - [ ] Phase 4 (optional, später): Ähnlichkeitsvorschläge für Abhängigkeiten
 - [ ] **Offen**: Seitenzuordnung + Paperless-API-Version an echter Instanz
       verifizieren (Tests laufen bisher nur gegen synthetische PDFs/Mocks).

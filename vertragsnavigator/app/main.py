@@ -304,6 +304,19 @@ def markierung_anlegen(
     return ergebnis
 
 
+@app.patch("/api/markierungen/{markierung_id}", response_model=models.Markierung)
+def markierung_aktualisieren(markierung_id: int, payload: models.MarkierungUpdate):
+    """Setzt/ändert die Notiz (Post-It) einer bestehenden Markierung."""
+    with db.verbindung() as conn:
+        if conn.execute("SELECT 1 FROM markierungen WHERE id=?", (markierung_id,)).fetchone() is None:
+            raise HTTPException(404, "Markierung nicht gefunden")
+        conn.execute(
+            "UPDATE markierungen SET notiz=? WHERE id=?", (payload.notiz, markierung_id)
+        )
+        row = conn.execute("SELECT * FROM markierungen WHERE id=?", (markierung_id,)).fetchone()
+    return _markierung_dict(row)
+
+
 @app.delete("/api/markierungen/{markierung_id}")
 def markierung_loeschen(
     markierung_id: int,

@@ -31,6 +31,7 @@ Nach dem Speichern das Add-on **starten** und über die **Seitenleiste** öffnen
 3. **Rechts**: die **Themenliste** (nur die angelegten Themen + Anzahl). Klick auf
    ein Thema öffnet die **Zusammenfassung** als Overlay – alle Markierungen des
    Themas getrennt, je mit Quelle, PDF-Sprunglink und ggf. „🗂 Paperless"-Link.
+   Pro Markierung kann dort eine **Notiz (Post-It)** angelegt/bearbeitet werden.
 4. Im Dokumentkopf lässt sich ein **Hauptvertrag** zuordnen (Nachträge).
 
 ## Hinweise

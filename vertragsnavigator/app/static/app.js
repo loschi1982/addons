@@ -684,7 +684,6 @@ function baueKarte(m, alle) {
   let inner = '<button class="loeschen" title="Markierung löschen" data-id="' + m.id + '">✕</button>';
   inner += '<div class="quelle">' + quelle + "</div>";
   inner += '<blockquote class="auszug">' + escapeHtml(m.textauszug) + "</blockquote>";
-  if (m.notiz) inner += '<div class="notiz">📝 ' + escapeHtml(m.notiz) + "</div>";
   if (m.verknuepft_mit && m.verknuepft_mit.length) {
     const ziele = m.verknuepft_mit
       .map((id) => {
@@ -695,6 +694,12 @@ function baueKarte(m, alle) {
     inner += '<div class="verkn">🔗 ' + ziele + "</div>";
   }
   karte.innerHTML = inner;
+
+  // Post-It / Notiz: anlegen und bearbeiten
+  const notizWrap = document.createElement("div");
+  notizWrap.className = "notiz-bereich";
+  renderNotizBereich(notizWrap, m);
+  karte.appendChild(notizWrap);
 
   karte.querySelector(".loeschen").addEventListener("click", async (ev) => {
     ev.stopPropagation();
@@ -710,4 +715,59 @@ function baueKarte(m, alle) {
   });
 
   return karte;
+}
+
+// Zeigt die Notiz als Post-It (klickbar zum Bearbeiten) bzw. einen Button zum Anlegen.
+function renderNotizBereich(wrap, m) {
+  wrap.innerHTML = "";
+  if (m.notiz) {
+    const pit = document.createElement("div");
+    pit.className = "postit";
+    pit.textContent = m.notiz;
+    pit.title = "Notiz bearbeiten";
+    pit.addEventListener("click", () => oeffneNotizEditor(wrap, m));
+    wrap.appendChild(pit);
+  } else {
+    const btn = document.createElement("button");
+    btn.className = "notiz-btn";
+    btn.textContent = "📝 Notiz hinzufügen";
+    btn.addEventListener("click", () => oeffneNotizEditor(wrap, m));
+    wrap.appendChild(btn);
+  }
+}
+
+function oeffneNotizEditor(wrap, m) {
+  wrap.innerHTML = "";
+  const ta = document.createElement("textarea");
+  ta.className = "notiz-edit";
+  ta.rows = 3;
+  ta.value = m.notiz || "";
+  wrap.appendChild(ta);
+
+  const leiste = document.createElement("div");
+  leiste.className = "notiz-aktionen";
+
+  const speichern = document.createElement("button");
+  speichern.className = "btn-speichern";
+  speichern.textContent = "Speichern";
+  speichern.addEventListener("click", async () => {
+    const text = ta.value.trim();
+    try {
+      await api("PATCH", "/api/markierungen/" + m.id, { notiz: text || null });
+      m.notiz = text || null; // lokalen Stand aktualisieren
+      await ladeUebersicht(); // Overlay + Liste neu aufbauen
+    } catch (e) {
+      alert("Fehler: " + e.message);
+    }
+  });
+
+  const abbrechen = document.createElement("button");
+  abbrechen.className = "btn-abbrechen";
+  abbrechen.textContent = "Abbrechen";
+  abbrechen.addEventListener("click", () => renderNotizBereich(wrap, m));
+
+  leiste.appendChild(speichern);
+  leiste.appendChild(abbrechen);
+  wrap.appendChild(leiste);
+  ta.focus();
 }

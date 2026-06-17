@@ -218,6 +218,45 @@ html, body {
 .karte a.paperless-link:hover { text-decoration: underline; color: var(--akzent); }
 .karte .loeschen { position: absolute; top: 0.4rem; right: 0.5rem; cursor: pointer; color: #b00; border: none; background: none; font-size: 0.85rem; }
 
+/* Notiz / Post-It in der Zusammenfassung */
+.karte .notiz-bereich { margin-top: 0.5rem; }
+.postit {
+  background: #fff7c0;
+  border: 1px solid #e6d97a;
+  border-radius: 3px;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+.notiz-btn {
+  font: inherit;
+  font-size: 0.78rem;
+  border: 1px dashed var(--rand);
+  background: #fff;
+  color: var(--grau);
+  border-radius: 4px;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+}
+.notiz-btn:hover { color: var(--akzent); border-color: var(--akzent); }
+.notiz-edit {
+  width: 100%;
+  font: inherit;
+  font-size: 0.85rem;
+  box-sizing: border-box;
+  padding: 0.4rem;
+  border: 1px solid var(--rand);
+  border-radius: 4px;
+  resize: vertical;
+}
+.notiz-aktionen { margin-top: 0.3rem; display: flex; gap: 0.4rem; }
+.notiz-aktionen button { font: inherit; font-size: 0.78rem; border: none; border-radius: 4px; padding: 0.25rem 0.7rem; cursor: pointer; }
+.btn-speichern { background: var(--akzent); color: #fff; }
+.btn-abbrechen { background: #eee; color: var(--text); }
+
 /* Kontextmenü */
 .ctxmenu {
   position: fixed;

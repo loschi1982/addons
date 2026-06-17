@@ -47,6 +47,11 @@ class MarkierungCreate(BaseModel):
     offset: Optional[int] = None
 
 
+class MarkierungUpdate(BaseModel):
+    # Notiz an einer bestehenden Markierung setzen/ändern (Post-It). None löscht sie.
+    notiz: Optional[str] = None
+
+
 class Markierung(BaseModel):
     id: int
     dokument_id: int

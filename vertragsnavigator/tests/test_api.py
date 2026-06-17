@@ -132,6 +132,28 @@ def test_seitenzuordnung_ueber_pdf_wenn_seite_fehlt(client, monkeypatch):
     assert r.json()["seite"] == 2
 
 
+def test_notiz_aktualisieren(client):
+    m = client.post(
+        "/api/markierungen",
+        json={"dokument_id": 1, "textauszug": "Haftung ist begrenzt", "seite": 1},
+    ).json()
+
+    r = client.patch("/api/markierungen/" + str(m["id"]), json={"notiz": "Wichtig!"})
+    assert r.status_code == 200
+    assert r.json()["notiz"] == "Wichtig!"
+
+    gruppen = client.get("/api/uebersicht").json()
+    alle = {mk["id"]: mk for g in gruppen for mk in g["markierungen"]}
+    assert alle[m["id"]]["notiz"] == "Wichtig!"
+
+    # Leeren der Notiz
+    r = client.patch("/api/markierungen/" + str(m["id"]), json={"notiz": None})
+    assert r.json()["notiz"] is None
+
+    # Unbekannte Markierung -> 404
+    assert client.patch("/api/markierungen/99999", json={"notiz": "x"}).status_code == 404
+
+
 def test_hauptvertrag_hierarchie(client):
     # Beide Dokumente lokal bekannt machen
     client.get("/api/docs")
