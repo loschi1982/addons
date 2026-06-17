@@ -10,6 +10,7 @@ const state = {
   alleDocs: [],
   aktuellesDok: null,
   paperlessUrl: "",
+  sprungUrl: "", // vom Browser erreichbare Paperless-URL für Sprungmarken
   linkSource: null, // Markierungs-ID im Verknüpfungsmodus
 };
 
@@ -65,6 +66,7 @@ async function init() {
   try {
     const cfg = await api("GET", "/api/config");
     state.paperlessUrl = cfg.paperless_url || "";
+    state.sprungUrl = cfg.sprung_url || cfg.paperless_url || "";
     if (!cfg.konfiguriert) {
       setStatus("Paperless nicht konfiguriert – bitte Add-on-Optionen prüfen.", true);
     }
@@ -442,8 +444,8 @@ function rendereUebersicht(gruppen) {
       const e = document.createElement("div");
       e.className = "eintrag";
 
-      const sprung = state.paperlessUrl
-        ? state.paperlessUrl + "/documents/" + m.dokument_id + "/preview/#page=" + m.seite
+      const sprung = state.sprungUrl
+        ? state.sprungUrl + "/api/documents/" + m.dokument_id + "/preview/#page=" + m.seite
         : null;
       const quelle = sprung
         ? '<a class="sprung" href="' + sprung + '" target="_blank" rel="noopener">📄 ' +

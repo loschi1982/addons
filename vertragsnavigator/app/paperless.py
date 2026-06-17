@@ -107,12 +107,14 @@ class PaperlessClient:
         """Loescht eine einzelne Notiz."""
         self._request("DELETE", f"/api/documents/{doc_id}/notes/{note_id}/")
 
-    def set_navigator_hint(self, doc_id: int, seiten: List[int]) -> None:
+    def set_navigator_hint(self, doc_id: int, zusammenfassung: Optional[str]) -> None:
         """Ersetzt den Vertragsnavigator-Hinweis im Notizfeld.
 
-        Bestehende ``Vertragsnavigator:``-Notizen werden geloescht, danach wird
-        (sofern Seiten vorhanden) eine neue, menschenlesbare Notiz gepostet.
-        Fremde Notizen bleiben unberuehrt.
+        ``zusammenfassung`` ist der Themen-/Seiten-Text, z. B.
+        ``"Haftung (S. 4, 7), Laufzeit (S. 12)"``. Bestehende
+        ``Vertragsnavigator:``-Notizen werden geloescht, danach wird (sofern
+        eine Zusammenfassung vorliegt) eine neue, menschenlesbare Notiz
+        gepostet. Fremde Notizen bleiben unberuehrt.
         """
         for note in self.get_notes(doc_id):
             text = (note.get("note") or "").lstrip()
@@ -121,11 +123,8 @@ class PaperlessClient:
                 if note_id is not None:
                     self.delete_note(doc_id, note_id)
 
-        if seiten:
-            geordnet = sorted(set(seiten))
-            wort = "Seite" if len(geordnet) == 1 else "Seiten"
-            liste = ", ".join(str(s) for s in geordnet)
+        if zusammenfassung:
             self.add_note(
                 doc_id,
-                f"{HINWEIS_PREFIX} {wort} {liste} in Themenuebersicht erfasst.",
+                f"{HINWEIS_PREFIX} {zusammenfassung} in Themenübersicht erfasst.",
             )

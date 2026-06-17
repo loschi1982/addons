@@ -27,8 +27,8 @@ class FakeClient:
     def download_pdf(self, doc_id, original=False):
         return b""
 
-    def set_navigator_hint(self, doc_id, seiten):
-        self.hinweise.append((doc_id, list(seiten)))
+    def set_navigator_hint(self, doc_id, zusammenfassung):
+        self.hinweise.append((doc_id, zusammenfassung))
 
 
 @pytest.fixture
@@ -53,7 +53,10 @@ def client(tmp_path, monkeypatch):
 def test_config(client):
     r = client.get("/api/config")
     assert r.status_code == 200
-    assert r.json()["konfiguriert"] is True
+    body = r.json()
+    assert body["konfiguriert"] is True
+    # Ohne separate externe URL faellt sprung_url auf die API-URL zurueck.
+    assert body["sprung_url"] == "http://paperless.local"
 
 
 def test_vertragsbaum_und_detail(client):
@@ -95,8 +98,8 @@ def test_markierung_workflow(client):
     docs = {d["id"]: d for d in client.get("/api/docs").json()}
     assert docs[1]["anzahl_markierungen"] == 1
 
-    # Hinweis wurde nach Paperless gespiegelt
-    assert client.fake.hinweise[-1] == (1, [2])
+    # Hinweis wurde nach Paperless gespiegelt (inkl. Themenname)
+    assert client.fake.hinweise[-1] == (1, "Haftung (S. 2)")
 
     # Uebersicht enthaelt das Thema mit der Markierung
     gruppen = client.get("/api/uebersicht").json()

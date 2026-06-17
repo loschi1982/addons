@@ -79,15 +79,36 @@ def _seiten_text(client: PaperlessClient, doc_id: int) -> List[str]:
 
 
 def _aktualisiere_hinweis(client: PaperlessClient, dokument_id: int) -> None:
-    """Spiegelt die erfassten Seiten als Notiz nach Paperless (best effort)."""
+    """Spiegelt die erfassten Themen/Seiten als Notiz nach Paperless (best effort).
+
+    Beispiel-Notiz: "Vertragsnavigator: Haftung (S. 4, 7), Laufzeit (S. 12),
+    ohne Thema (S. 5) in Themenübersicht erfasst."
+    """
     with db.verbindung() as conn:
         rows = conn.execute(
-            "SELECT DISTINCT seite FROM markierungen WHERE dokument_id=? ORDER BY seite",
+            "SELECT m.seite AS seite, t.name AS thema "
+            "FROM markierungen m LEFT JOIN themen t ON t.id = m.thema_id "
+            "WHERE m.dokument_id=? ORDER BY m.seite",
             (dokument_id,),
         ).fetchall()
-    seiten = [r["seite"] for r in rows]
+
+    gruppen: Dict[str, set] = {}
+    for r in rows:
+        name = r["thema"] or "ohne Thema"
+        gruppen.setdefault(name, set()).add(r["seite"])
+
+    # Themen alphabetisch, "ohne Thema" zuletzt
+    def _key(name: str):
+        return (name == "ohne Thema", name.lower())
+
+    teile = []
+    for name in sorted(gruppen, key=_key):
+        seiten = ", ".join(str(s) for s in sorted(gruppen[name]))
+        teile.append(f"{name} (S. {seiten})")
+    zusammenfassung = ", ".join(teile)
+
     try:
-        client.set_navigator_hint(dokument_id, seiten)
+        client.set_navigator_hint(dokument_id, zusammenfassung)
     except PaperlessError:
         # Der Notiz-Spiegel darf die Hauptoperation nie blockieren.
         pass
@@ -118,6 +139,8 @@ def app_config():
     settings = get_settings()
     return {
         "paperless_url": settings.paperless_url,
+        # Basis fuer Sprungmarken im Browser: externe URL, sonst interne URL.
+        "sprung_url": settings.paperless_external_url or settings.paperless_url,
         "konfiguriert": bool(settings.paperless_url and settings.paperless_token),
     }
 

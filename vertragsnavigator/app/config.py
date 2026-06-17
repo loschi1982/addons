@@ -16,8 +16,9 @@ from dataclasses import dataclass
 class Settings:
     """Laufzeit-Einstellungen."""
 
-    paperless_url: str
+    paperless_url: str            # interne API-URL (App -> Paperless)
     paperless_token: str
+    paperless_external_url: str   # vom Browser erreichbare URL (Sprungmarken)
     db_path: str
 
 
@@ -30,5 +31,6 @@ def get_settings() -> Settings:
     return Settings(
         paperless_url=os.environ.get("PAPERLESS_URL", "").rstrip("/"),
         paperless_token=os.environ.get("PAPERLESS_TOKEN", ""),
+        paperless_external_url=os.environ.get("PAPERLESS_EXTERNAL_URL", "").rstrip("/"),
         db_path=os.environ.get("VN_DB_PATH", "/data/vertragsnavigator.db"),
     )

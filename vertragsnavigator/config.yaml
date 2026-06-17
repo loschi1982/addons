@@ -1,5 +1,5 @@
 name: Vertragsnavigator
-version: "0.1.0"
+version: "0.1.1"
 slug: vertragsnavigator
 description: Verträge aus Paperless-ngx thematisch erschließen und navigieren
 url: https://github.com/loschi1982/addons
@@ -16,6 +16,8 @@ panel_title: Vertragsnavigator
 options:
   paperless_url: ""
   paperless_token: ""
+  paperless_external_url: ""
 schema:
   paperless_url: str
   paperless_token: password
+  paperless_external_url: str?

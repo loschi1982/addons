@@ -21,36 +21,31 @@ def _client_mit_notes(notes):
 def test_ersetzt_eigene_note_und_laesst_fremde_unberuehrt():
     notes = [
         {"id": 1, "note": "Wichtige fremde Notiz vom Nutzer"},
-        {"id": 2, "note": "Vertragsnavigator: Seiten 1, 2 in Themenuebersicht erfasst."},
+        {"id": 2, "note": "Vertragsnavigator: alter Stand in Themenübersicht erfasst."},
     ]
     client, geloescht, hinzugefuegt = _client_mit_notes(notes)
 
-    client.set_navigator_hint(5, [3, 1, 7, 1])
+    client.set_navigator_hint(5, "Haftung (S. 1, 2)")
 
     assert geloescht == [2]  # nur die eigene Note geloescht
     assert len(hinzugefuegt) == 1
     assert hinzugefuegt[0].startswith(HINWEIS_PREFIX)
-    assert "1, 3, 7" in hinzugefuegt[0]  # sortiert + dedupliziert
+    assert "Haftung (S. 1, 2)" in hinzugefuegt[0]
+    assert hinzugefuegt[0].endswith("in Themenübersicht erfasst.")
 
 
-def test_ohne_seiten_wird_nur_geloescht():
-    notes = [{"id": 9, "note": "Vertragsnavigator: Seite 4 in Themenuebersicht erfasst."}]
+def test_ohne_zusammenfassung_wird_nur_geloescht():
+    notes = [{"id": 9, "note": "Vertragsnavigator: Laufzeit (S. 4) in Themenübersicht erfasst."}]
     client, geloescht, hinzugefuegt = _client_mit_notes(notes)
 
-    client.set_navigator_hint(1, [])
+    client.set_navigator_hint(1, "")
 
     assert geloescht == [9]
     assert hinzugefuegt == []
 
 
-def test_singular_bei_einer_seite():
+def test_themenname_im_hinweis():
     client, _, hinzugefuegt = _client_mit_notes([])
-    client.set_navigator_hint(1, [4])
-    assert "Seite 4" in hinzugefuegt[0]
-    assert "Seiten" not in hinzugefuegt[0]
-
-
-def test_plural_bei_mehreren_seiten():
-    client, _, hinzugefuegt = _client_mit_notes([])
-    client.set_navigator_hint(1, [4, 7])
-    assert "Seiten 4, 7" in hinzugefuegt[0]
+    client.set_navigator_hint(1, "Haftung (S. 4, 7), Laufzeit (S. 12)")
+    assert "Haftung (S. 4, 7)" in hinzugefuegt[0]
+    assert "Laufzeit (S. 12)" in hinzugefuegt[0]

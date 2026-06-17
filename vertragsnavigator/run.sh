@@ -18,11 +18,14 @@ PY
 
 PAPERLESS_URL="$(leseoption paperless_url)"
 PAPERLESS_TOKEN="$(leseoption paperless_token)"
+PAPERLESS_EXTERNAL_URL="$(leseoption paperless_external_url)"
 export PAPERLESS_URL
 export PAPERLESS_TOKEN
+export PAPERLESS_EXTERNAL_URL
 export VN_DB_PATH="/data/vertragsnavigator.db"
 
 echo "[Vertragsnavigator] Paperless-URL: ${PAPERLESS_URL:-<nicht gesetzt>}"
+echo "[Vertragsnavigator] Paperless-URL (extern): ${PAPERLESS_EXTERNAL_URL:-<nicht gesetzt>}"
 echo "[Vertragsnavigator] Datenbank: ${VN_DB_PATH}"
 
 cd /app

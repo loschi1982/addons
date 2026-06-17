@@ -8,10 +8,11 @@ Original-PDF.
 - Ein **API-Token** (Paperless: *Einstellungen → API-Token*).
 
 ## Konfiguration
-| Option            | Pflicht | Beschreibung                                    |
-|-------------------|---------|-------------------------------------------------|
-| `paperless_url`   | ja      | Basis-URL, z. B. `http://homeassistant.local:8000` (ohne Slash am Ende) |
-| `paperless_token` | ja      | API-Token für die Token-Authentifizierung       |
+| Option                   | Pflicht | Beschreibung                                                                 |
+|--------------------------|---------|-----------------------------------------------------------------------------|
+| `paperless_url`          | ja      | Interne API-URL (App → Paperless), z. B. `http://ca5234a0-paperless-ngx:8000` (Add-on-Hostname, ohne Slash am Ende) |
+| `paperless_token`        | ja      | API-Token für die Token-Authentifizierung                                   |
+| `paperless_external_url` | nein    | Vom **Browser** erreichbare Paperless-URL für die Sprungmarken, z. B. die Ingress-/Domain-URL `https://homeassistant.elphi.musik/ca5234a0_paperless-ngx`. Leer = wie `paperless_url`. |
 
 Nach dem Speichern das Add-on **starten** und über die **Seitenleiste** öffnen.
 
@@ -29,6 +30,10 @@ Nach dem Speichern das Add-on **starten** und über die **Seitenleiste** öffnen
 ## Hinweise
 - Die **Seitenzuordnung** wird aus dem PDF berechnet (Paperless liefert keinen
   seitenweisen Text). Bitte an deinen Dokumenten gegenprüfen.
+- Die **Sprungmarke** öffnet `…/api/documents/{id}/preview/#page={n}`. Damit der
+  Link im Browser funktioniert, sollte `paperless_external_url` auf die von außen
+  erreichbare Paperless-URL zeigen (die interne `…:8000`-Adresse ist vom PC nicht
+  auflösbar).
 - Im Paperless-Notizfeld erscheint ein Hinweis wie
   `Vertragsnavigator: Seiten 4, 7, 12 in Themenuebersicht erfasst.` – andere
   Notizen bleiben unberührt.

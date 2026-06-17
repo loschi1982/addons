@@ -30,10 +30,11 @@ Strukturebene darüber.
 4. Add-on starten und über die HA-Seitenleiste öffnen (Ingress).
 
 ## Konfiguration
-| Option            | Beschreibung                          |
-|-------------------|---------------------------------------|
-| `paperless_url`   | Basis-URL der Paperless-ngx-Instanz   |
-| `paperless_token` | Token-Auth (`Authorization: Token …`) |
+| Option                   | Beschreibung                                                            |
+|--------------------------|------------------------------------------------------------------------|
+| `paperless_url`          | Interne API-URL (App → Paperless), z. B. `http://<addon-slug>:8000`     |
+| `paperless_token`        | Token-Auth (`Authorization: Token …`)                                  |
+| `paperless_external_url` | Optional: vom Browser erreichbare URL für Sprungmarken (Ingress/Domain) |
 
 ## Daten & Backup
 Alle App-Daten liegen in der SQLite-Datei `/data/vertragsnavigator.db` innerhalb
