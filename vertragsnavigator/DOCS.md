@@ -42,10 +42,10 @@ Nach dem Speichern das Add-on **starten** und über die **Seitenleiste** öffnen
   berechnet (Paperless liefert keinen seitenweisen Text); im **PDF** ist die Seite
   exakt bekannt.
 - In der Themen-Zusammenfassung gibt es pro Markierung Links:
-  - **📄 … · S. n** – liefert das PDF über das Add-on aus (`…/api/pdf/{id}#page={n}`)
-    und springt im Browser-PDF-Viewer auf die Seite. Braucht **keine** externe URL.
-  - **🗂 Paperless** – öffnet die Paperless-Detailansicht (mit Notizen/Metadaten),
-    ohne Seitensprung. Nur sichtbar, wenn `paperless_external_url` gesetzt ist.
+  - **📄 … · S. n** – öffnet das Dokument **im Add-on** (mittlere PDF-Ansicht) und
+    scrollt zur Markierung bzw. Seite. Kein neues Fenster, keine externe URL nötig.
+  - **🗂 Paperless** – öffnet die Paperless-Detailansicht (mit Notizen/Metadaten)
+    in einem neuen Tab. Nur sichtbar, wenn `paperless_external_url` gesetzt ist.
 - Im Paperless-Notizfeld erscheint ein Hinweis wie
   `Vertragsnavigator: Seiten 4, 7, 12 in Themenuebersicht erfasst.` – andere
   Notizen bleiben unberührt.

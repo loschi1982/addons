@@ -407,6 +407,40 @@ function hebeHervorDivs(textDivs, marken) {
   }
 }
 
+// Aus der Themen-Zusammenfassung in die PDF-Ansicht springen (kein neues Fenster).
+async function springeZuMarkierung(dokumentId, seite, markId) {
+  schliesseOverlay();
+  state.docModus = "pdf"; // sicherstellen, dass die PDF-Ansicht aktiv ist
+  await oeffneDokument(dokumentId); // lädt + rendert das PDF (asynchron)
+  scrolleZu(seite, markId);
+}
+
+// Scrollt zur Markierung (falls schon hervorgehoben) bzw. zur Seite. Wartet, bis
+// die betreffende PDF-Seite gerendert ist.
+function scrolleZu(seite, markId) {
+  let n = 0;
+  const tick = () => {
+    const span =
+      markId != null
+        ? document.querySelector('#pdf-render .markiert[data-mark-id="' + markId + '"]')
+        : null;
+    if (span) {
+      span.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    const seiteEl = document.querySelector('#pdf-render .pdf-seite[data-seite="' + seite + '"]');
+    n++;
+    // Seite vorhanden + kurze Kulanz für die Hervorhebung -> zur Seite scrollen.
+    if (seiteEl && n > 8) {
+      seiteEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (n > 80) return; // Abbruch nach ~8 s
+    setTimeout(tick, 100);
+  };
+  tick();
+}
+
 // --- Markieren & Kontextmenü ---------------------------------------------
 
 function globalerOffset(container, node, offsetInNode) {
@@ -668,11 +702,10 @@ function baueKarte(m, alle) {
   const karte = document.createElement("div");
   karte.className = "karte";
 
-  // PDF wird vom Add-on selbst inline ausgeliefert (eigene Ingress-URL),
-  // damit #page=n funktioniert und kein Paperless-Auth/Pfad-Problem auftritt.
-  const pdfLink = API + "/api/pdf/" + m.dokument_id + "#page=" + m.seite;
+  // Sprung erfolgt IM Add-on (mittlere PDF-Ansicht) statt in einem neuen Tab.
   let quelle =
-    '<a class="sprung" href="' + pdfLink + '" target="_blank" rel="noopener">📄 ' +
+    '<a class="sprung" href="#" data-doc="' + m.dokument_id + '" data-seite="' + m.seite +
+    '" data-mark="' + m.id + '" title="Im PDF anzeigen">📄 ' +
     escapeHtml(m.dokument_titel) + " · S. " + m.seite + "</a>";
   if (state.externalUrl) {
     const detail = state.externalUrl + "/documents/" + m.dokument_id;
@@ -694,6 +727,19 @@ function baueKarte(m, alle) {
     inner += '<div class="verkn">🔗 ' + ziele + "</div>";
   }
   karte.innerHTML = inner;
+
+  // Sprung in die PDF-Ansicht des Add-ons (kein neues Fenster)
+  const sprungEl = karte.querySelector("a.sprung");
+  if (sprungEl) {
+    sprungEl.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      springeZuMarkierung(
+        parseInt(sprungEl.dataset.doc, 10),
+        parseInt(sprungEl.dataset.seite, 10),
+        parseInt(sprungEl.dataset.mark, 10)
+      );
+    });
+  }
 
   // Post-It / Notiz: anlegen und bearbeiten
   const notizWrap = document.createElement("div");
