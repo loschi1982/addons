@@ -21,6 +21,9 @@ html, body {
   background: var(--bg);
 }
 
+/* hidden-Attribut muss display:flex/inline-flex etc. sicher überstimmen */
+[hidden] { display: none !important; }
+
 #kopf {
   display: flex;
   align-items: baseline;
