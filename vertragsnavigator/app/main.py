@@ -410,7 +410,8 @@ def index(request: Request):
         .replace('href="static/style.css"', f'href="static/style.css?v={ver}"')
         .replace('src="static/app.js"', f'src="static/app.js?v={ver}"')
     )
-    return HTMLResponse(html)
+    # index.html nie cachen, damit die ?v=-Marken der Assets stets aktuell sind.
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
