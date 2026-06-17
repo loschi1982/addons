@@ -59,6 +59,13 @@ def test_config(client):
     assert body["sprung_url"] == "http://paperless.local"
 
 
+def test_pdf_inline(client):
+    r = client.get("/api/pdf/1")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert "inline" in r.headers.get("content-disposition", "")
+
+
 def test_vertragsbaum_und_detail(client):
     r = client.get("/api/docs")
     assert r.status_code == 200

@@ -444,13 +444,12 @@ function rendereUebersicht(gruppen) {
       const e = document.createElement("div");
       e.className = "eintrag";
 
-      const sprung = state.sprungUrl
-        ? state.sprungUrl + "/api/documents/" + m.dokument_id + "/preview/#page=" + m.seite
-        : null;
-      const quelle = sprung
-        ? '<a class="sprung" href="' + sprung + '" target="_blank" rel="noopener">📄 ' +
-          escapeHtml(m.dokument_titel) + " · S. " + m.seite + "</a>"
-        : "📄 " + escapeHtml(m.dokument_titel) + " · S. " + m.seite;
+      // PDF wird vom Add-on selbst inline ausgeliefert (eigene Ingress-URL),
+      // damit #page=n funktioniert und kein Paperless-Auth/Pfad-Problem auftritt.
+      const sprung = API + "/api/pdf/" + m.dokument_id + "#page=" + m.seite;
+      const quelle =
+        '<a class="sprung" href="' + sprung + '" target="_blank" rel="noopener">📄 ' +
+        escapeHtml(m.dokument_titel) + " · S. " + m.seite + "</a>";
 
       let inner = '<button class="loeschen" title="Markierung löschen" data-id="' + m.id + '">✕</button>';
       inner += '<div class="quelle">' + quelle + "</div>";

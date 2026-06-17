@@ -12,7 +12,7 @@ Original-PDF.
 |--------------------------|---------|-----------------------------------------------------------------------------|
 | `paperless_url`          | ja      | Interne API-URL (App → Paperless), z. B. `http://ca5234a0-paperless-ngx:8000` (Add-on-Hostname, ohne Slash am Ende) |
 | `paperless_token`        | ja      | API-Token für die Token-Authentifizierung                                   |
-| `paperless_external_url` | nein    | Vom **Browser** erreichbare Paperless-URL für die Sprungmarken, z. B. die Ingress-/Domain-URL `https://homeassistant.elphi.musik/ca5234a0_paperless-ngx`. Leer = wie `paperless_url`. |
+| `paperless_external_url` | nein    | Optional/Legacy. Wird **nicht** mehr für die Sprungmarken benötigt (das PDF kommt über das Add-on selbst). Kann leer bleiben. |
 
 Nach dem Speichern das Add-on **starten** und über die **Seitenleiste** öffnen.
 
@@ -30,10 +30,9 @@ Nach dem Speichern das Add-on **starten** und über die **Seitenleiste** öffnen
 ## Hinweise
 - Die **Seitenzuordnung** wird aus dem PDF berechnet (Paperless liefert keinen
   seitenweisen Text). Bitte an deinen Dokumenten gegenprüfen.
-- Die **Sprungmarke** öffnet `…/api/documents/{id}/preview/#page={n}`. Damit der
-  Link im Browser funktioniert, sollte `paperless_external_url` auf die von außen
-  erreichbare Paperless-URL zeigen (die interne `…:8000`-Adresse ist vom PC nicht
-  auflösbar).
+- Die **Sprungmarke** liefert das PDF über das Add-on selbst aus
+  (`…/api/pdf/{id}#page={n}`) und springt im Browser-PDF-Viewer zur Seite.
+  Dafür ist **keine** `paperless_external_url` nötig.
 - Im Paperless-Notizfeld erscheint ein Hinweis wie
   `Vertragsnavigator: Seiten 4, 7, 12 in Themenuebersicht erfasst.` – andere
   Notizen bleiben unberührt.

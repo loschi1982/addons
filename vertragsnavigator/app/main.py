@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import db, models, pagination
@@ -219,6 +219,25 @@ def hauptvertrag_setzen(
                 raise HTTPException(400, "Zuordnung wuerde einen Zyklus erzeugen")
         conn.execute("UPDATE dokumente SET eltern_id=? WHERE id=?", (eltern, doc_id))
     return {"ok": True, "id": doc_id, "eltern_id": eltern}
+
+
+# --- PDF-Proxy (fuer Sprungmarken) --------------------------------------
+
+@app.get("/api/pdf/{doc_id}")
+def pdf_inline(doc_id: int, client: PaperlessClient = Depends(get_client)):
+    """Liefert das Original-PDF inline aus (Proxy zu Paperless).
+
+    Ermoeglicht Sprungmarken (#page=n) ueber die eigene Ingress-URL: Der
+    Browser muss weder den internen Paperless-Hostnamen aufloesen noch laeuft
+    der Aufruf in das Paperless-Ingress-Problem (SPA faengt /api/ ab). Das PDF
+    wird intern per Token geladen und unveraendert weitergereicht.
+    """
+    pdf = client.download_pdf(doc_id)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="dokument-{doc_id}.pdf"'},
+    )
 
 
 # --- Themen --------------------------------------------------------------
