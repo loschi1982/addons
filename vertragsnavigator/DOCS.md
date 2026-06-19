@@ -46,8 +46,10 @@ rechts oben kannst du dich **abmelden**. Der Login lässt sich über die Option
    Themas getrennt, je als **PDF-Ausschnitt** (formatiert, mit gelber Hervorhebung
    und – falls vorhanden – Verweis-Redlines) samt Quelle, PDF-Sprunglink und ggf.
    „🗂 Paperless"-Link. Pro Markierung kann dort eine **Notiz (Post-It)**
-   angelegt/bearbeitet werden. (Wird die Stelle im PDF nicht gefunden, erscheint
-   stattdessen der Textauszug; bei Seitenumbruch der auf der Seite vorhandene Teil.)
+   angelegt/bearbeitet werden. Notizen erscheinen zusätzlich als **Annotation**: in
+   der PDF-Ansicht als indigofarbene **Randnotiz** (mit Verbindungslinie) und im
+   Ausschnitt als **farbiger Rahmen** um die Stelle. (Wird die Stelle im PDF nicht
+   gefunden, erscheint stattdessen der Textauszug; bei Seitenumbruch der auf der Seite vorhandene Teil.)
    Im Overlay-Kopf lässt sich das Thema **umbenennen (✎)** oder **löschen (🗑)** –
    beim Löschen bleiben die Markierungen erhalten und werden „Ohne Thema".
 4. Im Dokumentkopf lässt sich ein **Hauptvertrag** zuordnen (Nachträge).

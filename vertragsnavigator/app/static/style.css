@@ -232,6 +232,8 @@ html, body {
 .textLayer span.verweis-quelle {
   background: linear-gradient(to bottom, transparent 82%, rgba(27, 94, 123, 0.7) 82%);
 }
+/* Markierung mit Notiz: farbiger Rahmen (Notizfarbe) */
+.textLayer span.notiz-markiert { outline: 1.5px solid rgba(59, 91, 219, 0.85); outline-offset: 0; }
 /* Einfügepunkt im Original (ergänzt/erweitert) – dezent markiert */
 .textLayer span.verweis-ziel {
   background: linear-gradient(to bottom, transparent 80%, rgba(20, 120, 60, 0.55) 80%);
@@ -260,6 +262,7 @@ html, body {
 .vlinie.art-geaendert { stroke: rgba(190, 110, 0, 0.4); }
 .vlinie.art-ergaenzt { stroke: rgba(20, 120, 60, 0.4); }
 .vlinie.art-erweitert { stroke: rgba(11, 74, 91, 0.4); }
+.vlinie.notiz { stroke: rgba(59, 91, 219, 0.5); }
 .verweis-annot .vdel {
   position: absolute;
   top: 1px;
@@ -276,6 +279,7 @@ html, body {
 .verweis-annot.art-geaendert { background: #ffe7c2; color: #6b3b00; border: 1px solid #e6c184; }
 .verweis-annot.art-ergaenzt { background: #d6f3d9; color: #14532d; border: 1px solid #a3d8ab; }
 .verweis-annot.art-erweitert { background: #d6ecf3; color: #0b4a5b; border: 1px solid #a3cdd8; }
+.verweis-annot.notiz { background: #e7ecfb; color: #20308f; border: 1px solid #b4c2f0; cursor: default; padding-right: 0.45rem; }
 
 .doc-content {
   font-family: "Georgia", "Times New Roman", serif;

@@ -5,8 +5,11 @@
 
 const API = (window.__VN__ && window.__VN__.apiBase) || "";
 
-//: Breite der rechten Marginalspalte für Verweis-Annotationen (px).
+//: Breite der rechten Marginalspalte für Verweis-/Notiz-Annotationen (px).
 const VERWEIS_GUTTER = 250;
+
+//: Einheitliche Notizfarbe (Indigo) für Rahmen/Linien.
+const NOTIZ_FARBE = "rgba(59, 91, 219, 0.9)";
 
 const state = {
   themen: [],
@@ -546,10 +549,11 @@ async function zeichneSeiten() {
   ziel.innerHTML = "";
   state.pdfSeiten = [];
 
-  // Rechter Rand (Marginalspalte) für Verweis-Annotationen – nur wenn das
-  // Dokument Verweise hat, sonst volle Breite fürs PDF.
-  const hatVerweise = !!(state.aktuellesDok && (state.aktuellesDok.verweise || []).length);
-  const gutter = hatVerweise ? VERWEIS_GUTTER : 0;
+  // Rechter Rand (Marginalspalte) für Verweis-/Notiz-Annotationen – nur wenn das
+  // Dokument Verweise oder Notizen hat, sonst volle Breite fürs PDF.
+  const dok = state.aktuellesDok;
+  const hatRand = !!dok && (((dok.verweise || []).length > 0) || (dok.markierungen || []).some((m) => m.notiz));
+  const gutter = hatRand ? VERWEIS_GUTTER : 0;
   const breite = Math.max(120, (ziel.clientWidth || 800) - gutter - 8);
 
   for (let n = 1; n <= pdf.numPages; n++) {
@@ -632,23 +636,42 @@ function refreshPdfMarken() {
   for (const seite of state.pdfSeiten) {
     // Zurücksetzen
     for (const d of seite.textDivs) {
-      d.classList.remove("markiert", "verweis-strich", "verweis-quelle");
+      d.classList.remove("markiert", "verweis-strich", "verweis-quelle", "verweis-ziel", "notiz-markiert");
       delete d.dataset.markId;
     }
     if (seite.seiteDiv) seite.seiteDiv.querySelectorAll(".verweis-annot, .verweis-linien").forEach((e) => e.remove());
 
-    // Themen-Markierungen (gelb)
-    for (const m of marks.filter((x) => x.seite === seite.n)) {
+    const seitenMarks = marks.filter((x) => x.seite === seite.n);
+
+    // Themen-Markierungen (gelb) + Notiz-Rahmen
+    for (const m of seitenMarks) {
       const divs = findeSpansFuerText(seite.textDivs, m.textauszug);
       divs.forEach((d) => {
         d.classList.add("markiert");
         d.dataset.markId = m.id;
+        if (m.notiz) d.classList.add("notiz-markiert");
       });
     }
 
-    // Verweise (Redline + Annotation in der Marginalspalte)
-    const vs = verweise.filter((x) => x.eigene_seite === seite.n);
-    if (vs.length) platziereVerweise(seite, vs);
+    // Rand-Annotationen sammeln (Verweise + Notizen) und gestapelt platzieren
+    const eintraege = [];
+    for (const v of verweise.filter((x) => x.eigene_seite === seite.n)) {
+      const spans = findeSpansFuerText(seite.textDivs, v.eigene_text);
+      const istZiel = v.rolle === "ziel";
+      if (istZiel && (v.art === "gestrichen" || v.art === "geändert")) spans.forEach((s) => s.classList.add("verweis-strich"));
+      else if (istZiel) spans.forEach((s) => s.classList.add("verweis-ziel"));
+      else spans.forEach((s) => s.classList.add("verweis-quelle"));
+      const b = _spanBox(spans);
+      eintraege.push({ ankerTop: b.top, sx: b.right, sy: b.mid, gefunden: spans.length > 0, farbe: "art-" + artKey(v.art), karte: () => baueVerweisKarte(v, spans.length > 0) });
+    }
+    for (const m of seitenMarks) {
+      if (!m.notiz) continue;
+      const spans = findeSpansFuerText(seite.textDivs, m.textauszug);
+      const b = _spanBox(spans);
+      eintraege.push({ ankerTop: b.top, sx: b.right, sy: b.mid, gefunden: spans.length > 0, farbe: "notiz", karte: () => baueNotizKarte(m) });
+    }
+
+    if (eintraege.length) platziereRand(seite, eintraege);
   }
 }
 
@@ -671,41 +694,31 @@ function verweisLabel(v) {
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-// Markiert die betroffene Stelle im PDF, platziert die Annotationen gestapelt in
-// der rechten Marginalspalte und verbindet beide mit einer blassen Linie.
-function platziereVerweise(seite, vs) {
-  const eintraege = vs.map((v) => {
-    const spans = findeSpansFuerText(seite.textDivs, v.eigene_text);
-    const istZiel = v.rolle === "ziel";
-
-    if (istZiel && (v.art === "gestrichen" || v.art === "geändert")) {
-      spans.forEach((s) => s.classList.add("verweis-strich"));
-    } else if (istZiel) {
-      spans.forEach((s) => s.classList.add("verweis-ziel")); // Einfügepunkt (ergänzt/erweitert)
-    } else {
-      spans.forEach((s) => s.classList.add("verweis-quelle"));
-    }
-
-    // Bounding-Box der Stelle (für Ankerpunkt der Verbindungslinie)
-    let top = Infinity, bottom = 0, right = 0;
-    spans.forEach((s) => {
-      top = Math.min(top, s.offsetTop);
-      bottom = Math.max(bottom, s.offsetTop + s.offsetHeight);
-      right = Math.max(right, s.offsetLeft + s.offsetWidth);
-    });
-    const gefunden = spans.length > 0;
-    return {
-      v: v,
-      gefunden: gefunden,
-      ankerTop: gefunden ? top : 0,
-      sx: gefunden ? right : null,
-      sy: gefunden ? (top + bottom) / 2 : null,
-    };
+// Bounding-Box mehrerer Spans (für Ankerpunkt der Verbindungslinie).
+function _spanBox(spans) {
+  if (!spans.length) return { top: 0, right: 0, mid: 0 };
+  let top = Infinity, bottom = 0, right = 0;
+  spans.forEach((s) => {
+    top = Math.min(top, s.offsetTop);
+    bottom = Math.max(bottom, s.offsetTop + s.offsetHeight);
+    right = Math.max(right, s.offsetLeft + s.offsetWidth);
   });
+  return { top: top, right: right, mid: (top + bottom) / 2 };
+}
 
+// Notiz-Karte (Post-It) für die Marginalspalte – nicht klickbar.
+function baueNotizKarte(m) {
+  const card = document.createElement("div");
+  card.className = "verweis-annot notiz";
+  card.innerHTML = '<span class="vtext">📝 ' + escapeHtml(m.notiz) + "</span>";
+  return card;
+}
+
+// Platziert Rand-Annotationen (Verweise + Notizen) gestapelt in der rechten
+// Marginalspalte und verbindet jede mit einer blassen Linie zur Stelle.
+function platziereRand(seite, eintraege) {
   eintraege.sort((a, b) => a.ankerTop - b.ankerTop);
 
-  // SVG-Overlay für die Verbindungslinien (unter den Karten, über dem Text)
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("class", "verweis-linien");
   svg.style.width = seite.seiteDiv.style.width;
@@ -715,7 +728,7 @@ function platziereVerweise(seite, vs) {
   const left = seite.pageWidth + 8;
   let prevBottom = -Infinity;
   for (const e of eintraege) {
-    const card = baueVerweisKarte(e.v, e.gefunden);
+    const card = e.karte();
     card.style.left = left + "px";
     card.style.width = VERWEIS_GUTTER - 16 + "px";
     const top = Math.max(e.ankerTop, prevBottom + 6);
@@ -726,9 +739,8 @@ function platziereVerweise(seite, vs) {
     if (e.gefunden) {
       const cy = top + card.offsetHeight / 2;
       const poly = document.createElementNS(SVG_NS, "polyline");
-      // Stelle -> Seitenrand (entlang der eigenen Zeile) -> Karte (in der Randspalte)
       poly.setAttribute("points", e.sx + "," + e.sy + " " + seite.pageWidth + "," + e.sy + " " + left + "," + cy);
-      poly.setAttribute("class", "vlinie art-" + artKey(e.v.art));
+      poly.setAttribute("class", "vlinie " + e.farbe);
       poly.setAttribute("fill", "none");
       svg.appendChild(poly);
     }
@@ -1411,6 +1423,13 @@ async function rendereAusschnitt(karte, m) {
       }
     } catch (e) { /* Verweise optional */ }
 
+    // Notiz vorhanden -> farbiger Rahmen um den Ausschnitt
+    if (m.notiz) {
+      ctx.strokeStyle = NOTIZ_FARBE;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(1.5, 1.5, w - 3, h - 3);
+    }
+
     const img = document.createElement("img");
     img.className = "ausschnitt-bild";
     img.alt = m.textauszug;
@@ -1465,7 +1484,13 @@ function oeffneNotizEditor(wrap, m) {
     try {
       await api("PATCH", "/api/markierungen/" + m.id, { notiz: text || null });
       m.notiz = text || null; // lokalen Stand aktualisieren
+      delete _dokMeta[m.dokument_id]; // Dokument-Cache (für Ausschnitt-Verweise) leeren
       await ladeUebersicht(); // Overlay + Liste neu aufbauen
+      // Falls das Dokument gerade offen ist: PDF-Ansicht neu zeichnen (Notiz-Rand)
+      if (state.aktuellesDok && state.aktuellesDok.id === m.dokument_id) {
+        state.pdfDocId = null; // erzwingt Neuzeichnen inkl. Gutter-Berechnung
+        await oeffneDokument(m.dokument_id);
+      }
     } catch (e) {
       alert("Fehler: " + e.message);
     }
