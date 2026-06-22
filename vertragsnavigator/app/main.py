@@ -289,6 +289,98 @@ def liste_dokumente(client: PaperlessClient = Depends(get_client)):
     return ergebnis
 
 
+# --- Suche ---------------------------------------------------------------
+
+def _passt(hay: str, woerter: List[str], modus: str, phrase: str) -> bool:
+    if modus == "phrase":
+        return phrase.lower() in hay
+    if modus == "oder":
+        return any(w.lower() in hay for w in woerter)
+    return all(w.lower() in hay for w in woerter)  # und / stichwort
+
+
+def _lokale_suche(woerter, modus, phrase, doc_filter):
+    """Durchsucht Markierungen/Notizen und Themen (SQLite)."""
+    treffer = []
+    with db.verbindung() as conn:
+        rows = conn.execute(
+            "SELECT m.id, m.dokument_id, m.seite, m.textauszug, m.notiz, "
+            "d.titel AS dokument_titel, t.name AS thema_name "
+            "FROM markierungen m JOIN dokumente d ON d.id = m.dokument_id "
+            "LEFT JOIN themen t ON t.id = m.thema_id ORDER BY m.seite, m.id"
+        ).fetchall()
+        for r in rows:
+            if doc_filter is not None and r["dokument_id"] not in doc_filter:
+                continue
+            hay = ((r["textauszug"] or "") + " " + (r["notiz"] or "")).lower()
+            if not _passt(hay, woerter, modus, phrase):
+                continue
+            treffer.append(
+                {
+                    "typ": "markierung",
+                    "dokument_id": r["dokument_id"],
+                    "dokument_titel": r["dokument_titel"],
+                    "seite": r["seite"],
+                    "thema_name": r["thema_name"],
+                    "textauszug": r["textauszug"],
+                    "notiz": r["notiz"],
+                    "markierung_id": r["id"],
+                }
+            )
+        for r in conn.execute("SELECT id, name FROM themen ORDER BY name").fetchall():
+            if _passt((r["name"] or "").lower(), woerter, modus, phrase):
+                treffer.append({"typ": "thema", "thema_id": r["id"], "name": r["name"]})
+    return treffer
+
+
+@app.get("/api/suche")
+def suche(
+    q: str = "",
+    modus: str = "stichwort",
+    tag: str = "",
+    client: PaperlessClient = Depends(get_client),
+):
+    q = (q or "").strip()
+    if not q:
+        return {"dokumente": [], "lokal": []}
+    woerter = q.split()
+
+    if modus == "phrase":
+        query = '"' + q + '"'
+    elif modus == "und":
+        query = " AND ".join(woerter)
+    elif modus == "oder":
+        query = " OR ".join(woerter)
+    else:
+        query = q
+
+    # Objekt-Tag -> ID
+    tag_id = None
+    if tag:
+        try:
+            for tid, name in client.get_tags().items():
+                if name == tag:
+                    tag_id = tid
+                    break
+        except PaperlessError:
+            tag_id = None
+    tag_ids = [tag_id] if tag_id else None
+
+    try:
+        dokumente = client.suche_dokumente(query, tag_ids=tag_ids)
+    except PaperlessError:
+        dokumente = []
+
+    doc_filter = None
+    if tag_id:
+        try:
+            doc_filter = set(client.dokument_ids_mit_tag(tag_id))
+        except PaperlessError:
+            doc_filter = None
+
+    return {"dokumente": dokumente, "lokal": _lokale_suche(woerter, modus, q, doc_filter)}
+
+
 @app.get("/api/docs/{doc_id}")
 def dokument_detail(doc_id: int, client: PaperlessClient = Depends(get_client)):
     """OCR-Text + vorhandene Markierungen eines Dokuments."""

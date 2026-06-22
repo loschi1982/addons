@@ -13,9 +13,30 @@
 <body>
   <header id="kopf">
     <h1>Vertragsnavigator</h1>
+    <form id="such-form" class="such-form">
+      <input type="search" id="such-feld" placeholder="Suchen …" autocomplete="off" />
+      <button type="button" id="such-erweitert-btn" title="Erweiterte Suche">⚙</button>
+      <button type="submit" id="such-btn">Suchen</button>
+    </form>
     <span id="status" class="status"></span>
     <button type="button" id="abmelden" class="abmelden" hidden>Abmelden</button>
   </header>
+
+  <!-- Erweiterte Suchoptionen (Aufklapp) -->
+  <div id="such-erweitert" class="such-erweitert" hidden>
+    <div class="such-modi">
+      <label><input type="radio" name="such-modus" value="stichwort" checked /> Stichwort</label>
+      <label><input type="radio" name="such-modus" value="phrase" /> Phrase</label>
+      <label><input type="radio" name="such-modus" value="und" /> UND</label>
+      <label><input type="radio" name="such-modus" value="oder" /> ODER</label>
+    </div>
+    <label class="such-objekt">Objekt:
+      <select id="such-tag"><option value="">— alle —</option></select>
+    </label>
+  </div>
+
+  <!-- Suchergebnis-Panel -->
+  <div id="such-panel" class="such-panel" hidden></div>
 
   <main id="layout">
     <!-- Spalte 1: Vertragsbaum -->
@@ -33,6 +54,12 @@
         <div class="doc-kopf-zeile">
           <h2 id="doc-titel">Kein Dokument gewählt</h2>
           <div class="doc-kopf-controls">
+            <div id="treffer-nav" class="treffer-nav" hidden>
+              <button type="button" id="treffer-prev" title="Vorheriger Treffer">‹</button>
+              <span id="treffer-anzeige">Treffer 0/0</span>
+              <button type="button" id="treffer-next" title="Nächster Treffer">›</button>
+              <button type="button" id="treffer-zu" title="Suche schließen">✕</button>
+            </div>
             <div id="pdf-zoom" class="pdf-zoom" hidden>
               <button type="button" id="btn-zoom-out" class="zoom-btn" title="Verkleinern">−</button>
               <span id="zoom-anzeige" class="zoom-anzeige">100 %</span>

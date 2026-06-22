@@ -46,6 +46,65 @@ html, body {
 }
 .abmelden:hover { background: rgba(255, 255, 255, 0.28); }
 
+/* Suche im Kopf */
+.such-form { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: 1.5rem; }
+.such-form input[type="search"] { font: inherit; font-size: 0.85rem; padding: 0.25rem 0.5rem; border: 1px solid rgba(255,255,255,0.5); border-radius: 4px; width: 16rem; max-width: 30vw; }
+.such-form button { font: inherit; font-size: 0.8rem; padding: 0.25rem 0.5rem; border: 1px solid rgba(255,255,255,0.5); background: rgba(255,255,255,0.15); color: #fff; border-radius: 4px; cursor: pointer; }
+.such-form button:hover { background: rgba(255,255,255,0.28); }
+
+.such-erweitert {
+  position: absolute;
+  top: 46px;
+  left: 1rem;
+  z-index: 1500;
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+  padding: 0.6rem 0.8rem;
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.such-modi { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.such-modi label { display: inline-flex; align-items: center; gap: 0.25rem; }
+.such-objekt select { font: inherit; }
+
+.such-panel {
+  position: absolute;
+  top: 46px;
+  left: 1rem;
+  z-index: 1490;
+  width: min(520px, 92vw);
+  max-height: 70vh;
+  overflow-y: auto;
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--rand);
+  border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.22);
+  padding: 0.4rem;
+}
+.such-gruppe-titel { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--grau); padding: 0.4rem 0.5rem 0.2rem; }
+.such-item { padding: 0.4rem 0.5rem; border-radius: 4px; cursor: pointer; }
+.such-item:hover { background: var(--akzent-hell); }
+.such-titel { font-size: 0.88rem; font-weight: 600; }
+.such-snippet { font-size: 0.8rem; color: var(--grau); margin-top: 0.1rem; }
+.such-snippet mark { background: var(--mark); }
+.such-panel .hinweis { color: var(--grau); font-style: italic; padding: 0.5rem; }
+
+/* Treffer-Navigator im Dokumentkopf */
+.treffer-nav { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; }
+.treffer-nav button { font: inherit; border: 1px solid var(--rand); background: #fff; border-radius: 4px; cursor: pointer; padding: 0 0.4rem; line-height: 1.6; }
+.treffer-nav button:hover { background: var(--akzent-hell); }
+.treffer-nav #treffer-anzeige { color: var(--grau); min-width: 6.5rem; text-align: center; }
+
+/* In-PDF-Suchtreffer */
+.textLayer span.such-treffer { background: rgba(255, 150, 0, 0.4); border-radius: 2px; }
+.textLayer span.such-aktiv { background: rgba(255, 120, 0, 0.75); outline: 1px solid #c2410c; }
+
 /* Login-Overlay */
 .login-overlay {
   position: fixed;

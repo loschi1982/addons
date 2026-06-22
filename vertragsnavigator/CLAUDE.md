@@ -98,6 +98,11 @@ docker build -t vertragsnavigator .
 - [x] v0.9.0: Themen-Zusammenfassung zeigt PDF-Ausschnitte (PDF.js offscreen rendert
       Seite, croppt die Fundstelle, zeichnet Hervorhebung; Text als Fallback). Rein
       Frontend.
+- [x] v0.9.2: Notizen als Annotation (Randnotiz + Rahmen, einheitliche Notizfarbe)
+- [x] v0.10.0: Erweiterte Suche – `GET /api/suche` (Paperless-Volltext via
+      `suche_dokumente` + lokale Markierungen/Themen/Notizen; Modus Stichwort/Phrase/
+      UND/ODER; Objekt-/Tag-Filter). Frontend: Suchleiste, Ergebnis-Panel, In-PDF-
+      Treffer-Navigation („Treffer x/y" + ‹/›)
 - [ ] Phase 4 (optional, später): Ähnlichkeitsvorschläge für Abhängigkeiten
 - [ ] **Offen**: Seitenzuordnung + Paperless-API-Version an echter Instanz
       verifizieren (Tests laufen bisher nur gegen synthetische PDFs/Mocks).

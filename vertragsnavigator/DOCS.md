@@ -17,6 +17,15 @@ Original-PDF.
 
 Nach dem Speichern das Add-on **starten** und über die **Seitenleiste** öffnen.
 
+## Suche
+Oben im Kopf das **Suchfeld** nutzen; über **⚙** lassen sich der **Modus**
+(Stichwort / Phrase / UND / ODER) und ein **Objekt-Filter** (Tag) wählen. Gesucht wird
+im **Paperless-Volltext** (OCR) **und** in den lokalen **Markierungen/Themen/Notizen**.
+Treffer werden vorgeschlagen:
+- **Dokument-Treffer** öffnet das PDF und springt zur Fundstelle; bei mehreren Treffern
+  zeigt der Kopf **„Treffer 1/x"** mit **‹/›** zum Weiterspringen.
+- **Markierungs-/Themen-Treffer** springt zur Markierung bzw. öffnet das Thema.
+
 ## Anmeldung
 Standardmäßig erscheint beim Öffnen eine **Login-Maske**. Melde dich mit deinem
 **Paperless-Benutzernamen und -Passwort** an (dieselben Zugangsdaten wie in Paperless;

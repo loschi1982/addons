@@ -100,6 +100,36 @@ class PaperlessClient:
             f"Unerwartete Antwort von Paperless ({antwort.status_code}) bei der Anmeldung"
         )
 
+    def suche_dokumente(self, query: str, tag_ids=None, page_size: int = 50):
+        """Volltextsuche (Whoosh) über Paperless; liefert Treffer mit Snippet."""
+        params: Dict[str, Any] = {"query": query, "page_size": page_size}
+        if tag_ids:
+            params["tags__id__in"] = ",".join(str(t) for t in tag_ids)
+        antwort = self._request("GET", "/api/documents/", params=params)
+        ergebnis = []
+        for d in antwort.json().get("results", []):
+            hit = d.get("__search_hit__") or {}
+            ergebnis.append(
+                {
+                    "id": d["id"],
+                    "title": d.get("title") or f"Dokument {d['id']}",
+                    "snippet": hit.get("highlights", "") or "",
+                }
+            )
+        return ergebnis
+
+    def dokument_ids_mit_tag(self, tag_id: int):
+        """IDs aller Dokumente mit dem Tag (für lokalen Tag-Filter)."""
+        ids = []
+        pfad = "/api/documents/?tags__id__in=" + str(tag_id) + "&page_size=250"
+        while pfad:
+            antwort = self._request("GET", pfad)
+            daten = antwort.json()
+            ids.extend(d["id"] for d in daten.get("results", []))
+            naechste = daten.get("next")
+            pfad = naechste.replace(self.base_url, "") if naechste else None
+        return ids
+
     def get_tags(self) -> Dict[int, str]:
         """Liefert eine Zuordnung Tag-ID -> Tag-Name (folgt der Paginierung)."""
         tags: Dict[int, str] = {}

@@ -30,6 +30,7 @@ const state = {
   gruppierung: "alle", // "alle" | "keine" | <Tag-Name>
   zugeklappt: new Set(), // eingeklappte Objekt-Gruppen
   dragId: null, // Dokument-ID im Drag-Vorgang
+  such: { hits: [], index: -1 }, // In-PDF-Suchtreffer (Navigator)
 };
 
 // --- API-Helfer -----------------------------------------------------------
@@ -80,6 +81,13 @@ document.addEventListener("DOMContentLoaded", init);
 async function init() {
   // Immer aktive Bindings (auch vor dem Login)
   document.addEventListener("click", verbergeCtxMenu);
+  // Such-Panel/Optionen schließen bei Klick außerhalb
+  document.addEventListener("click", (ev) => {
+    if (!ev.target.closest("#such-panel") && !ev.target.closest("#such-form") && !ev.target.closest("#such-erweitert")) {
+      document.getElementById("such-panel").hidden = true;
+      document.getElementById("such-erweitert").hidden = true;
+    }
+  });
   document.getElementById("login-form").addEventListener("submit", aufLogin);
   document.getElementById("abmelden").addEventListener("click", aufLogout);
 
@@ -160,6 +168,20 @@ async function starteApp() {
   document.getElementById("btn-pdf").addEventListener("click", () => setzeDocModus("pdf"));
   document.getElementById("btn-text").addEventListener("click", () => setzeDocModus("text"));
 
+  // Suche
+  document.getElementById("such-form").addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    fuehreSucheAus();
+  });
+  document.getElementById("such-erweitert-btn").addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    const p = document.getElementById("such-erweitert");
+    p.hidden = !p.hidden;
+  });
+  document.getElementById("treffer-prev").addEventListener("click", () => geheZuTreffer(state.such.index - 1));
+  document.getElementById("treffer-next").addEventListener("click", () => geheZuTreffer(state.such.index + 1));
+  document.getElementById("treffer-zu").addEventListener("click", beendeSuche);
+
   // Zoom für die PDF-Ansicht
   document.getElementById("btn-zoom-in").addEventListener("click", () => zoomAendern(0.2));
   document.getElementById("btn-zoom-out").addEventListener("click", () => zoomAendern(-0.2));
@@ -188,6 +210,7 @@ async function ladeBaum() {
     const docs = await api("GET", "/api/docs");
     state.alleDocs = docs;
     fuelleGruppierung(docs);
+    fuelleSuchTag(docs);
     rendereBaum(docs);
   } catch (e) {
     setStatus("Dokumente konnten nicht geladen werden: " + e.message, true);
@@ -222,6 +245,221 @@ function fuelleGruppierung(docs) {
     state.gruppierung = sel.value;
     rendereBaum(state.alleDocs);
   };
+}
+
+// --- Suche ----------------------------------------------------------------
+
+function kuerzen2(s, n) {
+  s = s || "";
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+// Paperless-Highlight-Snippet sicher rendern (nur <span class="match"> -> <mark>).
+function snippetHtml(s) {
+  return escapeHtml(s || "")
+    .replace(/&lt;span class=&quot;match&quot;&gt;/g, "<mark>")
+    .replace(/&lt;\/span&gt;/g, "</mark>");
+}
+
+function fuelleSuchTag(docs) {
+  const sel = document.getElementById("such-tag");
+  if (!sel) return;
+  const tags = Array.from(new Set(docs.flatMap((d) => d.tags || []))).sort((a, b) => a.localeCompare(b));
+  const aktuell = sel.value;
+  sel.innerHTML = '<option value="">— alle —</option>';
+  for (const t of tags) {
+    const o = document.createElement("option");
+    o.value = t;
+    o.textContent = t;
+    sel.appendChild(o);
+  }
+  if (aktuell) sel.value = aktuell;
+}
+
+async function fuehreSucheAus() {
+  const q = document.getElementById("such-feld").value.trim();
+  const panel = document.getElementById("such-panel");
+  if (!q) {
+    panel.hidden = true;
+    return;
+  }
+  const modus = (document.querySelector('input[name="such-modus"]:checked') || {}).value || "stichwort";
+  const tag = document.getElementById("such-tag").value || "";
+  const ctx = { woerter: q.split(/\s+/).filter(Boolean), modus: modus, phrase: q };
+
+  document.getElementById("such-erweitert").hidden = true;
+  panel.hidden = false;
+  panel.innerHTML = '<p class="hinweis">Suche …</p>';
+  try {
+    const body = await api(
+      "GET",
+      "/api/suche?q=" + encodeURIComponent(q) + "&modus=" + modus + "&tag=" + encodeURIComponent(tag)
+    );
+    rendereSuchErgebnisse(body, ctx);
+  } catch (e) {
+    panel.innerHTML = '<p class="hinweis">Fehler: ' + escapeHtml(e.message) + "</p>";
+  }
+}
+
+function rendereSuchErgebnisse(body, ctx) {
+  const panel = document.getElementById("such-panel");
+  panel.innerHTML = "";
+  const dok = body.dokumente || [];
+  const lokal = body.lokal || [];
+  if (!dok.length && !lokal.length) {
+    panel.innerHTML = '<p class="hinweis">Keine Treffer.</p>';
+    return;
+  }
+
+  if (dok.length) {
+    const h = document.createElement("div");
+    h.className = "such-gruppe-titel";
+    h.textContent = "Dokumente (" + dok.length + ")";
+    panel.appendChild(h);
+    for (const d of dok) {
+      const item = document.createElement("div");
+      item.className = "such-item";
+      item.innerHTML =
+        '<div class="such-titel">📄 ' + escapeHtml(d.title) + "</div>" +
+        (d.snippet ? '<div class="such-snippet">' + snippetHtml(d.snippet) + "</div>" : "");
+      item.addEventListener("click", () => waehleDokumentTreffer(d.id, ctx));
+      panel.appendChild(item);
+    }
+  }
+
+  if (lokal.length) {
+    const h = document.createElement("div");
+    h.className = "such-gruppe-titel";
+    h.textContent = "Markierungen & Themen (" + lokal.length + ")";
+    panel.appendChild(h);
+    for (const t of lokal) {
+      const item = document.createElement("div");
+      item.className = "such-item";
+      if (t.typ === "thema") {
+        item.innerHTML = '<div class="such-titel">🏷 Thema: ' + escapeHtml(t.name) + "</div>";
+      } else {
+        const quelle =
+          escapeHtml(t.dokument_titel) + " · S. " + t.seite + (t.thema_name ? " · " + escapeHtml(t.thema_name) : "");
+        item.innerHTML =
+          '<div class="such-titel">✏ ' + quelle + "</div>" +
+          '<div class="such-snippet">' + escapeHtml(kuerzen2(t.textauszug || t.notiz || "", 140)) + "</div>";
+      }
+      item.addEventListener("click", () => waehleLokalTreffer(t));
+      panel.appendChild(item);
+    }
+  }
+}
+
+function schliesseSuchPanel() {
+  document.getElementById("such-panel").hidden = true;
+}
+
+// Wartet, bis das PDF des Dokuments gerendert ist (Treffer brauchen die Textebene).
+function warteAufPdf(id) {
+  return new Promise((res) => {
+    let n = 0;
+    const tick = () => {
+      if (state.pdfDocId === id && state.pdfSeiten.length) return res();
+      if (n++ > 150) return res();
+      setTimeout(tick, 100);
+    };
+    tick();
+  });
+}
+
+// Alle Vorkommen der Suchwörter auf einer Seite (sortiert nach Position).
+function findeTrefferAufSeite(textDivs, needles) {
+  let compact = "";
+  const charDiv = [];
+  for (const div of textDivs) {
+    for (const ch of div.textContent || "") {
+      if (/\s/.test(ch)) continue;
+      compact += ch.toLowerCase();
+      charDiv.push(div);
+    }
+  }
+  const treffer = [];
+  for (const w of needles) {
+    const n = (w || "").replace(/\s+/g, "").toLowerCase();
+    if (n.length < 2) continue;
+    let from = 0;
+    let idx;
+    while ((idx = compact.indexOf(n, from)) >= 0) {
+      const divs = new Set();
+      for (let i = idx; i < idx + n.length && i < charDiv.length; i++) divs.add(charDiv[i]);
+      treffer.push({ pos: idx, divs: Array.from(divs) });
+      from = idx + n.length;
+    }
+  }
+  treffer.sort((a, b) => a.pos - b.pos);
+  return treffer;
+}
+
+async function waehleDokumentTreffer(id, ctx) {
+  schliesseSuchPanel();
+  state.docModus = "pdf";
+  await oeffneDokument(id); // setzt Suche zurück
+  await warteAufPdf(id);
+  const needles = ctx.modus === "phrase" ? [ctx.phrase] : ctx.woerter;
+  const hits = [];
+  for (const seite of state.pdfSeiten) {
+    for (const tr of findeTrefferAufSeite(seite.textDivs, needles)) {
+      hits.push({ seite: seite.n, divs: tr.divs });
+    }
+  }
+  state.such.hits = hits;
+  state.such.index = -1;
+  hits.forEach((h) => h.divs.forEach((d) => d.classList.add("such-treffer")));
+  zeigeTrefferNav();
+  if (hits.length) geheZuTreffer(0);
+  else aktualisiereTrefferAnzeige();
+}
+
+async function waehleLokalTreffer(t) {
+  schliesseSuchPanel();
+  if (t.typ === "thema") {
+    oeffneThemaOverlay(t.thema_id);
+    return;
+  }
+  state.docModus = "pdf";
+  await oeffneDokument(t.dokument_id);
+  await warteAufPdf(t.dokument_id);
+  scrolleZu(t.seite, t.markierung_id);
+}
+
+function geheZuTreffer(i) {
+  const hits = state.such.hits;
+  if (!hits.length) return;
+  if (state.such.index >= 0 && hits[state.such.index]) {
+    hits[state.such.index].divs.forEach((d) => d.classList.remove("such-aktiv"));
+  }
+  state.such.index = ((i % hits.length) + hits.length) % hits.length;
+  const h = hits[state.such.index];
+  h.divs.forEach((d) => d.classList.add("such-aktiv"));
+  if (h.divs[0]) h.divs[0].scrollIntoView({ behavior: "smooth", block: "center" });
+  aktualisiereTrefferAnzeige();
+}
+
+function aktualisiereTrefferAnzeige() {
+  const n = state.such.hits.length;
+  document.getElementById("treffer-anzeige").textContent = "Treffer " + (n ? state.such.index + 1 : 0) + "/" + n;
+}
+
+function zeigeTrefferNav() {
+  document.getElementById("treffer-nav").hidden = false;
+  aktualisiereTrefferAnzeige();
+}
+
+function loescheSuchTreffer() {
+  for (const seite of state.pdfSeiten) {
+    for (const d of seite.textDivs) d.classList.remove("such-treffer", "such-aktiv");
+  }
+  state.such = { hits: [], index: -1 };
+}
+
+function beendeSuche() {
+  loescheSuchTreffer();
+  document.getElementById("treffer-nav").hidden = true;
 }
 
 function rendereBaum(docs) {
@@ -367,6 +605,7 @@ function markiereAktivenBaum(id) {
 
 async function oeffneDokument(id) {
   setStatus("Lade Dokument …");
+  beendeSuche(); // Suchtreffer/Navigator des vorherigen Dokuments zurücksetzen
   try {
     const dok = await api("GET", "/api/docs/" + id);
     state.aktuellesDok = dok;

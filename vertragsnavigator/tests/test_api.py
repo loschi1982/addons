@@ -26,6 +26,22 @@ class FakeClient:
     def pruefe_zugangsdaten(self, username, password):
         return username == "admin" and password == "geheim"
 
+    def suche_dokumente(self, query, tag_ids=None, page_size=50):
+        woerter = [
+            w for w in query.replace('"', "").replace(" AND ", " ").replace(" OR ", " ").split() if w
+        ]
+        res = []
+        for i, d in self.docs.items():
+            if tag_ids and not (set(d.get("tags", [])) & set(tag_ids)):
+                continue
+            c = d["content"].lower()
+            if any(w.lower() in c for w in woerter):
+                res.append({"id": i, "title": d["title"], "snippet": "…match…"})
+        return res
+
+    def dokument_ids_mit_tag(self, tag_id):
+        return [i for i, d in self.docs.items() if tag_id in d.get("tags", [])]
+
     def get_document(self, doc_id):
         d = self.docs[doc_id]
         return {"id": doc_id, **d}
@@ -78,6 +94,27 @@ def test_login(client, monkeypatch):
     # Abmelden -> wieder gesperrt
     assert client.post("/api/logout").status_code == 200
     assert client.get("/api/docs").status_code == 401
+
+
+def test_suche(client):
+    client.post(
+        "/api/markierungen",
+        json={"dokument_id": 1, "thema_id": None, "textauszug": "Haftung ist begrenzt", "seite": 1},
+    )
+    body = client.get("/api/suche", params={"q": "Haftung", "modus": "stichwort"}).json()
+    assert any(d["id"] == 1 for d in body["dokumente"])  # Paperless-Volltext
+    assert any(t["typ"] == "markierung" and t["dokument_id"] == 1 for t in body["lokal"])
+
+
+def test_suche_modi_und_tagfilter(client):
+    # UND
+    body = client.get("/api/suche", params={"q": "Haftung Laufzeit", "modus": "und"}).json()
+    assert any(d["id"] == 1 for d in body["dokumente"])
+    # Tag-Filter (Laeiszhalle = nur Doc 2)
+    body = client.get("/api/suche", params={"q": "Ergaenzung", "modus": "stichwort", "tag": "Laeiszhalle"}).json()
+    assert [d["id"] for d in body["dokumente"]] == [2]
+    # leere Query
+    assert client.get("/api/suche", params={"q": ""}).json() == {"dokumente": [], "lokal": []}
 
 
 def test_config(client):
