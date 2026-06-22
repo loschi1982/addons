@@ -69,6 +69,7 @@
               <button type="button" id="btn-pdf" class="um-btn aktiv">PDF</button>
               <button type="button" id="btn-text" class="um-btn">Text</button>
             </div>
+            <button type="button" id="btn-druck-doc" class="druck-btn" hidden title="Dokument drucken">🖨</button>
           </div>
         </div>
         <label id="parent-zeile" class="parent-zeile" hidden>
@@ -108,6 +109,7 @@
       <div class="overlay-kopf">
         <h2 id="overlay-titel">Thema</h2>
         <div class="overlay-aktionen">
+          <button type="button" id="thema-drucken" class="overlay-akt" title="Thema drucken">🖨</button>
           <button type="button" id="thema-umbenennen" class="overlay-akt" title="Thema umbenennen">✎</button>
           <button type="button" id="thema-loeschen" class="overlay-akt" title="Thema löschen">🗑</button>
           <button type="button" id="overlay-close" class="overlay-close" title="Schließen">✕</button>
@@ -132,6 +134,9 @@
       <button type="submit" id="login-btn">Anmelden</button>
     </form>
   </div>
+
+  <!-- Druckausgabe (nur beim Drucken sichtbar) -->
+  <div id="druck-root"></div>
 
   <script src="static/app.js"></script>
 </body>

@@ -103,6 +103,9 @@ docker build -t vertragsnavigator .
       `suche_dokumente` + lokale Markierungen/Themen/Notizen; Modus Stichwort/Phrase/
       UND/ODER; Objekt-/Tag-Filter). Frontend: Suchleiste, Ergebnis-Panel, In-PDF-
       Treffer-Navigation („Treffer x/y" + ‹/›)
+- [x] v0.11.0: Druck (rein Frontend, `window.print` + `@media print`/`#druck-root`):
+      Dokument mit Seitenauswahl + eingebrannten Annotationen/Notizen; Thema mit Toggles
+      (Notizen/Annotationen). Gemeinsame Bake-Logik `erzeugeAusschnittBild`
 - [ ] Phase 4 (optional, später): Ähnlichkeitsvorschläge für Abhängigkeiten
 - [ ] **Offen**: Seitenzuordnung + Paperless-API-Version an echter Instanz
       verifizieren (Tests laufen bisher nur gegen synthetische PDFs/Mocks).

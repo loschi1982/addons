@@ -105,6 +105,33 @@ html, body {
 .textLayer span.such-treffer { background: rgba(255, 150, 0, 0.4); border-radius: 2px; }
 .textLayer span.such-aktiv { background: rgba(255, 120, 0, 0.75); outline: 1px solid #c2410c; }
 
+/* Druck */
+.druck-btn { font: inherit; border: 1px solid var(--rand); background: #fff; border-radius: 4px; cursor: pointer; padding: 0.15rem 0.45rem; }
+.druck-btn:hover { background: var(--akzent-hell); }
+
+.druck-dialog-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 4000; }
+.druck-dialog { background: #fff; border-radius: 8px; padding: 1.2rem 1.4rem; width: min(420px, 92vw); box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
+.druck-dialog h3 { margin: 0 0 0.8rem; color: var(--akzent); }
+.druck-felder { display: flex; flex-direction: column; gap: 0.6rem; font-size: 0.9rem; }
+.druck-felder input[type="text"] { font: inherit; padding: 0.3rem 0.45rem; border: 1px solid var(--rand); border-radius: 4px; }
+.dd-hinweis { color: var(--grau); font-size: 0.8rem; margin: 0; }
+.druck-dialog-aktionen { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+.druck-dialog-aktionen button { font: inherit; border: none; border-radius: 4px; padding: 0.4rem 0.9rem; cursor: pointer; }
+.dd-abbrechen { background: #eee; color: var(--text); }
+
+#druck-root { display: none; }
+@media print {
+  body > *:not(#druck-root) { display: none !important; }
+  #druck-root { display: block !important; }
+  .druck-titel { font-size: 1.2rem; margin: 0 0 0.6rem; }
+  .druck-seite, .druck-eintrag { page-break-inside: avoid; margin-bottom: 1rem; }
+  .druck-seiten-label, .druck-quelle { font-size: 0.8rem; color: #444; margin-bottom: 0.2rem; }
+  .druck-bild { max-width: 100%; height: auto; border: 1px solid #ccc; display: block; }
+  .druck-annot-liste { font-size: 0.8rem; margin: 0.3rem 0 0; padding-left: 1.1rem; }
+  .druck-notiz { font-size: 0.82rem; margin-top: 0.3rem; }
+  #druck-root blockquote { font-size: 0.9rem; white-space: pre-wrap; }
+}
+
 /* Login-Overlay */
 .login-overlay {
   position: fixed;

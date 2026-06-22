@@ -26,6 +26,14 @@ Treffer werden vorgeschlagen:
   zeigt der Kopf **„Treffer 1/x"** mit **‹/›** zum Weiterspringen.
 - **Markierungs-/Themen-Treffer** springt zur Markierung bzw. öffnet das Thema.
 
+## Drucken
+- **Dokument**: 🖨 im Dokumentkopf → Seitenauswahl („alle" oder z. B. `1-3,5`). Es wird
+  jede gewählte Seite als Bild **mit eingebrannten Annotationen** (Markierungen,
+  Verweis-Redlines, Notiz-Rahmen) gedruckt, darunter eine Liste der Verweis-/Notiztexte.
+- **Thema**: 🖨 im Themen-Overlay → Auswahl, ob **Notizen** und/oder **Annotationen**
+  mitgedruckt werden; gedruckt werden die Ausschnitte aller Markierungen des Themas mit
+  Quelle.
+
 ## Anmeldung
 Standardmäßig erscheint beim Öffnen eine **Login-Maske**. Melde dich mit deinem
 **Paperless-Benutzernamen und -Passwort** an (dieselben Zugangsdaten wie in Paperless;

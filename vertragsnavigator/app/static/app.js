@@ -182,6 +182,10 @@ async function starteApp() {
   document.getElementById("treffer-next").addEventListener("click", () => geheZuTreffer(state.such.index + 1));
   document.getElementById("treffer-zu").addEventListener("click", beendeSuche);
 
+  // Druck
+  document.getElementById("btn-druck-doc").addEventListener("click", druckeDokumentDialog);
+  document.getElementById("thema-drucken").addEventListener("click", druckeThemaDialog);
+
   // Zoom für die PDF-Ansicht
   document.getElementById("btn-zoom-in").addEventListener("click", () => zoomAendern(0.2));
   document.getElementById("btn-zoom-out").addEventListener("click", () => zoomAendern(-0.2));
@@ -613,6 +617,7 @@ async function oeffneDokument(id) {
     rendereParentAuswahl(dok);
     markiereAktivenBaum(id);
     document.getElementById("ansicht-umschalter").hidden = false;
+    document.getElementById("btn-druck-doc").hidden = false;
     setzeDocModus(state.docModus); // Ansicht anwenden + PDF rendern/hervorheben
     setStatus("");
   } catch (e) {
@@ -1598,91 +1603,299 @@ function _linie(ctx, bx, l, t, anteil) {
   ctx.stroke();
 }
 
-async function rendereAusschnitt(karte, m) {
-  const wrap = document.createElement("div");
-  wrap.className = "ausschnitt";
-  wrap.innerHTML = '<span class="ausschnitt-laden">PDF-Ausschnitt wird erstellt …</span>';
-  karte.insertBefore(wrap, karte.firstChild);
+// Erzeugt ein PNG (DataURL) des Ausschnitts einer Markierung. Mit Annotationen:
+// gelbe Hervorhebung, Verweis-Redlines und Notiz-Rahmen werden eingebrannt.
+async function erzeugeAusschnittBild(m, mitAnnotationen) {
+  const seite = await _ladeAusschnittSeite(m.dokument_id, m.seite);
+  if (!seite) return null;
+  const boxen = _findeItemBoxen(seite.items, m.textauszug);
+  if (!boxen.length) return null;
 
-  try {
-    const seite = await _ladeAusschnittSeite(m.dokument_id, m.seite);
-    if (!seite) {
-      wrap.remove();
-      return;
-    }
-    const boxen = _findeItemBoxen(seite.items, m.textauszug);
-    if (!boxen.length) {
-      wrap.remove(); // Stelle nicht gefunden -> Text bleibt sichtbar
-      return;
-    }
+  let l = Infinity, t = Infinity, r = 0, b = 0;
+  boxen.forEach((bx) => {
+    l = Math.min(l, bx.x);
+    t = Math.min(t, bx.y);
+    r = Math.max(r, bx.x + bx.w);
+    b = Math.max(b, bx.y + bx.h);
+  });
+  const pad = 8;
+  l = Math.max(0, l - pad);
+  t = Math.max(0, t - pad);
+  r = Math.min(seite.canvas.width, r + pad);
+  b = Math.min(seite.canvas.height, b + pad);
+  const w = r - l, h = b - t;
+  if (w <= 0 || h <= 0) return null;
 
-    let l = Infinity, t = Infinity, r = 0, b = 0;
-    boxen.forEach((bx) => {
-      l = Math.min(l, bx.x);
-      t = Math.min(t, bx.y);
-      r = Math.max(r, bx.x + bx.w);
-      b = Math.max(b, bx.y + bx.h);
-    });
-    const pad = 8;
-    l = Math.max(0, l - pad);
-    t = Math.max(0, t - pad);
-    r = Math.min(seite.canvas.width, r + pad);
-    b = Math.min(seite.canvas.height, b + pad);
-    const w = r - l, h = b - t;
-    if (w <= 0 || h <= 0) {
-      wrap.remove();
-      return;
-    }
+  const clip = document.createElement("canvas");
+  clip.width = w;
+  clip.height = h;
+  const ctx = clip.getContext("2d");
+  ctx.drawImage(seite.canvas, l, t, w, h, 0, 0, w, h);
 
-    const clip = document.createElement("canvas");
-    clip.width = w;
-    clip.height = h;
-    const ctx = clip.getContext("2d");
-    ctx.drawImage(seite.canvas, l, t, w, h, 0, 0, w, h);
-    ctx.fillStyle = "rgba(255, 213, 0, 0.4)"; // Hervorhebung wie im PDF
+  if (mitAnnotationen) {
+    ctx.fillStyle = "rgba(255, 213, 0, 0.4)"; // Hervorhebung
     boxen.forEach((bx) => ctx.fillRect(bx.x - l, bx.y - t, bx.w, bx.h));
-
-    // Verweis-Annotationen (Redlines) des Dokuments in den Ausschnitt zeichnen
     try {
       const meta = await _ladeDokMeta(m.dokument_id);
-      const verweise = (meta && meta.verweise) || [];
-      for (const v of verweise) {
+      for (const v of (meta && meta.verweise) || []) {
         if (v.eigene_seite !== m.seite) continue;
         const vboxen = _findeItemBoxen(seite.items, v.eigene_text);
         if (!vboxen.length) continue;
         const istZiel = v.rolle === "ziel";
         ctx.lineWidth = 2;
         if (istZiel && (v.art === "gestrichen" || v.art === "geändert")) {
-          ctx.strokeStyle = "rgba(200, 0, 0, 0.85)"; // Durchstreichung
+          ctx.strokeStyle = "rgba(200, 0, 0, 0.85)";
           vboxen.forEach((bx) => _linie(ctx, bx, l, t, 0.55));
         } else {
-          ctx.strokeStyle = istZiel ? "rgba(20, 120, 60, 0.85)" : "rgba(27, 94, 123, 0.85)"; // Unterstrich
+          ctx.strokeStyle = istZiel ? "rgba(20, 120, 60, 0.85)" : "rgba(27, 94, 123, 0.85)";
           vboxen.forEach((bx) => _linie(ctx, bx, l, t, 0.92));
         }
       }
     } catch (e) { /* Verweise optional */ }
-
-    // Notiz vorhanden -> farbiger Rahmen um den Ausschnitt
     if (m.notiz) {
       ctx.strokeStyle = NOTIZ_FARBE;
       ctx.lineWidth = 3;
       ctx.strokeRect(1.5, 1.5, w - 3, h - 3);
     }
+  }
+  return clip.toDataURL("image/png");
+}
 
+async function rendereAusschnitt(karte, m) {
+  const wrap = document.createElement("div");
+  wrap.className = "ausschnitt";
+  wrap.innerHTML = '<span class="ausschnitt-laden">PDF-Ausschnitt wird erstellt …</span>';
+  karte.insertBefore(wrap, karte.firstChild);
+  try {
+    const dataUrl = await erzeugeAusschnittBild(m, true);
+    if (!dataUrl) {
+      wrap.remove(); // Stelle nicht gefunden -> Text bleibt sichtbar
+      return;
+    }
     const img = document.createElement("img");
     img.className = "ausschnitt-bild";
     img.alt = m.textauszug;
     img.title = m.textauszug;
-    img.src = clip.toDataURL("image/png");
+    img.src = dataUrl;
     wrap.innerHTML = "";
     wrap.appendChild(img);
-
-    // Unformatierten Text ausblenden, wenn der Ausschnitt vorhanden ist
     const aus = karte.querySelector(".auszug");
     if (aus) aus.hidden = true;
   } catch (e) {
     wrap.remove();
   }
+}
+
+// --- Druck ----------------------------------------------------------------
+
+// Parst eine Seitenauswahl ("alle" oder "1-3,5") zu einer sortierten Seitenliste.
+function parseSeiten(eingabe, max) {
+  const s = (eingabe || "").trim().toLowerCase();
+  if (!s || s === "alle" || s === "all") return Array.from({ length: max }, (_, i) => i + 1);
+  const set = new Set();
+  for (const teil of s.split(",")) {
+    const t = teil.trim();
+    const m = t.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (m) {
+      let a = +m[1], b = +m[2];
+      if (a > b) { const x = a; a = b; b = x; }
+      for (let i = a; i <= b; i++) if (i >= 1 && i <= max) set.add(i);
+    } else if (/^\d+$/.test(t)) {
+      const i = +t;
+      if (i >= 1 && i <= max) set.add(i);
+    }
+  }
+  return Array.from(set).sort((a, b) => a - b);
+}
+
+// Klartext-Beschriftung eines Verweises (für Druck-Listen).
+function verweisLabelText(v) {
+  const ziel = v.andere_dokument_titel + " · S. " + v.andere_seite;
+  if (v.rolle === "quelle") return "↪ " + v.art + " in " + ziel;
+  if (v.art === "gestrichen") return "✗ gestrichen (Nachtrag: " + ziel + ")";
+  if (v.art === "geändert") return "✎ geändert → " + v.andere_text;
+  return "＋ " + v.art + ": " + v.andere_text;
+}
+
+function fensterDrucken() {
+  const aufraeumen = () => {
+    document.getElementById("druck-root").innerHTML = "";
+    window.removeEventListener("afterprint", aufraeumen);
+  };
+  window.addEventListener("afterprint", aufraeumen);
+  window.print();
+}
+
+// Kleiner Druck-Optionen-Dialog; ruft onOk(panel) mit dem (gelesenen) Panel auf.
+function druckDialog(titel, innerHtml, onOk) {
+  const ov = document.createElement("div");
+  ov.className = "druck-dialog-overlay";
+  ov.innerHTML =
+    '<div class="druck-dialog">' +
+    "<h3>" + escapeHtml(titel) + "</h3>" +
+    '<div class="druck-felder">' + innerHtml + "</div>" +
+    '<div class="druck-dialog-aktionen">' +
+    '<button type="button" class="dd-abbrechen">Abbrechen</button>' +
+    '<button type="button" class="dd-ok btn-speichern">Drucken</button>' +
+    "</div></div>";
+  document.body.appendChild(ov);
+  const schliessen = () => ov.remove();
+  ov.querySelector(".dd-abbrechen").addEventListener("click", schliessen);
+  ov.addEventListener("click", (e) => { if (e.target === ov) schliessen(); });
+  ov.querySelector(".dd-ok").addEventListener("click", () => {
+    const panel = ov.querySelector(".druck-dialog");
+    ov.remove();
+    onOk(panel);
+  });
+}
+
+function druckeDokumentDialog() {
+  if (!state.aktuellesDok) return;
+  const max = state.aktuellesDok.page_count || state.pdfSeiten.length || 1;
+  druckDialog(
+    "Dokument drucken",
+    '<label>Seiten: <input type="text" class="dd-seiten" value="alle" placeholder="alle oder 1-3,5" /></label>' +
+      '<p class="dd-hinweis">Annotationen und Notizen werden mitgedruckt.</p>',
+    (panel) => {
+      const seiten = parseSeiten(panel.querySelector(".dd-seiten").value, max);
+      if (!seiten.length) {
+        alert("Keine gültige Seitenauswahl.");
+        return;
+      }
+      druckeDokument(seiten);
+    }
+  );
+}
+
+async function baueDruckSeite(dok, n, verweise) {
+  const seite = await _ladeAusschnittSeite(dok.id, n);
+  if (!seite) return null;
+  const c = document.createElement("canvas");
+  c.width = seite.canvas.width;
+  c.height = seite.canvas.height;
+  const ctx = c.getContext("2d");
+  ctx.drawImage(seite.canvas, 0, 0);
+
+  const liste = [];
+  for (const m of (dok.markierungen || []).filter((x) => x.seite === n)) {
+    const boxen = _findeItemBoxen(seite.items, m.textauszug);
+    ctx.fillStyle = "rgba(255, 213, 0, 0.4)";
+    boxen.forEach((bx) => ctx.fillRect(bx.x, bx.y, bx.w, bx.h));
+    if (m.notiz && boxen.length) {
+      let l = Infinity, t = Infinity, r = 0, bo = 0;
+      boxen.forEach((bx) => { l = Math.min(l, bx.x); t = Math.min(t, bx.y); r = Math.max(r, bx.x + bx.w); bo = Math.max(bo, bx.y + bx.h); });
+      ctx.strokeStyle = NOTIZ_FARBE;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(l - 2, t - 2, r - l + 4, bo - t + 4);
+      liste.push("📝 " + m.notiz);
+    }
+  }
+  for (const v of verweise.filter((x) => x.eigene_seite === n)) {
+    const vb = _findeItemBoxen(seite.items, v.eigene_text);
+    const istZiel = v.rolle === "ziel";
+    ctx.lineWidth = 2;
+    if (istZiel && (v.art === "gestrichen" || v.art === "geändert")) {
+      ctx.strokeStyle = "rgba(200, 0, 0, 0.85)";
+      vb.forEach((bx) => _linie(ctx, bx, 0, 0, 0.55));
+    } else {
+      ctx.strokeStyle = istZiel ? "rgba(20, 120, 60, 0.85)" : "rgba(27, 94, 123, 0.85)";
+      vb.forEach((bx) => _linie(ctx, bx, 0, 0, 0.92));
+    }
+    liste.push(verweisLabelText(v));
+  }
+
+  const block = document.createElement("div");
+  block.className = "druck-seite";
+  const lab = document.createElement("div");
+  lab.className = "druck-seiten-label";
+  lab.textContent = "Seite " + n;
+  block.appendChild(lab);
+  const img = document.createElement("img");
+  img.className = "druck-bild";
+  img.src = c.toDataURL("image/png");
+  block.appendChild(img);
+  if (liste.length) {
+    const ul = document.createElement("ul");
+    ul.className = "druck-annot-liste";
+    liste.forEach((txt) => {
+      const li = document.createElement("li");
+      li.textContent = txt;
+      ul.appendChild(li);
+    });
+    block.appendChild(ul);
+  }
+  return block;
+}
+
+async function druckeDokument(seiten) {
+  const dok = state.aktuellesDok;
+  if (!dok) return;
+  setStatus("Druckansicht wird vorbereitet …");
+  const root = document.getElementById("druck-root");
+  root.innerHTML = '<h1 class="druck-titel">' + escapeHtml(dok.titel) + "</h1>";
+  let verweise = [];
+  try {
+    const meta = await _ladeDokMeta(dok.id);
+    verweise = (meta && meta.verweise) || [];
+  } catch (e) { /* optional */ }
+  for (const n of seiten) {
+    const block = await baueDruckSeite(dok, n, verweise);
+    if (block) root.appendChild(block);
+  }
+  setStatus("");
+  fensterDrucken();
+}
+
+function druckeThemaDialog() {
+  if (state.offenesThemaId === undefined) return;
+  druckDialog(
+    "Thema drucken",
+    '<label><input type="checkbox" class="dd-notizen" checked /> Notizen mitdrucken</label>' +
+      '<label><input type="checkbox" class="dd-annot" checked /> Annotationen mitdrucken</label>',
+    (panel) => {
+      druckeThema(
+        state.offenesThemaId,
+        panel.querySelector(".dd-notizen").checked,
+        panel.querySelector(".dd-annot").checked
+      );
+    }
+  );
+}
+
+async function druckeThema(themaId, mitNotizen, mitAnnotationen) {
+  const g = findeGruppe(themaId);
+  if (!g) return;
+  setStatus("Druckansicht wird vorbereitet …");
+  const root = document.getElementById("druck-root");
+  root.innerHTML = '<h1 class="druck-titel">Thema: ' + escapeHtml(g.name) + "</h1>";
+  for (const m of g.markierungen) {
+    const block = document.createElement("div");
+    block.className = "druck-eintrag";
+    const quelle = document.createElement("div");
+    quelle.className = "druck-quelle";
+    quelle.textContent = "📄 " + m.dokument_titel + " · S. " + m.seite;
+    block.appendChild(quelle);
+    const dataUrl = await erzeugeAusschnittBild(m, mitAnnotationen);
+    if (dataUrl) {
+      const img = document.createElement("img");
+      img.className = "druck-bild";
+      img.src = dataUrl;
+      block.appendChild(img);
+    } else {
+      const bq = document.createElement("blockquote");
+      bq.textContent = m.textauszug;
+      block.appendChild(bq);
+    }
+    if (mitNotizen && m.notiz) {
+      const nz = document.createElement("div");
+      nz.className = "druck-notiz";
+      nz.textContent = "📝 " + m.notiz;
+      block.appendChild(nz);
+    }
+    root.appendChild(block);
+  }
+  setStatus("");
+  fensterDrucken();
 }
 
 // Zeigt die Notiz als Post-It (klickbar zum Bearbeiten) bzw. einen Button zum Anlegen.
