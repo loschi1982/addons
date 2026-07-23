@@ -33,6 +33,29 @@ BASE_URL = "https://energy-as-a-service.spie-es.de"
 POSTDATA_WAIT_SECONDS = 12
 
 
+def _diag(nav_id: str, stage: str, message: str) -> None:
+    """Diagnose-Meldung eines Abbruchpunkts sichtbar machen.
+
+    Der Scraper ist eng an die SPIE-Oberfläche gekoppelt; bricht er nach dem
+    Login ab, liefert er stumm eine leere Liste. Diese Helper-Funktion schreibt
+    die Ursache als strukturiertes Warning UND in den In-Memory-Log-Puffer,
+    damit der Abbruchpunkt in der "Log"-Seite (GET /system/logs) sichtbar ist –
+    ohne dass das globale Log-Level auf debug gesetzt werden muss.
+    """
+    logger.warning("spie_import_break", nav_id=nav_id, stage=stage, reason=message)
+    try:
+        from app.core import log_buffer
+
+        log_buffer.write(
+            level="warning",
+            source="spie_import",
+            message=message,
+            details={"nav_id": nav_id, "stage": stage},
+        )
+    except Exception:  # pragma: no cover - Diagnose darf den Import nie umwerfen
+        pass
+
+
 class SpieAuthError(Exception):
     """Login fehlgeschlagen."""
 
@@ -167,12 +190,14 @@ class SpieClient:
             await self._page.goto(url, wait_until="networkidle", timeout=90000)
         except Exception as e:
             await self._page.unroute("**/api/legacyanalysis/postdata**")
-            logger.warning("spie_navigation_failed", nav_id=nav_id, error=str(e))
+            _diag(nav_id, "navigation",
+                  f"Navigation zur Auswertungsseite fehlgeschlagen (URL-Schema geändert?): {e}")
             return []
 
         if "/login" in self._page.url:
             await self._page.unroute("**/api/legacyanalysis/postdata**")
-            logger.warning("spie_session_expired", nav_id=nav_id)
+            _diag(nav_id, "session",
+                  "Nach Navigation zurück auf Login umgeleitet – Session ungültig/abgelaufen.")
             return []
 
         await self._page.unroute("**/api/legacyanalysis/postdata**")
@@ -218,7 +243,11 @@ class SpieClient:
 
         if not scope_ok:
             await self._page.unroute("**/api/legacyanalysis/postdata**")
-            logger.debug("spie_scope_not_found", nav_id=nav_id)
+            _diag(nav_id, "angular_scope",
+                  "AngularJS-Auswertungs-Scope nicht gefunden "
+                  "(Controller 'analysis.AuswertungController' oder "
+                  "selectedSettings.fromTo/resolution geändert?) – Portal-Struktur "
+                  "hat sich vermutlich geändert.")
             return []
 
         # Ersten sichtbaren "Ansicht aktualisieren"-Button klicken
@@ -232,24 +261,30 @@ class SpieClient:
 
         if not clicked:
             await self._page.unroute("**/api/legacyanalysis/postdata**")
-            logger.debug("spie_no_refresh_button", nav_id=nav_id)
+            _diag(nav_id, "refresh_button",
+                  "'Ansicht aktualisieren'-Button (button.button--highlight) nicht "
+                  "gefunden/sichtbar – Button-Klasse oder Ribbon-Layout geändert?")
             return []
 
         await asyncio.sleep(POSTDATA_WAIT_SECONDS)
         await self._page.unroute("**/api/legacyanalysis/postdata**")
 
         if not captured:
-            logger.debug("spie_postdata_no_response", nav_id=nav_id)
+            _diag(nav_id, "postdata_endpoint",
+                  "Keine Antwort auf /api/legacyanalysis/postdata abgefangen – "
+                  "Endpunkt evtl. umbenannt oder Klick löste keinen Request aus.")
             return []
 
         if "error" in captured:
-            logger.warning("spie_postdata_decode_error", nav_id=nav_id, error=captured["error"])
+            _diag(nav_id, "postdata_decode",
+                  f"Antwort war kein JSON (HTML/Fehlerseite?): {captured['error']}")
             return []
 
         resp = captured["response"]
         api_err = resp.get("error")
         if api_err:
-            logger.warning("spie_postdata_api_error", nav_id=nav_id, error=str(api_err))
+            _diag(nav_id, "postdata_api_error",
+                  f"SPIE-API meldete einen Fehler: {api_err}")
             return []
 
         dd = (resp.get("data") or {}).get("diagramData") or {}
@@ -257,8 +292,10 @@ class SpieClient:
         y_outer = dd.get("y") or []
 
         if not x_outer or not y_outer:
-            logger.debug("spie_postdata_empty", nav_id=nav_id,
-                         date_from=str(date_from), date_to=str(date_to))
+            _diag(nav_id, "response_structure",
+                  f"Antwort ohne diagramData.x/y (Struktur geändert oder kein Wert "
+                  f"im Zeitraum {date_from}–{date_to}). Antwort-Schlüssel: "
+                  f"{sorted((resp.get('data') or {}).keys()) if isinstance(resp.get('data'), dict) else type(resp.get('data')).__name__}")
             return []
 
         readings = []
