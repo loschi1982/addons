@@ -146,41 +146,59 @@ class ReadingService:
         if not meter:
             return 0
 
-        readings = list((await self.db.execute(
-            select(MeterReading)
-            .where(MeterReading.meter_id == meter_id)
-            .order_by(MeterReading.timestamp.asc())
-        )).scalars().all())
-
-        changed = 0
-        prev_value: Decimal | None = None
-        to_update: list[tuple[uuid.UUID, Decimal | None]] = []
-        for r in readings:
-            if r.value is None:
-                # Reiner Direkt-Verbrauchswert ohne Zählerstand → unverändert lassen.
-                new_cons = r.consumption
-            elif meter.is_delivery_based:
-                new_cons = r.value
-            elif prev_value is None:
-                new_cons = None
-            else:
-                diff = r.value - prev_value
-                new_cons = diff if diff >= 0 else None
-
-            if new_cons != r.consumption:
-                to_update.append((r.id, new_cons))
-                changed += 1
-            if r.value is not None:
-                prev_value = r.value
-
-        # Direktes SQL statt ORM-Flush (TimescaleDB rowcount quirk auf Hypertables)
-        for rid, new_cons in to_update:
-            await self.db.execute(
-                sa_update(MeterReading)
-                .where(MeterReading.id == rid)
-                .values(consumption=new_cons)
-                .execution_options(synchronize_session=False)
+        # Verbrauch mengenbasiert in EINEM UPDATE berechnen statt zeilenweise.
+        # SPIE-Zähler haben stündliche Werte (zehntausende Zeilen); ein Loop mit
+        # einem UPDATE-Statement pro Zeile bedeutete zehntausende Round-Trips auf
+        # den Timescale-Hypertables und hing praktisch (Minuten bis Timeout).
+        # Nur tatsächlich geänderte Zeilen werden geschrieben (IS DISTINCT FROM):
+        # das vermeidet unnötige Writes und lässt bereits korrekt berechnete
+        # (ggf. komprimierte) Altdaten unangetastet.
+        if meter.is_delivery_based:
+            # Lieferungsbasiert: Wert IST der Verbrauch.
+            result = await self.db.execute(
+                text(
+                    """
+                    UPDATE meter_readings
+                    SET consumption = value
+                    WHERE meter_id = :mid
+                      AND value IS NOT NULL
+                      AND consumption IS DISTINCT FROM value
+                    """
+                ),
+                {"mid": str(meter_id)},
             )
+        else:
+            # Differenzbasiert: consumption = value − vorheriger (nicht-NULL) Stand.
+            # LAG über die auf value IS NOT NULL gefilterten Zeilen liefert exakt
+            # den vorherigen Zählerstand (überspringt Direkt-Verbrauchszeilen mit
+            # value=NULL, die unverändert bleiben). Erste Zeile bzw. negativer
+            # Delta (Zählerwechsel) → NULL.
+            result = await self.db.execute(
+                text(
+                    """
+                    WITH ordered AS (
+                        SELECT id,
+                               value - LAG(value) OVER (ORDER BY timestamp) AS diff
+                        FROM meter_readings
+                        WHERE meter_id = :mid AND value IS NOT NULL
+                    ),
+                    newvals AS (
+                        SELECT id,
+                               CASE WHEN diff IS NOT NULL AND diff >= 0 THEN diff
+                                    ELSE NULL END AS new_cons
+                        FROM ordered
+                    )
+                    UPDATE meter_readings mr
+                    SET consumption = n.new_cons
+                    FROM newvals n
+                    WHERE mr.id = n.id
+                      AND mr.consumption IS DISTINCT FROM n.new_cons
+                    """
+                ),
+                {"mid": str(meter_id)},
+            )
+
+        changed = result.rowcount or 0
         await self.db.commit()
 
         # Monats-Vorberechnung dieses Zählers gezielt erneuern (übrige Zähler

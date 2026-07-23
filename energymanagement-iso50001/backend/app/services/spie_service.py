@@ -340,42 +340,11 @@ class SpieService:
         # Verbrauch nachberechnen: SPIE liefert nur Rohwerte (value), consumption
         # bleibt beim Insert NULL. Ohne diesen Schritt summiert die Monats-
         # Vorberechnung (SUM(consumption)) nichts → die Werte erscheinen in keiner
-        # Auswertung. recompute_meter_consumption respektiert is_delivery_based
-        # (Wert IST Verbrauch) vs. Differenzbildung und aktualisiert je Zähler die
-        # Monats-Vorberechnung. Läuft nach dem Schließen des Browsers.
-        if affected_meter_ids:
-            from app.services.reading_service import ReadingService
-
-            rsvc = ReadingService(self.db)
-            n_affected = len(affected_meter_ids)
-            for i, mid in enumerate(sorted(affected_meter_ids, key=str), 1):
-                _write_progress(job_id, {
-                    "status": "running", "phase": "recompute",
-                    "current_meter": i, "total_meters": n_affected,
-                    "meter_name": "Verbrauchsberechnung",
-                    "imported": imported_total, "errors": error_count,
-                    "percent": 100,
-                })
-                try:
-                    await rsvc.recompute_meter_consumption(mid)
-                except Exception as e:
-                    logger.warning("spie_recompute_failed", meter_id=str(mid), error=str(e))
-
-            # Analyse-Caches und vorberechnete Snapshots verwerfen, damit die neu
-            # berechneten Verbräuche sofort (statt erst beim nächsten 6-h-Beat) in
-            # Dashboard und Auswertung erscheinen.
-            try:
-                from sqlalchemy import delete as _delete
-
-                from app.core.cache import cache_delete
-                from app.models.snapshot import AnalyticsSnapshot, DashboardSnapshot
-
-                await cache_delete("analytics_*")
-                await self.db.execute(_delete(DashboardSnapshot))
-                await self.db.execute(_delete(AnalyticsSnapshot))
-                await self.db.commit()
-            except Exception as e:  # pragma: no cover - Invalidierung ist best effort
-                logger.warning("spie_snapshot_invalidation_failed", error=str(e))
+        # Auswertung. Läuft nach dem Schließen des Browsers.
+        await self._recompute_and_invalidate(
+            affected_meter_ids, job_id=job_id,
+            imported_total=imported_total, error_count=error_count,
+        )
 
         # Abschluss
         result = {
@@ -392,6 +361,67 @@ class SpieService:
         await self._save_last_sync(result)
         logger.info("spie_import_done", **{k: v for k, v in result.items() if k != "status"})
         return result
+
+    async def _recompute_and_invalidate(
+        self,
+        meter_ids: set[uuid.UUID],
+        job_id: str | None = None,
+        imported_total: int = 0,
+        error_count: int = 0,
+    ) -> int:
+        """Verbrauch je Zähler neu berechnen und Analyse-Caches/Snapshots verwerfen.
+
+        recompute_meter_consumption respektiert is_delivery_based (Wert IST
+        Verbrauch) vs. Differenzbildung und aktualisiert je Zähler die Monats-
+        Vorberechnung. Anschließend werden Analyse-Cache und Dashboard-/Analytics-
+        Snapshots verworfen, damit die neu berechneten Verbräuche sofort (statt
+        erst beim nächsten 6-h-Beat) in Dashboard und Auswertung erscheinen.
+        Gibt die Anzahl verarbeiteter Zähler zurück.
+        """
+        if not meter_ids:
+            return 0
+
+        from app.services.reading_service import ReadingService
+
+        rsvc = ReadingService(self.db)
+        n = len(meter_ids)
+        for i, mid in enumerate(sorted(meter_ids, key=str), 1):
+            if job_id:
+                _write_progress(job_id, {
+                    "status": "running", "phase": "recompute",
+                    "current_meter": i, "total_meters": n,
+                    "meter_name": "Verbrauchsberechnung",
+                    "imported": imported_total, "errors": error_count,
+                    "percent": 100,
+                })
+            try:
+                await rsvc.recompute_meter_consumption(mid)
+            except Exception as e:
+                logger.warning("spie_recompute_failed", meter_id=str(mid), error=str(e))
+
+        try:
+            from sqlalchemy import delete as _delete
+
+            from app.core.cache import cache_delete
+            from app.models.snapshot import AnalyticsSnapshot, DashboardSnapshot
+
+            await cache_delete("analytics_*")
+            await self.db.execute(_delete(DashboardSnapshot))
+            await self.db.execute(_delete(AnalyticsSnapshot))
+            await self.db.commit()
+        except Exception as e:  # pragma: no cover - Invalidierung ist best effort
+            logger.warning("spie_snapshot_invalidation_failed", error=str(e))
+        return n
+
+    async def recompute_all_spie_meters(self) -> int:
+        """Verbrauch ALLER SPIE-Zähler ohne erneutes Scraping nachberechnen.
+
+        Recovery-Pfad: die Rohwerte stehen bereits in der DB, nur consumption
+        fehlt (bzw. wurde nach einem Import nicht berechnet). Deutlich schneller
+        als ein voller Sync, da kein Browser/Portal-Abruf nötig ist.
+        """
+        meters = await self._load_spie_meters()
+        return await self._recompute_and_invalidate({m.id for m in meters})
 
     async def _delete_readings_from(self, meter_id: uuid.UUID, from_date: date) -> int:
         """Alle Readings eines Zählers ab `from_date` (Berlin-Mitternacht) löschen.

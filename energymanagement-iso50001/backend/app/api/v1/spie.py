@@ -140,6 +140,23 @@ async def start_spie_sync(
     return {"job_id": job_id}
 
 
+@router.post("/recompute")
+async def recompute_spie_consumption(
+    current_user: User = Depends(require_permission("settings", "update")),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Verbrauch aller SPIE-Zähler nachberechnen – OHNE erneutes Scraping.
+
+    Recovery, wenn Rohwerte importiert wurden, aber die Verbräuche (consumption)
+    fehlen und daher nicht in der Auswertung erscheinen. Nutzt die bereits in der
+    DB vorhandenen Werte und ist damit deutlich schneller als ein voller Sync.
+    """
+    svc = SpieService(db)
+    count = await svc.recompute_all_spie_meters()
+    return {"ok": True, "meters_recomputed": count}
+
+
 @router.get("/progress/{job_id}")
 async def get_spie_progress(
     job_id: str,
