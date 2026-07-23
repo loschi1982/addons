@@ -249,6 +249,9 @@ class SpieService:
         imported_total = 0
         error_count = 0
         now = datetime.now(timezone.utc)
+        # Zähler, die SPIE-Werte geliefert haben → nach dem Import muss ihr
+        # Verbrauch berechnet werden (SPIE liefert nur value, consumption=NULL).
+        affected_meter_ids: set[uuid.UUID] = set()
 
         async with SpieClient() as client:
             # Login
@@ -326,9 +329,53 @@ class SpieService:
                 # Werte in DB schreiben (ON CONFLICT DO NOTHING)
                 meter_imported = await self._insert_readings(meter.id, readings)
                 imported_total += meter_imported
+                # Auch bei 0 neu eingefügten Zeilen (reine Duplikate) vormerken:
+                # bereits vorhandene SPIE-Werte können noch consumption=NULL haben
+                # und müssen nachberechnet werden.
+                affected_meter_ids.add(meter.id)
                 logger.info("spie_import_meter_done",
                             meter=meter_name, imported=meter_imported,
                             date_from=str(date_from), date_to=str(date_to))
+
+        # Verbrauch nachberechnen: SPIE liefert nur Rohwerte (value), consumption
+        # bleibt beim Insert NULL. Ohne diesen Schritt summiert die Monats-
+        # Vorberechnung (SUM(consumption)) nichts → die Werte erscheinen in keiner
+        # Auswertung. recompute_meter_consumption respektiert is_delivery_based
+        # (Wert IST Verbrauch) vs. Differenzbildung und aktualisiert je Zähler die
+        # Monats-Vorberechnung. Läuft nach dem Schließen des Browsers.
+        if affected_meter_ids:
+            from app.services.reading_service import ReadingService
+
+            rsvc = ReadingService(self.db)
+            n_affected = len(affected_meter_ids)
+            for i, mid in enumerate(sorted(affected_meter_ids, key=str), 1):
+                _write_progress(job_id, {
+                    "status": "running", "phase": "recompute",
+                    "current_meter": i, "total_meters": n_affected,
+                    "meter_name": "Verbrauchsberechnung",
+                    "imported": imported_total, "errors": error_count,
+                    "percent": 100,
+                })
+                try:
+                    await rsvc.recompute_meter_consumption(mid)
+                except Exception as e:
+                    logger.warning("spie_recompute_failed", meter_id=str(mid), error=str(e))
+
+            # Analyse-Caches und vorberechnete Snapshots verwerfen, damit die neu
+            # berechneten Verbräuche sofort (statt erst beim nächsten 6-h-Beat) in
+            # Dashboard und Auswertung erscheinen.
+            try:
+                from sqlalchemy import delete as _delete
+
+                from app.core.cache import cache_delete
+                from app.models.snapshot import AnalyticsSnapshot, DashboardSnapshot
+
+                await cache_delete("analytics_*")
+                await self.db.execute(_delete(DashboardSnapshot))
+                await self.db.execute(_delete(AnalyticsSnapshot))
+                await self.db.commit()
+            except Exception as e:  # pragma: no cover - Invalidierung ist best effort
+                logger.warning("spie_snapshot_invalidation_failed", error=str(e))
 
         # Abschluss
         result = {
