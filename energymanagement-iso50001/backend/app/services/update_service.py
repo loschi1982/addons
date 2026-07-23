@@ -161,6 +161,34 @@ class UpdateService:
         old_version = _read_current_version()
         log_lines: list[str] = []
 
+        # Das Standalone-Image wird per `docker compose build` erzeugt (Code wird
+        # per COPY eingebacken) → im Container liegt kein Git-Repository, und ein
+        # In-Place-`git pull` wäre selbst mit .git wirkungslos (Frontend-Build und
+        # Dependencies stecken im Image). Statt eines rohen Git-Fehlers eine klare
+        # Handlungsanweisung für das Host-seitige Update zurückgeben.
+        if not (PROJECT_ROOT / ".git").exists():
+            logger.info("update_install_not_git", project_root=str(PROJECT_ROOT))
+            return {
+                "success": False,
+                "message": (
+                    "Automatische Installation im Container nicht möglich: Das Image "
+                    "wird per 'docker compose build' erzeugt und enthält kein Git-"
+                    "Repository. Updates erfolgen auf dem Docker-Host durch Neubau "
+                    "des Images (siehe Log)."
+                ),
+                "old_version": old_version,
+                "restart_required": False,
+                "log": (
+                    "So aktualisieren Sie auf dem Docker-Host (im geklonten Repo):\n\n"
+                    "  1. git pull\n"
+                    "  2. cd energymanagement-iso50001/deploy/standalone\n"
+                    "  3. docker compose up -d --build app\n\n"
+                    "Die Datenbank-Migrationen laufen beim Start automatisch "
+                    "(entrypoint.sh → alembic upgrade head). Bestehende Daten in den "
+                    "Volumes (timescaledb_data, app_data) bleiben erhalten."
+                ),
+            }
+
         try:
             # 1. Git Pull
             log_lines.append("=== Git Pull ===")
