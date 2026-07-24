@@ -64,7 +64,15 @@ services:
       - "${APP_PORT:-8099}:8099"
     volumes:
       - app_data:/data
+      # ── Host-Terminal (optional, nur bei TERMINAL_ENABLED=true sinnvoll) ──
+      # Docker-Socket: erlaubt 'docker'/'docker compose' gegen den Host-Daemon.
+      # Quellcode-Mount (Repo-Wurzel → /srv/repo): erlaubt 'git pull' und
+      # 'docker compose ... up -d --build' aus dem Terminal heraus.
+      # ACHTUNG: beides zusammen = vollständige Host-Kontrolle durch den Container.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../../../:/srv/repo
     environment:
+      TERMINAL_ENABLED: ${TERMINAL_ENABLED:-false}
       DATABASE_URL: "postgresql+asyncpg://${DB_USER:-energy}:${DB_PASSWORD:-energy}@timescaledb:5432/${DB_NAME:-energy_management}"
       REDIS_URL: "redis://redis:6379/0"
       SECRET_KEY: ${SECRET_KEY:-CHANGE-ME-use-a-random-64-char-hex-string}

@@ -93,6 +93,16 @@ class Settings(BaseSettings):
     language: str = "de"
     log_level: str = "info"
 
+    # ── Host-Terminal (Docker-Socket) ──
+    # Web-Terminal in den Einstellungen, das Shell-Befehle im Container ausführt.
+    # Mit gemountetem /var/run/docker.sock lassen sich damit auch 'docker compose'-
+    # Befehle auf dem Host ausführen (Rebuild/Neustart). Das bedeutet vollständige
+    # Befehlsausführung (RCE) über die Weboberfläche → standardmäßig AUS. Nur in
+    # vertrauenswürdiger Umgebung (internes Netz, einzelner Admin) aktivieren.
+    terminal_enabled: bool = False
+    # Timeout je Befehl in Sekunden (lange Image-Builds brauchen mehr Zeit).
+    terminal_timeout_seconds: int = 600
+
     # ── Anwendung ──
     app_name: str = "Energy Management ISO 50001"
     app_version: str = _read_version()

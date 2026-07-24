@@ -19,7 +19,8 @@ from datetime import datetime, timezone
 
 import httpx
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -415,3 +416,108 @@ async def clear_system_logs(
     from app.core import log_buffer
     log_buffer.clear()
     return {"cleared": True}
+
+
+# ---------------------------------------------------------------------------
+# Host-Terminal (Docker-Socket) – vollständige Befehlsausführung.
+# Nur aktiv wenn settings.terminal_enabled (Env TERMINAL_ENABLED=true) UND
+# Admin-Berechtigung. Jeder Befehl wird im Log-Puffer protokolliert.
+# ---------------------------------------------------------------------------
+
+class TerminalCommand(BaseModel):
+    command: str
+
+
+@router.get("/terminal/status")
+async def terminal_status(current_user=Depends(get_current_user)):
+    """Ob das Host-Terminal aktiviert ist und ob die Docker-CLI erreichbar ist."""
+    settings = get_settings()
+    docker_available = False
+    if settings.terminal_enabled:
+        try:
+            import subprocess
+
+            r = subprocess.run(
+                ["docker", "version", "--format", "{{.Server.Version}}"],
+                capture_output=True, text=True, timeout=8,
+            )
+            docker_available = r.returncode == 0
+        except Exception:
+            docker_available = False
+    return {
+        "enabled": settings.terminal_enabled,
+        "docker_available": docker_available,
+        "timeout_seconds": settings.terminal_timeout_seconds,
+    }
+
+
+@router.post("/terminal/exec")
+async def terminal_exec(
+    body: TerminalCommand,
+    current_user=Depends(require_permission("system", "update")),
+):
+    """
+    Shell-Befehl ausführen (Host-Terminal).
+
+    WARNUNG: vollständige Befehlsausführung. Nur aktiv wenn TERMINAL_ENABLED=true.
+    Mit gemountetem Docker-Socket wirken 'docker'/'docker compose'-Befehle auf den
+    Host. Jeder Befehl wird mit Benutzer und Exit-Code im Log-Puffer protokolliert.
+    """
+    settings = get_settings()
+    if not settings.terminal_enabled:
+        raise HTTPException(
+            status_code=403,
+            detail="Host-Terminal ist deaktiviert. TERMINAL_ENABLED=true setzen und Container neu starten.",
+        )
+
+    command = (body.command or "").strip()
+    if not command:
+        raise HTTPException(status_code=400, detail="Kein Befehl angegeben.")
+
+    import subprocess
+
+    from app.core import log_buffer
+
+    username = getattr(current_user, "username", None) or getattr(current_user, "email", "?")
+    logger.warning("terminal_exec", user=username, command=command)
+
+    # Arbeitsverzeichnis: gemounteter Quellcode (für git/docker compose), sonst /app.
+    cwd = "/srv/repo" if os.path.isdir("/srv/repo") else "/app"
+
+    start = time.monotonic()
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=settings.terminal_timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        log_buffer.write(
+            level="error", source="terminal",
+            message=f"$ {command} → Timeout nach {settings.terminal_timeout_seconds}s",
+            details={"user": username},
+        )
+        raise HTTPException(
+            status_code=504,
+            detail=f"Befehl-Timeout nach {settings.terminal_timeout_seconds}s.",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ausführung fehlgeschlagen: {e}")
+
+    duration_ms = round((time.monotonic() - start) * 1000)
+    log_buffer.write(
+        level="warning", source="terminal",
+        message=f"$ {command}",
+        details={"user": username, "exit_code": result.returncode, "duration_ms": duration_ms},
+    )
+    return {
+        "command": command,
+        "exit_code": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "duration_ms": duration_ms,
+        "cwd": cwd,
+    }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell, Monitor, Download, CheckCircle, AlertTriangle, XCircle, Plug2, HeartPulse, Database, Server, Clock, HardDrive, Play, RotateCcw, Wifi, ScrollText, Trash2, Upload, ShieldCheck, ChevronDown, Check } from 'lucide-react';
+import { Save, RefreshCw, Building2, Palette, FileText, Activity, Bell, Monitor, Download, CheckCircle, AlertTriangle, XCircle, Plug2, HeartPulse, Database, Server, Clock, HardDrive, Play, RotateCcw, Wifi, ScrollText, Trash2, Upload, ShieldCheck, ChevronDown, Check, TerminalSquare } from 'lucide-react';
 import { apiClient, setBackupRunning } from '@/utils/api';
 import { useAppDispatch } from '@/hooks/useRedux';
 import { logout } from '@/store/slices/authSlice';
@@ -25,6 +25,7 @@ const TABS = [
   { id: 'notifications', label: 'Benachrichtigungen', icon: Bell },
   { id: 'integrations', label: 'Integrationen', icon: Plug2 },
   { id: 'system', label: 'System', icon: Monitor },
+  { id: 'terminal', label: 'Terminal', icon: TerminalSquare },
   { id: 'logs', label: 'Log', icon: ScrollText },
   { id: 'backup', label: 'Datensicherung', icon: ShieldCheck },
 ] as const;
@@ -95,7 +96,7 @@ export default function SettingsPage() {
     );
   }
 
-  const saveable = !['system', 'integrations', 'status', 'logs', 'backup'].includes(activeTab);
+  const saveable = !['system', 'terminal', 'integrations', 'status', 'logs', 'backup'].includes(activeTab);
 
   return (
     <div className="einstellungen">
@@ -145,6 +146,7 @@ export default function SettingsPage() {
           {activeTab === 'notifications' && <NotificationsForm values={editValues} onChange={updateField} />}
           {activeTab === 'integrations' && <IntegrationsPanel />}
           {activeTab === 'system' && <SystemPanel />}
+          {activeTab === 'terminal' && <TerminalPanel />}
           {activeTab === 'logs' && <LogPanel />}
           {activeTab === 'backup' && <BackupPanel />}
         </div>
@@ -158,7 +160,7 @@ const RAIL_GROUPS: { label: string; items: string[] }[] = [
   { label: 'Allgemein', items: ['organization', 'branding', 'report_defaults'] },
   { label: 'Energiemanagement', items: ['enpi_config', 'notifications'] },
   { label: 'Daten & Geräte', items: ['integrations'] },
-  { label: 'System & Wartung', items: ['status', 'system', 'logs', 'backup'] },
+  { label: 'System & Wartung', items: ['status', 'system', 'terminal', 'logs', 'backup'] },
 ];
 const RAIL_DESC: Record<string, string> = {
   organization: 'Stammdaten für Berichte & ISO-Dokumente',
@@ -169,6 +171,7 @@ const RAIL_DESC: Record<string, string> = {
   integrations: 'Home Assistant, Wetter, MQTT, BACnet …',
   status: 'Live-Zustand der Hintergrunddienste',
   system: 'Version & Updates',
+  terminal: 'Host-Befehle (Docker, Update)',
   logs: 'Fehler & Warnungen der Sitzung',
   backup: 'Backup, Wiederherstellung, Reset',
 };
@@ -945,6 +948,214 @@ function NotificationsForm({ values, onChange }: { values: Record<string, unknow
         </Field>
       </div>
     </SetCard>
+  );
+}
+
+/* ── Terminal-Panel (Host-Befehle via Docker-Socket) ── */
+
+interface TerminalStatus {
+  enabled: boolean;
+  docker_available: boolean;
+  timeout_seconds: number;
+}
+
+interface TerminalResult {
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+  duration_ms: number;
+  cwd?: string;
+}
+
+// Update in zwei Schritten, damit die App nicht unten bleibt:
+// 1) Pull + Build: erzeugt das neue Image, der laufende Container bleibt aktiv.
+// 2) Aktivieren: kurzer Recreate mit dem bereits gebauten Image – dabei bricht
+//    die Verbindung ab (der app-Container wird ersetzt). Danach Seite neu laden.
+const BUILD_CMD =
+  'cd /srv/repo && git pull && cd energymanagement-iso50001/deploy/standalone && docker compose build app';
+const ACTIVATE_CMD =
+  'cd /srv/repo/energymanagement-iso50001/deploy/standalone && docker compose up -d app';
+
+function TerminalPanel() {
+  const [status, setStatus] = useState<TerminalStatus | null>(null);
+  const [command, setCommand] = useState('');
+  const [running, setRunning] = useState(false);
+  const [history, setHistory] = useState<TerminalResult[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const outputRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    apiClient
+      .get('/api/v1/system/terminal/status')
+      .then((res) => setStatus(res.data))
+      .catch(() => setStatus({ enabled: false, docker_available: false, timeout_seconds: 0 }));
+  }, []);
+
+  useEffect(() => {
+    outputRef.current?.scrollTo({ top: outputRef.current.scrollHeight });
+  }, [history]);
+
+  const run = async (cmd: string) => {
+    const c = cmd.trim();
+    if (!c || running) return;
+    setRunning(true);
+    setError(null);
+    try {
+      const res = await apiClient.post('/api/v1/system/terminal/exec', { command: c });
+      setHistory((prev) => [...prev, res.data]);
+      setCommand('');
+    } catch (e) {
+      const detail =
+        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        'Ausführung fehlgeschlagen (evtl. Timeout oder Verbindungsabbruch).';
+      setError(detail);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  if (!status) {
+    return (
+      <div className="flex items-center justify-center h-40">
+        <RefreshCw className="w-5 h-5 animate-spin text-primary-500" />
+      </div>
+    );
+  }
+
+  if (!status.enabled) {
+    return (
+      <div className="space-y-4">
+        <h3 className="text-base font-semibold text-gray-900">Host-Terminal</h3>
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+            <div className="text-sm text-amber-800">
+              <p className="font-medium">Terminal ist deaktiviert.</p>
+              <p className="mt-1">
+                Aktivierung (bewusst, da vollständige Befehlsausführung): In{' '}
+                <code className="bg-white px-1 rounded border">deploy/standalone/.env</code>{' '}
+                <code className="bg-white px-1 rounded border">TERMINAL_ENABLED=true</code> setzen
+                und den Container neu bauen:
+              </p>
+              <pre className="mt-2 text-xs bg-white rounded p-3 border border-amber-200 whitespace-pre-wrap">
+                docker compose up -d --build app
+              </pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-base font-semibold text-gray-900">Host-Terminal</h3>
+        <span
+          className={`text-xs px-2 py-1 rounded-full ${
+            status.docker_available
+              ? 'bg-green-100 text-green-700'
+              : 'bg-gray-100 text-gray-600'
+          }`}
+        >
+          Docker: {status.docker_available ? 'verbunden' : 'nicht erreichbar'}
+        </span>
+      </div>
+
+      {/* Sicherheitshinweis */}
+      <div className="rounded-lg border border-red-200 bg-red-50 p-3 flex items-start gap-2">
+        <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+        <p className="text-xs text-red-700">
+          Befehle laufen mit vollen Rechten im Container; mit gemountetem Docker-Socket auf dem
+          Host. Jeder Befehl wird protokolliert. Timeout: {status.timeout_seconds}s.
+        </p>
+      </div>
+
+      {/* Schnellbefehle */}
+      <div className="flex flex-wrap gap-2">
+        <button className="btn-secondary text-xs" disabled={running} onClick={() => run('cat /app/VERSION')}>
+          Version
+        </button>
+        <button className="btn-secondary text-xs" disabled={running} onClick={() => run('docker ps')}>
+          Container
+        </button>
+        <button
+          className="btn-secondary text-xs"
+          disabled={running}
+          onClick={() =>
+            run('curl -s -X POST http://localhost:8099/api/v1/spie/recompute -H "Content-Type: application/json"')
+          }
+        >
+          SPIE-Verbrauch neu berechnen
+        </button>
+        <button
+          className="btn-secondary text-xs"
+          disabled={running}
+          onClick={() => run(BUILD_CMD)}
+        >
+          1. Update holen (Pull + Build)
+        </button>
+        <button
+          className="btn-secondary text-xs text-red-700"
+          disabled={running}
+          onClick={() => {
+            if (
+              window.confirm(
+                'Neues Image aktivieren? Der app-Container wird ersetzt – die Verbindung ' +
+                  'bricht ab. Nach ~1 Minute die Seite neu laden. Vorher "Update holen" ausführen.',
+              )
+            )
+              run(ACTIVATE_CMD);
+          }}
+        >
+          2. Aktivieren (Neustart)
+        </button>
+      </div>
+
+      {/* Ausgabe */}
+      <div
+        ref={outputRef}
+        className="bg-gray-900 text-gray-100 rounded-lg p-3 font-mono text-xs h-80 overflow-auto"
+      >
+        {history.length === 0 ? (
+          <p className="text-gray-500">Noch keine Ausgabe. Befehl eingeben und ausführen.</p>
+        ) : (
+          history.map((r, i) => (
+            <div key={i} className="mb-3">
+              <div className="text-primary-300">
+                <span className="text-gray-500">{r.cwd || '/app'} $</span> {r.command}
+              </div>
+              {r.stdout && <pre className="whitespace-pre-wrap text-gray-100">{r.stdout}</pre>}
+              {r.stderr && <pre className="whitespace-pre-wrap text-red-300">{r.stderr}</pre>}
+              <div className={r.exit_code === 0 ? 'text-green-400' : 'text-red-400'}>
+                Exit {r.exit_code} · {r.duration_ms} ms
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {/* Eingabe */}
+      <div className="flex gap-2">
+        <input
+          className="input flex-1 font-mono text-sm"
+          placeholder="Befehl eingeben, z. B. docker compose ps"
+          value={command}
+          disabled={running}
+          onChange={(e) => setCommand(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') run(command);
+          }}
+        />
+        <button className="btn-primary flex items-center gap-2" disabled={running} onClick={() => run(command)}>
+          {running ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+          {running ? 'Läuft…' : 'Ausführen'}
+        </button>
+      </div>
+    </div>
   );
 }
 
