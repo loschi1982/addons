@@ -160,13 +160,17 @@ async def _check_celery_worker() -> dict:
 async def _check_celery_beat(db: AsyncSession) -> dict:
     """Celery Beat-Status anhand der letzten Task-Ausführung schätzen."""
     try:
-        # Prüfe ob in den letzten 10 Minuten Readings oder Polling stattfand
-        from app.models.climate import ClimateReading
-
+        # Prüfe ob kürzlich Readings/Polling stattfand. WICHTIG: Zeitgrenze
+        # (letzte 24 h) mitgeben – sonst erzwingt der source-Filter einen vollen
+        # Scan über die gesamte Readings-Hypertable (Millionen Zeilen, alle
+        # Chunks) und die Status-Abfrage läuft ins Timeout. Mit der Zeitgrenze
+        # greift TimescaleDBs Chunk-Exclusion und nur der aktuelle Chunk wird
+        # gelesen. Für die Beat-Bewertung reichen die letzten 24 h völlig.
         row = await db.execute(
             text("""
                 SELECT MAX(timestamp) FROM climate_readings
                 WHERE source = 'homeassistant'
+                  AND timestamp > now() - INTERVAL '1 day'
             """)
         )
         last_poll = row.scalar()
@@ -176,6 +180,7 @@ async def _check_celery_beat(db: AsyncSession) -> dict:
             text("""
                 SELECT MAX(timestamp) FROM meter_readings
                 WHERE source = 'auto'
+                  AND timestamp > now() - INTERVAL '1 day'
             """)
         )
         last_meter_poll = row2.scalar()
@@ -205,7 +210,7 @@ async def _check_celery_beat(db: AsyncSession) -> dict:
         return {
             "name": "Celery Beat (Scheduler)",
             "status": "unknown",
-            "error": "Noch keine automatischen Messwerte vorhanden – Status unbekannt.",
+            "error": "Keine automatischen Messwerte in den letzten 24 h – Scheduler/Polling vermutlich gestoppt.",
         }
     except Exception as e:
         return {
