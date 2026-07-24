@@ -12,6 +12,7 @@ analog zum Backup-System, Browser-Reload-sicher.
 import json
 import os
 import tempfile
+import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -34,6 +35,10 @@ SETTINGS_KEY = "integrations_spie"
 LAST_SYNC_KEY = "integrations_spie_last_sync"
 # Standard-Rückblick wenn noch kein Messwert vorhanden
 DEFAULT_LOOKBACK_DAYS = 30
+# Ab dieser Inaktivität (Sekunden) gilt ein "running"-Fortschritt als abgebrochen.
+# Der Import aktualisiert den Fortschritt je Zähler bzw. je Recompute-Schritt,
+# also deutlich häufiger als dieser Wert.
+PROGRESS_STALE_SECONDS = 180
 
 
 def _progress_path(job_id: str) -> str:
@@ -50,15 +55,35 @@ def _write_progress(job_id: str, data: dict) -> None:
 
 
 def read_progress(job_id: str) -> dict | None:
-    """Fortschritt aus Disk lesen (für API-Endpoint)."""
+    """Fortschritt aus Disk lesen (für API-Endpoint).
+
+    Stale-Erkennung: Ein laufender Import schreibt regelmäßig Fortschritt. Wird
+    die Datei länger als PROGRESS_STALE_SECONDS nicht mehr aktualisiert, obwohl
+    der Status noch "running" ist, gilt der Task als abgebrochen (typisch nach
+    einem Container-Neustart, der die In-Process-asyncio-Task killt). Dann wird
+    "error" gemeldet, damit das Frontend nicht ewig "läuft" anzeigt.
+    """
     path = _progress_path(job_id)
     if not os.path.exists(path):
         return None
     try:
         with open(path) as f:
-            return json.load(f)
+            data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return None
+
+    if isinstance(data, dict) and data.get("status") == "running":
+        try:
+            age = time.time() - os.path.getmtime(path)
+        except OSError:
+            age = 0
+        if age > PROGRESS_STALE_SECONDS:
+            data["status"] = "error"
+            data["error"] = (
+                "Import abgebrochen – keine Aktualisierung seit "
+                f"{int(age)} s (vermutlich Neustart)."
+            )
+    return data
 
 
 def cleanup_progress(job_id: str) -> None:

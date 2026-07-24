@@ -879,9 +879,11 @@ function SpiePanel() {
 
   const resumePoll = (jobId: string) => {
     setSyncProgress({ status: 'running', phase: 'import' });
+    let fails = 0;
     pollRef.current = setInterval(async () => {
       try {
         const res = await apiClient.get(`/api/v1/spie/progress/${jobId}`);
+        fails = 0;
         const p: SpieProgress = res.data;
         setSyncProgress(p);
         if (p.status === 'done' || p.status === 'error') {
@@ -890,7 +892,15 @@ function SpiePanel() {
           if (p.status === 'done') await loadConfig();
         }
       } catch {
-        /* Job noch nicht bereit – weiter pollen */
+        // Job nicht (mehr) auffindbar (404) oder Backend neu gestartet. Nach
+        // mehreren Fehlversuchen aufgeben, damit kein ewiger "läuft"-Zustand
+        // hängen bleibt (früher wurde hier stumm weitergepollt).
+        fails += 1;
+        if (fails >= 5) {
+          if (pollRef.current) clearInterval(pollRef.current);
+          localStorage.removeItem(LS_SPIE_JOB);
+          setSyncProgress(null);
+        }
       }
     }, 2000);
   };
