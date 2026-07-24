@@ -437,7 +437,8 @@ async def terminal_status(current_user=Depends(get_current_user)):
         try:
             import subprocess
 
-            r = subprocess.run(
+            r = await asyncio.to_thread(
+                subprocess.run,
                 ["docker", "version", "--format", "{{.Server.Version}}"],
                 capture_output=True, text=True, timeout=8,
             )
@@ -486,7 +487,12 @@ async def terminal_exec(
 
     start = time.monotonic()
     try:
-        result = subprocess.run(
+        # WICHTIG: subprocess.run in einen Thread auslagern. Direkt in der
+        # async-Funktion aufgerufen würde es den gesamten Event-Loop blockieren –
+        # dann friert die ganze App für die Dauer des Befehls ein (und Befehle,
+        # die per HTTP auf die App selbst zugreifen, führen zum Deadlock).
+        result = await asyncio.to_thread(
+            subprocess.run,
             command,
             shell=True,
             cwd=cwd,

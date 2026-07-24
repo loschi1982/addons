@@ -973,7 +973,7 @@ interface TerminalResult {
 // 2) Aktivieren: kurzer Recreate mit dem bereits gebauten Image – dabei bricht
 //    die Verbindung ab (der app-Container wird ersetzt). Danach Seite neu laden.
 const BUILD_CMD =
-  'cd /srv/repo && git pull && cd energymanagement-iso50001/deploy/standalone && docker compose build app';
+  'git config --global --add safe.directory /srv/repo && cd /srv/repo && git pull && cd energymanagement-iso50001/deploy/standalone && docker compose build app';
 const ACTIVATE_CMD =
   'cd /srv/repo/energymanagement-iso50001/deploy/standalone && docker compose up -d app';
 
@@ -1079,15 +1079,6 @@ function TerminalPanel() {
         </button>
         <button className="btn-secondary text-xs" disabled={running} onClick={() => run('docker ps')}>
           Container
-        </button>
-        <button
-          className="btn-secondary text-xs"
-          disabled={running}
-          onClick={() =>
-            run('curl -s -X POST http://localhost:8099/api/v1/spie/recompute -H "Content-Type: application/json"')
-          }
-        >
-          SPIE-Verbrauch neu berechnen
         </button>
         <button
           className="btn-secondary text-xs"
