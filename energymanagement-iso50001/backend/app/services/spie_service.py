@@ -439,16 +439,105 @@ class SpieService:
         return n
 
     async def recompute_all_spie_meters(self, job_id: str | None = None) -> int:
-        """Verbrauch ALLER SPIE-Zähler ohne erneutes Scraping nachberechnen.
+        """Verbrauch ALLER SPIE-Zähler mengenbasiert nachberechnen – ohne
+        erneutes Scraping und ohne 222 Einzelläufe.
 
-        Recovery-Pfad: die Rohwerte stehen bereits in der DB, nur consumption
-        fehlt (bzw. wurde nach einem Import nicht berechnet). Deutlich schneller
-        als ein voller Sync, da kein Browser/Portal-Abruf nötig ist. Mit ``job_id``
-        wird der Fortschritt je Zähler in die Progress-Datei geschrieben.
+        Statt je Zähler ein Fenster-UPDATE + eine Monats-Vorberechnung (langsam:
+        ~40 s/Zähler) laufen nur noch wenige Set-Statements:
+          1. EIN Fenster-UPDATE (LAG PARTITION BY meter_id) für ALLE
+             differenzbasierten SPIE-Zähler.
+          2. EIN UPDATE (consumption = value) für ALLE lieferungsbasierten.
+          3. EINE globale Monats-Vorberechnung (ein GROUP BY).
+          4. Analyse-Cache + Dashboard-/Analytics-Snapshots verwerfen.
+        Nur tatsächlich geänderte Zeilen werden geschrieben (IS DISTINCT FROM).
+        Mit ``job_id`` wird ein grober Fortschritt in die Progress-Datei geschrieben.
+        Gibt die Anzahl SPIE-Zähler zurück.
         """
         meters = await self._load_spie_meters()
-        await self._recompute_and_invalidate({m.id for m in meters}, job_id=job_id)
-        return len(meters)
+        n = len(meters)
+        if n == 0:
+            return 0
+
+        def _prog(percent: int, note: str) -> None:
+            if job_id:
+                _write_progress(job_id, {
+                    "status": "running", "phase": "recompute",
+                    "current_meter": 0, "total_meters": n,
+                    "meter_name": note, "imported": 0, "errors": 0,
+                    "percent": percent,
+                })
+
+        # SPIE-Zähler-Filter identisch zu _load_spie_meters, aber als SQL – so ist
+        # kein Array-Parameter nötig. Enthält ausschließlich statische Bedingungen
+        # (keine Nutzereingabe), daher unbedenklich per f-string eingesetzt.
+        spie_filter = (
+            "m.is_active = true "
+            "AND m.spie_import_excluded = false "
+            "AND (m.data_source = 'spie' "
+            "     OR (m.source_config->>'spie_nav_id') IS NOT NULL)"
+        )
+
+        _prog(10, "Verbrauch berechnen (differenzbasiert)")
+        # Differenzbasiert: consumption = value − vorheriger (nicht-NULL) Stand.
+        # is_delivery_based NULL zählt als false → differenzbasiert.
+        await self.db.execute(text(f"""
+            WITH ordered AS (
+                SELECT r.id,
+                       r.value - LAG(r.value) OVER (
+                           PARTITION BY r.meter_id ORDER BY r.timestamp
+                       ) AS diff
+                FROM meter_readings r
+                JOIN meters m ON m.id = r.meter_id
+                WHERE r.value IS NOT NULL
+                  AND {spie_filter}
+                  AND m.is_delivery_based IS NOT TRUE
+            ),
+            newvals AS (
+                SELECT id, CASE WHEN diff IS NOT NULL AND diff >= 0 THEN diff
+                                ELSE NULL END AS new_cons
+                FROM ordered
+            )
+            UPDATE meter_readings mr
+            SET consumption = n.new_cons
+            FROM newvals n
+            WHERE mr.id = n.id
+              AND mr.consumption IS DISTINCT FROM n.new_cons
+        """))
+
+        _prog(40, "Verbrauch berechnen (lieferungsbasiert)")
+        await self.db.execute(text(f"""
+            UPDATE meter_readings mr
+            SET consumption = mr.value
+            FROM meters m
+            WHERE mr.meter_id = m.id
+              AND {spie_filter}
+              AND m.is_delivery_based IS TRUE
+              AND mr.value IS NOT NULL
+              AND mr.consumption IS DISTINCT FROM mr.value
+        """))
+        await self.db.commit()
+
+        _prog(55, "Monatswerte aktualisieren")
+        # Monats-Vorberechnung global in EINEM GROUP BY erneuern (statt je Zähler).
+        from app.services.reading_service import ReadingService
+        await ReadingService(self.db).recompute_monthly_consumption()
+
+        _prog(90, "Auswertung aktualisieren")
+        try:
+            from sqlalchemy import delete as _delete
+
+            from app.core.cache import cache_delete
+            from app.models.snapshot import AnalyticsSnapshot, DashboardSnapshot
+
+            await cache_delete("analytics_*")
+            await self.db.execute(_delete(DashboardSnapshot))
+            await self.db.execute(_delete(AnalyticsSnapshot))
+            await self.db.commit()
+        except Exception as e:  # pragma: no cover - Invalidierung ist best effort
+            logger.warning("spie_snapshot_invalidation_failed", error=str(e))
+
+        logger.info("spie_recompute_all_done", meters=n)
+        return n
 
     async def _delete_readings_from(self, meter_id: uuid.UUID, from_date: date) -> int:
         """Alle Readings eines Zählers ab `from_date` (Berlin-Mitternacht) löschen.
