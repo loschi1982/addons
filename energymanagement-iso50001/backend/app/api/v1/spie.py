@@ -150,11 +150,41 @@ async def recompute_spie_consumption(
 
     Recovery, wenn Rohwerte importiert wurden, aber die Verbräuche (consumption)
     fehlen und daher nicht in der Auswertung erscheinen. Nutzt die bereits in der
-    DB vorhandenen Werte und ist damit deutlich schneller als ein voller Sync.
+    DB vorhandenen Werte.
+
+    Läuft als Hintergrund-Task (asyncio.Task), weil die Nachberechnung über alle
+    Zähler mit langer Stundenhistorie mehrere Minuten dauern kann – ein synchroner
+    Request würde am Client-Timeout scheitern. Fortschritt: GET /spie/progress/{id}.
     """
     svc = SpieService(db)
-    count = await svc.recompute_all_spie_meters()
-    return {"ok": True, "meters_recomputed": count}
+    meters = await svc._load_spie_meters()
+    job_id = str(uuid.uuid4())
+
+    async def _run():
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+        from app.config import get_settings
+        from app.services.spie_service import _write_progress
+        settings = get_settings()
+        engine = create_async_engine(
+            settings.database_url, echo=False, pool_size=2, max_overflow=2
+        )
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        try:
+            async with session_factory() as session:
+                service = SpieService(session)
+                n = await service.recompute_all_spie_meters(job_id=job_id)
+            _write_progress(job_id, {
+                "status": "done", "meters_recomputed": n, "percent": 100,
+            })
+        except Exception as e:
+            _write_progress(job_id, {"status": "error", "error": str(e)})
+            logger.error("spie_recompute_task_failed", job_id=job_id, error=str(e))
+        finally:
+            await engine.dispose()
+
+    asyncio.create_task(_run())
+    return {"job_id": job_id, "meters": len(meters)}
 
 
 @router.get("/progress/{job_id}")

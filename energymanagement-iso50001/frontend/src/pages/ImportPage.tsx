@@ -954,6 +954,21 @@ function SpiePanel() {
     }
   };
 
+  const handleRecompute = async () => {
+    // Verbrauch aus den bereits vorhandenen Rohwerten neu berechnen – kein
+    // erneutes Scraping. Läuft im Backend als Hintergrund-Task; gleiche
+    // Fortschrittsanzeige wie der Import.
+    setSyncProgress({ status: 'running', phase: 'recompute' });
+    try {
+      const res = await apiClient.post('/api/v1/spie/recompute', {});
+      const { job_id } = res.data;
+      localStorage.setItem(LS_SPIE_JOB, job_id);
+      resumePoll(job_id);
+    } catch {
+      setSyncProgress({ status: 'error', error: 'Nachberechnung konnte nicht gestartet werden.' });
+    }
+  };
+
   const handleResync = async () => {
     if (!fbDate) return;
     const dateStr = new Date(fbDate).toLocaleDateString('de-DE');
@@ -1054,6 +1069,14 @@ function SpiePanel() {
         </label>
         <button className="btn-soft" onClick={handleSave} disabled={saving || isRunning || !username}>
           {saving ? 'Speichern…' : 'Speichern'}
+        </button>
+        <button
+          className="btn-soft"
+          onClick={handleRecompute}
+          disabled={isRunning || !username}
+          title="Verbrauch aller SPIE-Zähler aus den vorhandenen Rohwerten neu berechnen (kein erneutes Scraping)"
+        >
+          <RefreshCw size={14} /> Verbrauch neu berechnen
         </button>
         <button className="btn-primary" onClick={handleSync} disabled={isRunning || !username}>
           {isRunning ? <RefreshCw size={14} /> : <Upload size={14} />} {isRunning ? 'Läuft…' : 'Jetzt importieren'}

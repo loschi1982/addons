@@ -417,7 +417,7 @@ class SpieService:
                     "current_meter": i, "total_meters": n,
                     "meter_name": "Verbrauchsberechnung",
                     "imported": imported_total, "errors": error_count,
-                    "percent": 100,
+                    "percent": round((i - 1) / n * 100) if n else 100,
                 })
             try:
                 await rsvc.recompute_meter_consumption(mid)
@@ -438,15 +438,17 @@ class SpieService:
             logger.warning("spie_snapshot_invalidation_failed", error=str(e))
         return n
 
-    async def recompute_all_spie_meters(self) -> int:
+    async def recompute_all_spie_meters(self, job_id: str | None = None) -> int:
         """Verbrauch ALLER SPIE-Zähler ohne erneutes Scraping nachberechnen.
 
         Recovery-Pfad: die Rohwerte stehen bereits in der DB, nur consumption
         fehlt (bzw. wurde nach einem Import nicht berechnet). Deutlich schneller
-        als ein voller Sync, da kein Browser/Portal-Abruf nötig ist.
+        als ein voller Sync, da kein Browser/Portal-Abruf nötig ist. Mit ``job_id``
+        wird der Fortschritt je Zähler in die Progress-Datei geschrieben.
         """
         meters = await self._load_spie_meters()
-        return await self._recompute_and_invalidate({m.id for m in meters})
+        await self._recompute_and_invalidate({m.id for m in meters}, job_id=job_id)
+        return len(meters)
 
     async def _delete_readings_from(self, meter_id: uuid.UUID, from_date: date) -> int:
         """Alle Readings eines Zählers ab `from_date` (Berlin-Mitternacht) löschen.
