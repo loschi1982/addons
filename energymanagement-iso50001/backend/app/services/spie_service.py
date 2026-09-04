@@ -40,6 +40,14 @@ DEFAULT_LOOKBACK_DAYS = 30
 # also deutlich häufiger als dieser Wert.
 PROGRESS_STALE_SECONDS = 180
 
+# SPIE liefert je Zeitintervall bereits den Verbrauch (kWh/m³ pro Intervall) –
+# die Zähler sind also lieferungsbasiert (consumption = value), NICHT
+# differenzbasiert. Werte oberhalb dieser Schwelle sind keine Intervallwerte,
+# sondern versehentlich mitgelieferte kumulierte Zählerstände (bis in die
+# Milliarden) – sie werden beim Import verworfen bzw. bei der Nachberechnung
+# entfernt, damit sie die Auswertung nicht sprengen.
+SPIE_OUTLIER_VALUE = Decimal("10000000")  # 10 Mio. kWh/m³ pro Intervall
+
 
 def _progress_path(job_id: str) -> str:
     return os.path.join(_TMP, f"spie_sync_{job_id}.json")
@@ -408,6 +416,18 @@ class SpieService:
 
         from app.services.reading_service import ReadingService
 
+        # SPIE-Zähler sind lieferungsbasiert (Wert = Intervallverbrauch). Sicher-
+        # stellen, dass die betroffenen (evtl. neu angelegten) Zähler das Flag
+        # tragen, bevor recompute_meter_consumption läuft – sonst würde es fälsch-
+        # lich Differenzen bilden.
+        for mid in meter_ids:
+            await self.db.execute(
+                text("UPDATE meters SET is_delivery_based = true "
+                     "WHERE id = :id AND is_delivery_based IS NOT TRUE"),
+                {"id": str(mid)},
+            )
+        await self.db.commit()
+
         rsvc = ReadingService(self.db)
         n = len(meter_ids)
         for i, mid in enumerate(sorted(meter_ids, key=str), 1):
@@ -439,18 +459,19 @@ class SpieService:
         return n
 
     async def recompute_all_spie_meters(self, job_id: str | None = None) -> int:
-        """Verbrauch ALLER SPIE-Zähler mengenbasiert nachberechnen – ohne
-        erneutes Scraping und ohne 222 Einzelläufe.
+        """Verbrauch ALLER SPIE-Zähler korrekt und mengenbasiert nachberechnen.
 
-        Statt je Zähler ein Fenster-UPDATE + eine Monats-Vorberechnung (langsam:
-        ~40 s/Zähler) laufen nur noch wenige Set-Statements:
-          1. EIN Fenster-UPDATE (LAG PARTITION BY meter_id) für ALLE
-             differenzbasierten SPIE-Zähler.
-          2. EIN UPDATE (consumption = value) für ALLE lieferungsbasierten.
-          3. EINE globale Monats-Vorberechnung (ein GROUP BY).
-          4. Analyse-Cache + Dashboard-/Analytics-Snapshots verwerfen.
-        Nur tatsächlich geänderte Zeilen werden geschrieben (IS DISTINCT FROM).
-        Mit ``job_id`` wird ein grober Fortschritt in die Progress-Datei geschrieben.
+        SPIE liefert je Intervall bereits den Verbrauch → die Zähler sind
+        lieferungsbasiert (``consumption = value``), nicht differenzbasiert. Diese
+        Nachberechnung stellt das in wenigen Set-Statements her:
+          1. Alle SPIE-Zähler auf ``is_delivery_based = true`` setzen.
+          2. Ausreißer (kumulierte Zählerstände, value > SPIE_OUTLIER_VALUE)
+             löschen – sie sind keine Intervallwerte und sprengen sonst die Skala.
+          3. ``consumption = value`` für alle SPIE-Readings (nur geänderte Zeilen).
+          4. Globale Monats-Vorberechnung (ein GROUP BY).
+          5. Analyse-Cache + Dashboard-/Analytics-Snapshots verwerfen.
+        Läuft ohne Scraping und ohne Kompression (keine komprimierten Chunks),
+        daher als einzelne Bulk-Statements über die gesamte Historie zulässig.
         Gibt die Anzahl SPIE-Zähler zurück.
         """
         meters = await self._load_spie_meters()
@@ -477,47 +498,36 @@ class SpieService:
             "     OR (m.source_config->>'spie_nav_id') IS NOT NULL)"
         )
 
-        _prog(10, "Verbrauch berechnen (differenzbasiert)")
-        # Differenzbasiert: consumption = value − vorheriger (nicht-NULL) Stand.
-        # is_delivery_based NULL zählt als false → differenzbasiert.
+        _prog(5, "Zähler auf lieferungsbasiert stellen")
         await self.db.execute(text(f"""
-            WITH ordered AS (
-                SELECT r.id,
-                       r.value - LAG(r.value) OVER (
-                           PARTITION BY r.meter_id ORDER BY r.timestamp
-                       ) AS diff
-                FROM meter_readings r
-                JOIN meters m ON m.id = r.meter_id
-                WHERE r.value IS NOT NULL
-                  AND {spie_filter}
-                  AND m.is_delivery_based IS NOT TRUE
-            ),
-            newvals AS (
-                SELECT id, CASE WHEN diff IS NOT NULL AND diff >= 0 THEN diff
-                                ELSE NULL END AS new_cons
-                FROM ordered
-            )
-            UPDATE meter_readings mr
-            SET consumption = n.new_cons
-            FROM newvals n
-            WHERE mr.id = n.id
-              AND mr.consumption IS DISTINCT FROM n.new_cons
+            UPDATE meters m SET is_delivery_based = true
+            WHERE {spie_filter} AND m.is_delivery_based IS NOT TRUE
         """))
+        await self.db.commit()
 
-        _prog(40, "Verbrauch berechnen (lieferungsbasiert)")
+        _prog(15, "Ausreißer entfernen")
+        await self.db.execute(text(f"""
+            DELETE FROM meter_readings mr USING meters m
+            WHERE mr.meter_id = m.id
+              AND {spie_filter}
+              AND mr.value > :thr
+        """), {"thr": SPIE_OUTLIER_VALUE})
+        await self.db.commit()
+
+        _prog(35, "Verbrauch = Wert setzen")
+        # Lieferungsbasiert: jeder Intervallwert IST der Verbrauch.
         await self.db.execute(text(f"""
             UPDATE meter_readings mr
             SET consumption = mr.value
             FROM meters m
             WHERE mr.meter_id = m.id
               AND {spie_filter}
-              AND m.is_delivery_based IS TRUE
               AND mr.value IS NOT NULL
               AND mr.consumption IS DISTINCT FROM mr.value
         """))
         await self.db.commit()
 
-        _prog(55, "Monatswerte aktualisieren")
+        _prog(70, "Monatswerte aktualisieren")
         # Monats-Vorberechnung global in EINEM GROUP BY erneuern (statt je Zähler).
         from app.services.reading_service import ReadingService
         await ReadingService(self.db).recompute_monthly_consumption()
@@ -569,11 +579,21 @@ class SpieService:
         inserted = 0
         for r in readings:
             try:
+                value = Decimal(str(r["value"]))
+                # Ausreißer (kumulierte Zählerstände statt Intervallwert) nicht
+                # importieren – sonst tauchen sie als Milliarden-Verbrauch auf.
+                if value > SPIE_OUTLIER_VALUE:
+                    logger.warning(
+                        "spie_insert_outlier_skipped",
+                        meter_id=str(meter_id), value=float(value),
+                    )
+                    continue
                 stmt = pg_insert(MeterReading).values(
                     id=uuid.uuid4(),
                     meter_id=meter_id,
                     timestamp=r["timestamp"],
-                    value=Decimal(str(r["value"])),
+                    value=value,
+                    consumption=value,  # lieferungsbasiert: Wert IST der Verbrauch
                     source="spie",
                     quality="measured",
                 ).on_conflict_do_nothing(
