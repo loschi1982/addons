@@ -527,6 +527,23 @@ class SpieService:
         """))
         await self.db.commit()
 
+        _prog(55, "Ausgeschlossene Zähler ausblenden")
+        # Als ausgeschlossen markierte SPIE-Zähler (spie_import_excluded=true, z. B.
+        # solche mit falschem Wandlerfaktor) aus der AUSWERTUNG nehmen: consumption
+        # = NULL → sie fallen aus allen Summen (überall wird auf consumption IS NOT
+        # NULL gefiltert), ohne dass Rohwerte (value) gelöscht werden. Rückgängig:
+        # Zähler wieder einschließen und Nachberechnung erneut laufen lassen.
+        await self.db.execute(text("""
+            UPDATE meter_readings mr SET consumption = NULL
+            FROM meters m
+            WHERE mr.meter_id = m.id
+              AND m.spie_import_excluded = true
+              AND (m.data_source = 'spie'
+                   OR (m.source_config->>'spie_nav_id') IS NOT NULL)
+              AND mr.consumption IS NOT NULL
+        """))
+        await self.db.commit()
+
         _prog(70, "Monatswerte aktualisieren")
         # Monats-Vorberechnung global in EINEM GROUP BY erneuern (statt je Zähler).
         from app.services.reading_service import ReadingService

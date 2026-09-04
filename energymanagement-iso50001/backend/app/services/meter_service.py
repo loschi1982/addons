@@ -195,7 +195,7 @@ class MeterService:
             "location", "cost_center", "tariff_info", "is_weather_corrected",
             "co2_factor_override", "is_active",
             "is_submeter", "is_virtual", "is_feed_in", "is_delivery_based", "virtual_config",
-            "schema_label",
+            "schema_label", "spie_import_excluded",
             "display_name", "serial_number", "installation_date", "removal_date", "calibration_date",
         ]
 
